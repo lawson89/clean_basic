@@ -1,0 +1,4 @@
+fn main()
+    msg = "Hello world from cleanbasic!"
+    print(f"{msg}")
+end fn
