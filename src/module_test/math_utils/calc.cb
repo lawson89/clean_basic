@@ -1,0 +1,11 @@
+pub record Vec2
+    x: int
+    y: int
+end record
+
+pub fn add_vectors(a: math_utils.Vec2, b: math_utils.Vec2) -> math_utils.Vec2
+    var res: math_utils.Vec2
+    res.x = a.x + b.x
+    res.y = a.y + b.y
+    return res
+end fn

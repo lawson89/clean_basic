@@ -1,0 +1,88 @@
+# --- 1. RECORD DECLARATION ---
+record AppStats
+    total_calls: int
+    success_count: int
+end record
+
+# --- 2. FUNCTION WITH ERROR HANDLING (`-> int, err`) ---
+fn calculate_fib(n: int, stats: ref AppStats) -> int, err
+    stats.total_calls = stats.total_calls + 1
+
+    # Validation check
+    if n < 0
+        return 0, "Input cannot be negative"
+    end if
+
+    # Base cases
+    if n == 0
+        return 0
+    else if n == 1
+        return 1
+    end if
+
+    # Iterative calculation
+    var a = 0
+    var b = 1
+    
+    # Range-based loop (2 to n)
+    for i in 2..n
+        const temp = a + b
+        a = b
+        b = temp
+    end for
+
+    stats.success_count = stats.success_count + 1
+    return b
+end fn
+
+# --- 3. HELPER FUNCTION ---
+fn print_divider(label: str)
+    print("==============================")
+    print(label)
+    print("==============================")
+end fn
+
+# --- 4. MAIN ENTRY POINT ---
+fn main()
+    print_divider("CleanBasic Feature Test")
+
+    # Shared heap-allocated record pointer
+    const stats = ref AppStats()
+    stats.total_calls = 0
+    stats.success_count = 0
+
+    # Generic list declaration (std::vector<int>)
+    var sequence: list[int]
+    const max_n: int = 8
+
+    print(f"Calculating Fibonacci sequence up to N = {max_n}...")
+
+    # Range loop
+    for i in 0..max_n
+        # Destructuring assignment with error handling
+        var val = calculate_fib(i, stats) on error err_msg
+            print(f"Error on index {i}:", err_msg)
+            break
+        end error
+
+        sequence.push_back(val)
+        print(f"Fib({i}) -> {val}")
+    end for
+
+    # Iterating over container (std::vector)
+    print("\nVerifying cached sequence contents:")
+    for num in sequence
+        print("Sequence item:", num)
+    end for
+
+    # Testing structured error block
+    print("\nTesting error handler with negative input:")
+    var bad_val = calculate_fib(-5, stats) on error err_msg
+        print(f"Successfully caught expected error: '{err_msg}'")
+    end error
+
+    # Summary using ref pointer values
+    print_divider("Execution Stats")
+    print(f"Total function calls: {stats.total_calls}")
+    print(f"Successful calculations: {stats.success_count}")
+end fn

@@ -1,4 +1,4 @@
 fn main()
-    msg = "Hello world from cleanbasic!"
+    const msg = "Hello world from cleanbasic!"
     print(f"{msg}")
 end fn
