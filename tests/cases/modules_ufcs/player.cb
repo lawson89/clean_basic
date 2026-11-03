@@ -1,0 +1,15 @@
+' Expose the type to other files
+pub type Player
+    name as str
+    health as int
+end type
+
+' Expose the function
+pub fn heal(byref p as Player, amount as int)
+    p.health = p.health + amount
+end fn
+
+' Private function (no 'pub')
+fn calculate_max_health() as int
+    return 100
+end fn

@@ -1,0 +1,70 @@
+' EXPECT_CPP: struct Connection {
+' EXPECT_CPP: std::tuple<Connection, std::string> connect(std::string ip)
+' EXPECT_CPP: return { Connection{}, std::string("IP cannot be empty") };
+' EXPECT_CPP: return { Connection{1}, std::string("") };
+' EXPECT_CPP: auto [_val1, _err1] = connect(std::string("192.168.1.1"));
+' EXPECT_CPP: if (!_err1.empty()) return { {}, _err1 };
+' EXPECT_CPP: auto conn = _val1;
+' EXPECT_CPP: auto _defer_1 = _defer([&]() {
+' EXPECT_CPP: close_connection(conn);
+' EXPECT_CPP: auto [_val2, e] = process_network();
+' EXPECT_CPP: if (!e.empty()) {
+' EXPECT_CPP: auto records = _val2;
+' FORBID_CPP: try
+' FORBID_CPP: catch
+' EXPECT_OUT: Closing connection: 1
+' EXPECT_OUT: Connected and processed 100 records.
+' EXPECT_OUT: Handled empty IP: IP cannot be empty
+
+pub type Connection
+    id as int
+end type
+
+' Function can return a Connection OR an error
+pub fn connect(ip as str) as Connection, err
+    if ip == ""
+        return null, "IP cannot be empty"
+    end if
+
+    return Connection(id=1), ""
+end fn
+
+pub fn close_connection(conn as Connection)
+    print("Closing connection: " & str(conn.id))
+end fn
+
+' Declares 'err', enabling implicit error bubbling
+pub fn process_network() as int, err
+    ' IMPLICIT BUBBLING: If connect fails, process_network immediately returns the error.
+    dim conn = connect("192.168.1.1")
+
+    ' DETERMINISTIC CLEANUP: Runs right before the function exits, no matter how.
+    defer
+        close_connection(conn)
+    end defer
+
+    return 100, ""
+end fn
+
+fn start_server()
+    ' start_server() cannot fail. The developer MUST handle the error here.
+    dim records = process_network() on error e
+        print("Failed to start server: " & e)
+        return
+    end error
+
+    print("Connected and processed " & str(records) & " records.")
+end fn
+
+fn test_failed_connect()
+    dim bad_conn = connect("") on error err_msg
+        print("Handled empty IP: " & err_msg)
+        return
+    end error
+    print("Unexpected success: " & str(bad_conn.id))
+end fn
+
+fn main()
+    start_server()
+    test_failed_connect()
+end fn

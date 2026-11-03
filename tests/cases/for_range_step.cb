@@ -1,0 +1,15 @@
+' EXPECT_CPP: for (int i = 0; i < 10; i += 2) {
+' FORBID_CPP: throw
+' EXPECT_OUT: 20
+
+fn sum_evens() as int
+    dim total = 0
+    for i in 0..10 step 2
+        total = total + i
+    end for
+    return total
+end fn
+
+fn main()
+    print(str(sum_evens()))
+end fn

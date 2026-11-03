@@ -1,0 +1,20 @@
+' EXPECT_CPP: struct Point {
+' EXPECT_CPP: int x{};
+' EXPECT_CPP: int y{};
+' EXPECT_CPP: pt.x
+' FORBID_CPP: class Point
+' EXPECT_OUT: 1
+' EXPECT_OUT: 25
+
+type Point
+    x as int
+    y as int
+end type
+
+fn main()
+    dim pt = Point(x=1, y=2)
+    print(str(pt.x))
+    pt.x = 10
+    pt.y = 15
+    print(str(pt.x + pt.y))
+end fn

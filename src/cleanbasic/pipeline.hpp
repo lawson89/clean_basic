@@ -119,10 +119,12 @@ inline BuildFileResult build_file(
     const std::string source = sstr.str();
 
     const size_t slash_pos = input_path.find_last_of('/');
-    const std::string file_name = (slash_pos != std::string::npos) ? input_path.substr(slash_pos + 1) : input_path;
-    const std::string parent_dir = (slash_pos != std::string::npos) ? input_path.substr(0, slash_pos) : ".";
+    std::string parent_dir = ".";
+    if (slash_pos != std::string::npos) {
+        parent_dir = input_path.substr(0, slash_pos);
+    }
 
-    const TranspileResult trans_res = transpile_source(source, file_name);
+    const TranspileResult trans_res = transpile_source(source, input_path);
     if (!trans_res.ok) {
         BuildFileResult res{};
         res.ok = false;
@@ -130,7 +132,10 @@ inline BuildFileResult build_file(
         return res;
     }
 
-    const std::string out_cpp = !output_path.empty() ? output_path : (parent_dir + "/build.cpp");
+    std::string out_cpp = parent_dir + "/build.cpp";
+    if (!output_path.empty()) {
+        out_cpp = output_path;
+    }
     std::ofstream out_file(out_cpp);
     if (!out_file.is_open()) {
         BuildFileResult res{};
@@ -148,7 +153,10 @@ inline BuildFileResult build_file(
     }
 
     if (compile_binary) {
-        const std::string bin_path = !binary_output.empty() ? binary_output : (parent_dir + "/app");
+        std::string bin_path = parent_dir + "/app";
+        if (!binary_output.empty()) {
+            bin_path = binary_output;
+        }
         std::string cmd = "g++ -O3 -std=c++17 -pthread " + out_cpp + " -o " + bin_path;
         for (const auto& flag : linker_flags) {
             cmd += " " + flag;

@@ -5,46 +5,107 @@ CleanBasic is a statically typed, procedural systems programming language. It co
 ## 1. Core Architecture
 * **Unity Build Backend:** The transpiler converts CleanBasic into a single procedural C++17 `build.cpp` file, eliminating headers and linker hell while enabling maximal GCC/Clang optimization.
 * **Procedural Purity:** CleanBasic strictly bans C++ classes, inheritance, exceptions, and raw pointers. It relies entirely on flat data structures, free functions, and Unified Function Call Syntax (UFCS).
-* **English-Over-Symbols:** C-style operators (`&&`, `||`, `!`) are replaced with `and`, `or`, and `not`.
+* **English-Over-Symbols:** C-style logical operators (`&&`, `||`, `!`) are forbidden at the lexer level and replaced with `and`, `or`, and `not`.
 
 ## 2. The CleanBasic EBNF Grammar
 
 ```ebnf
-Program         ::= Statement*
+Program         ::= TopLevelDecl*
 
-Statement       ::= ImportStmt | TypeDecl | FnDecl | VarDecl | Assignment 
-                  | ExprStmt | IfStmt | ForStmt | SelectStmt | DeferBlock
+TopLevelDecl    ::= ImportDecl | AliasDecl | TypeDecl | FnDecl
 
-ImportStmt      ::= "import" StringLiteral ["as" Identifier] NEWLINE
-TypeDecl        ::= ["pub"] "type" Identifier NEWLINE (FieldDecl)+ "end type" NEWLINE
+ImportDecl      ::= "import" (StringLiteral | QualifiedIdent) ["as" Identifier] NEWLINE
+                  | "import header" StringLiteral NEWLINE
+                  | "import link" StringLiteral NEWLINE
+
+AliasDecl       ::= ["pub"] "alias" Identifier "=" Type NEWLINE
+
+TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
+                  | ["pub"] "extern" "type" Identifier NEWLINE
 FieldDecl       ::= Identifier "as" Type NEWLINE
 
-FnDecl          ::= ["pub" | "extern"] "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] NEWLINE 
-                    Statement* 
+FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] NEWLINE
+                    Statement*
                     "end fn" NEWLINE
+                  | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] NEWLINE
 ParamList       ::= Param ("," Param)*
-Param           ::= ["byref"] Identifier "as" Type
-ReturnList      ::= Type ("," Type)* ["," "err"]
+Param           ::= ["byref"] Identifier "as" ["byref"] Type
+ReturnList      ::= "err"
+                  | Type ("," Type)* ["," "err"]
 
-VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr [ErrBlock] NEWLINE
-Assignment      ::= Expr "=" Expr [ErrBlock] NEWLINE
+Statement       ::= VarDecl | Assignment | ExprStmt
+                  | IfStmt | ForStmt | SelectStmt
+                  | DeferBlock | SpawnStmt | ReturnStmt | BreakStmt
+
+VarDecl         ::= ("dim" | "const") IdentList ["as" Type] "=" Expr [ErrBlock] NEWLINE
+Assignment      ::= ExprList "=" Expr [ErrBlock] NEWLINE
+ExprStmt        ::= Expr [ErrBlock] NEWLINE
+
 ErrBlock        ::= "on error" Identifier NEWLINE Statement* "end error"
 DeferBlock      ::= "defer" NEWLINE Statement* "end defer"
 
-ExprStmt        ::= Expr NEWLINE
-Expr            ::= Expr ("+" | "-" | "*" | "/" | "&" | "==" | "!=") Expr 
-                  | "not" Expr | Expr ("and" | "or") Expr
-                  | MethodCall | FnCall | Literal | Identifier | Allocation
-                  
-MethodCall      ::= Expr "." Identifier "(" [ArgList] ")"
-FnCall          ::= Identifier "(" [ArgList] ")"
-ArgList         ::= Expr ("," Expr)*
-Allocation      ::= "new" Type "(" [ArgList] ")"
+IfStmt          ::= "if" Expr NEWLINE Statement*
+                    ("else if" Expr NEWLINE Statement*)*
+                    ["else" NEWLINE Statement*]
+                    "end if" NEWLINE
 
-Type            ::= "int" | "float" | "str" | "bool" 
-                  | "shared" Type 
-                  | "list[" Type "]" | "dict[" Type "," Type "]" 
-                  | Identifier
+ForStmt         ::= "for" Identifier "in" Expr ".." Expr ["step" Expr] NEWLINE
+                    Statement*
+                    "end for" NEWLINE
+                  | "for" IdentList "in" Expr NEWLINE
+                    Statement*
+                    "end for" NEWLINE
+
+SelectStmt      ::= "select case" Expr NEWLINE
+                    ("case" Expr NEWLINE Statement*)*
+                    ["case else" NEWLINE Statement*]
+                    "end select" NEWLINE
+
+SpawnStmt       ::= "spawn" FnCall NEWLINE
+ReturnStmt      ::= "return" [ExprList] NEWLINE
+BreakStmt       ::= "break" NEWLINE
+
+Expr            ::= OrExpr
+OrExpr          ::= AndExpr ("or" AndExpr)*
+AndExpr         ::= NotExpr ("and" NotExpr)*
+NotExpr         ::= "not" NotExpr | CmpExpr
+CmpExpr         ::= AddExpr (("==" | "!=" | "<" | ">" | "<=" | ">=") AddExpr)*
+AddExpr         ::= MulExpr (("+" | "-" | "&") MulExpr)*
+MulExpr         ::= UnaryExpr (("*" | "/") UnaryExpr)*
+UnaryExpr       ::= ("+" | "-") UnaryExpr | PostfixExpr
+
+PostfixExpr     ::= PrimaryExpr
+                    ( "." Identifier
+                    | "[" Expr "]"
+                    | "(" [CallArgList] ")"
+                    | "{" [InitFieldList] "}" )*
+
+PrimaryExpr     ::= Allocation | Literal | QualifiedIdent | "(" Expr ")"
+Allocation      ::= "new" Type [ "(" [InitFieldList] ")" | "{" [InitFieldList] "}" ]
+
+CallArgList     ::= CallArg ("," CallArg)* [","]
+CallArg         ::= [Identifier (":" | "=")] Expr
+
+InitFieldList   ::= InitField ("," InitField)* [","]
+InitField       ::= [Identifier (":" | "=")] Expr
+
+Literal         ::= NumberLiteral | StringLiteral | FStringLiteral
+                  | "true" | "false" | "null"
+                  | ListLiteral | DictLiteral
+ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
+DictLiteral     ::= "{" [DictEntry ("," DictEntry)* [","]] "}"
+DictEntry       ::= Expr ":" Expr
+
+Type            ::= ["shared"] BaseType
+BaseType        ::= "int" | "float" | "str" | "bool"
+                  | "list" "[" Type "]"
+                  | "dict" "[" Type "," Type "]"
+                  | "chan" "[" Type "]"
+                  | QualifiedIdent
+
+IdentList       ::= Identifier ("," Identifier)*
+ExprList        ::= Expr ("," Expr)*
+QualifiedIdent  ::= Identifier ("." Identifier)*
 ```
 
 ---
@@ -53,7 +114,7 @@ Type            ::= "int" | "float" | "str" | "bool"
 
 ### 1. Multi-File Modules & Imports
 
-Every `.cb` file is implicitly a module. Everything is private by default; the `pub` keyword exposes types and functions to the importer.
+Every `.cb` file is implicitly a module. Everything is private by default; the `pub` keyword exposes types, aliases, and functions to the importer.
 
 **player.cb (The Library Module)**
 
@@ -77,14 +138,14 @@ end fn
 
 ### 2. Memory, Mutability, and UFCS
 
-CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`).
+CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Structs can be initialized using either parenthesized `Type(field=val)` or brace `Type{field: val}` syntax.
 
 **main.cb (The Executable Module)**
 
 ```vb
 import "player.cb"
 
-fn main()
+fn main() as int
     ' IMMUTABILITY: Cannot be changed after declaration
     const max_potion as int = 50 
     
@@ -106,16 +167,17 @@ fn main()
     ' Because heap_hero is 'shared' (a pointer), passing it to a 'byref' function
     ' automatically dereferences it under the hood. No C-style '*' or '&' needed.
     heap_hero.heal(max_potion)
+    return 0
 end fn
 ```
 
 ### 3. Error Handling & Cleanup (Static Bubbling & Defer)
 
-CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `err` to their return signature. The transpiler handles the rest.
+CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `err` to their return signature (`as T, err` or `as err`). The transpiler handles the rest.
 
 1. **Implicit Bubbling:** If a fallible function calls another fallible function, the transpiler automatically injects an invisible check that returns the error upward. The developer writes zero error boilerplate.
-2. **Deterministic Cleanup:** The `defer` block guarantees execution when the function exits (via a successful return, an error bubble, or a panic), mapping cleanly to C++ RAII destructors.
-3. **Explicit Handling:** If an infallible function calls a fallible one, it *must* handle the error using the `on error` block, binding the error string to a local variable.
+2. **Deterministic Cleanup:** The `defer ... end defer` block guarantees execution when the function exits (via a successful return or an error bubble), mapping cleanly to C++ RAII scope-exit destructors.
+3. **Explicit Handling:** If an infallible function calls a fallible one, it *must* handle the error using the `on error <ident> ... end error` block, binding the error string to a local variable.
 
 **network.cb (Error Bubbling & Cleanup)**
 
@@ -127,7 +189,7 @@ end type
 ' Function can return a Connection OR an error
 pub fn connect(ip as str) as Connection, err
     if ip == ""
-        return null, "IP cannot be empty"
+        return Connection(id=0), "IP cannot be empty"
     end if
     
     return Connection(id=1), ""
@@ -159,5 +221,29 @@ fn start_server()
     end error
     
     print("Connected and processed " & str(records) & " records.")
+end fn
+```
+
+### 4. Control Flow, Ranges, and Built-in Containers
+
+CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`, `chan[T]`), interpolated strings (`f"..."`), `for ... in start..end [step s]` range and collection loops, and `select case` pattern blocks.
+
+```vb
+fn demo_containers() as int
+    dim nums as list[int] = [10, 20, 30]
+    dim scores as dict[str, int] = {"alice": 100, "bob": 85}
+
+    dim total = 0
+    for i in 0..3 step 1
+        total = total + nums[i]
+    end for
+
+    select case scores["alice"]
+        case 100
+            print(f"Perfect score, total={total}")
+        case else
+            print("Keep trying")
+    end select
+    return 0
 end fn
 ```

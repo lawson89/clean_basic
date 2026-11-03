@@ -1,0 +1,25 @@
+' EXPECT_CPP: int test_containers(std::vector<int> nums, std::unordered_map<std::string, int> lookup)
+' EXPECT_CPP: static_cast<int>(nums.size())
+' FORBID_CPP: std::list
+' EXPECT_OUT: first: 10
+' EXPECT_OUT: empty: 0
+' EXPECT_OUT: score: 42
+
+fn test_containers(nums as list[int], lookup as dict[str, int]) as int
+    select case len(nums)
+    case 0
+        return 0
+    case else
+        return nums[0]
+    end select
+end fn
+
+fn main()
+    dim nums as list[int] = [10, 20, 30]
+    dim empty_nums as list[int] = []
+    dim scores as dict[str, int] = {"alice": 42, "bob": 17}
+
+    print("first: " & str(test_containers(nums, scores)))
+    print("empty: " & str(test_containers(empty_nums, scores)))
+    print("score: " & str(scores["alice"]))
+end fn

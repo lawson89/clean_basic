@@ -669,8 +669,6 @@ inline std::string build_error_bubble_return(
     const FnDecl& fn,
     std::string_view err_var
 ) {
-    (void)arena;
-    (void)symbols;
     if (fn.return_types.empty()) {
         return "return " + std::string(err_var) + ";";
     }
@@ -679,7 +677,15 @@ inline std::string build_error_bubble_return(
         if (i > 0) {
             args += ", ";
         }
-        args += "{}";
+        const TypeId resolved_id = resolve_alias(arena, symbols, fn.return_types[i]);
+        std::string elem = "{}";
+        if (resolved_id < arena.types.size()) {
+            const TypeNode& tnode = arena.types[resolved_id];
+            if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
+                elem = map_type(arena, symbols, resolved_id) + "{}";
+            }
+        }
+        args += elem;
     }
     args += ", " + std::string(err_var);
     return "return { " + args + " };";
@@ -990,6 +996,16 @@ inline void emit_return(
     for (size_t idx = 0; idx < stmt.values.size(); ++idx) {
         const ExprId vid = stmt.values[idx];
         std::string val_cpp = emit_expr(arena, symbols, vid, scope, state);
+        if (vid < arena.exprs.size() && std::holds_alternative<NullLiteral>(arena.exprs[vid].payload) &&
+            idx < fn.return_types.size()) {
+            const TypeId resolved_id = resolve_alias(arena, symbols, fn.return_types[idx]);
+            if (resolved_id < arena.types.size()) {
+                const TypeNode& tnode = arena.types[resolved_id];
+                if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
+                    val_cpp = map_type(arena, symbols, resolved_id) + "{}";
+                }
+            }
+        }
         if (fn.returns_err && idx == stmt.values.size() - 1 && vid < arena.exprs.size()) {
             if (std::holds_alternative<StringLiteral>(arena.exprs[vid].payload)) {
                 const auto& slit = std::get<StringLiteral>(arena.exprs[vid].payload);
