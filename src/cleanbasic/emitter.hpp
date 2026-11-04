@@ -18,7 +18,8 @@
 
 namespace cb {
 
-constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#include <iostream>
+constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#include <cstdint>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -30,6 +31,24 @@ constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#include <iostream>
 #include <mutex>
 #include <condition_variable>
 #include <queue>
+
+struct cb_error {
+    std::string msg = "";
+    int64_t code = 0;
+};
+
+inline std::string cb_to_str(const std::string& val) { return val; }
+inline std::string cb_to_str(int val) { return std::to_string(val); }
+inline std::string cb_to_str(int64_t val) { return std::to_string(val); }
+inline std::string cb_to_str(double val) { return std::to_string(val); }
+inline std::string cb_to_str(bool val) {
+    if (val) {
+        return "true";
+    }
+    return "false";
+}
+inline std::string cb_to_str(const cb_error& val) { return val.msg; }
+inline bool cb_has_error(const cb_error& val) { return !val.msg.empty() || val.code != 0; }
 
 template <typename F> struct _DeferTask { F f; ~_DeferTask() { f(); } };
 template <typename F> _DeferTask<F> _defer(F f) { return {f}; }
@@ -61,6 +80,7 @@ struct EmitterState {
     uint32_t temp_counter = 0;
     uint32_t val_counter = 0;
     uint32_t defer_counter = 0;
+    std::optional<ErrorBlock> active_error_block = std::nullopt;
 };
 
 inline void emit_line(EmitterState& state, std::string_view line = "") {
@@ -98,6 +118,7 @@ inline std::string map_base_type(
     if (t.name == "float") return "double";
     if (t.name == "bool") return "bool";
     if (t.name == "str") return "std::string";
+    if (t.name == "err") return "cb_error";
     if (t.name == "void") return "void";
     if (t.name == "auto") return "auto";
     if (t.name == "list") {
@@ -178,7 +199,7 @@ inline std::string fn_return_cpp_type(
         ret_cpp.push_back(map_type(arena, symbols, rtid));
     }
     if (fn.returns_err) {
-        ret_cpp.push_back("std::string");
+        ret_cpp.push_back("cb_error");
     }
     if (ret_cpp.empty()) {
         return "void";
@@ -412,13 +433,32 @@ inline std::string emit_expr(
 
     if (std::holds_alternative<BinaryOp>(payload)) {
         const auto& bop = std::get<BinaryOp>(payload);
+        if (bop.op == "&") {
+            const TypeId left_tid = infer_expr_type(arena, bop.left, symbols, scope);
+            const TypeId right_tid = infer_expr_type(arena, bop.right, symbols, scope);
+            std::string left_cpp = emit_expr(arena, symbols, bop.left, scope, state);
+            std::string right_cpp = emit_expr(arena, symbols, bop.right, scope, state);
+            bool left_is_str = false;
+            if (left_tid < arena.types.size() && arena.types[left_tid].name == "str") {
+                left_is_str = true;
+            }
+            bool right_is_str = false;
+            if (right_tid < arena.types.size() && arena.types[right_tid].name == "str") {
+                right_is_str = true;
+            }
+            if (!left_is_str) {
+                left_cpp = "cb_to_str(" + left_cpp + ")";
+            }
+            if (!right_is_str) {
+                right_cpp = "cb_to_str(" + right_cpp + ")";
+            }
+            return "(" + left_cpp + " + " + right_cpp + ")";
+        }
         std::string op_str = bop.op;
         if (op_str == "and") {
             op_str = "&&";
         } else if (op_str == "or") {
             op_str = "||";
-        } else if (op_str == "&") {
-            op_str = "+";
         }
         const std::string left_cpp = emit_expr(arena, symbols, bop.left, scope, state);
         const std::string right_cpp = emit_expr(arena, symbols, bop.right, scope, state);
@@ -574,6 +614,9 @@ inline std::string emit_expr(
                 if (arg_type_id < arena.types.size() && arena.types[arg_type_id].name == "str") {
                     return arg_cpp;
                 }
+                if (arg_type_id < arena.types.size() && arena.types[arg_type_id].name == "err") {
+                    return "cb_to_str(" + arg_cpp + ")";
+                }
                 return "std::to_string(" + arg_cpp + ")";
             }
 
@@ -581,8 +624,18 @@ inline std::string emit_expr(
                 if (call.args.empty()) {
                     return "(std::cout << std::endl)";
                 }
-                const std::string arg_cpp = emit_expr(arena, symbols, call.args[0], scope, state);
-                return "(std::cout << " + arg_cpp + " << std::endl)";
+                std::string stream_expr = "(std::cout";
+                for (const ExprId arg_id : call.args) {
+                    const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope);
+                    std::string arg_cpp = emit_expr(arena, symbols, arg_id, scope, state);
+                    if (arg_tid < arena.types.size() &&
+                        (arena.types[arg_tid].name == "bool" || arena.types[arg_tid].name == "err")) {
+                        arg_cpp = "cb_to_str(" + arg_cpp + ")";
+                    }
+                    stream_expr += " << " + arg_cpp;
+                }
+                stream_expr += " << std::endl)";
+                return stream_expr;
             }
 
             std::optional<FnSymbol> fn_sym;
@@ -663,6 +716,57 @@ inline std::string emit_expr(
     return "";
 }
 
+inline std::string build_error_call_value(
+    AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    const FuncCall& call,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    EmitterState& state
+) {
+    std::string msg_cpp = R"(std::string(""))";
+    if (call.args.size() == 1) {
+        const ExprId arg_id = call.args[0];
+        const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope);
+        std::string part = emit_expr(arena, symbols, arg_id, scope, state);
+        bool is_str = false;
+        if (arg_tid < arena.types.size() && arena.types[arg_tid].name == "str") {
+            is_str = true;
+        }
+        if (!is_str) {
+            part = "cb_to_str(" + part + ")";
+        }
+        msg_cpp = part;
+    } else if (call.args.size() > 1) {
+        std::string combined = "(";
+        for (size_t i = 0; i < call.args.size(); ++i) {
+            if (i > 0) {
+                combined += " + ";
+            }
+            const ExprId arg_id = call.args[i];
+            const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope);
+            std::string part = emit_expr(arena, symbols, arg_id, scope, state);
+            bool is_str = false;
+            if (arg_tid < arena.types.size() && arena.types[arg_tid].name == "str") {
+                is_str = true;
+            }
+            if (!is_str) {
+                part = "cb_to_str(" + part + ")";
+            }
+            combined += part;
+        }
+        combined += ")";
+        msg_cpp = combined;
+    }
+
+    std::string code_cpp = "1";
+    for (const auto& na : call.named_args) {
+        if (na.name == "code") {
+            code_cpp = emit_expr(arena, symbols, na.value, scope, state);
+        }
+    }
+    return "cb_error{" + msg_cpp + ", " + code_cpp + "}";
+}
+
 inline std::string build_error_bubble_return(
     AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -710,8 +814,44 @@ inline void emit_stmt_list(
     std::unordered_set<std::string>& declared_vars,
     EmitterState& state
 ) {
+    const std::optional<ErrorBlock> saved_error_block = state.active_error_block;
     for (const StmtId sid : stmts) {
         emit_stmt(arena, symbols, fn, sid, scope, declared_vars, state);
+    }
+    state.active_error_block = saved_error_block;
+}
+
+inline void emit_active_error_handler_or_bubble(
+    AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    const FnDecl& fn,
+    const std::string& err_tmp,
+    std::unordered_map<std::string, VarSymbol>& scope,
+    std::unordered_set<std::string>& declared_vars,
+    EmitterState& state
+) {
+    if (state.active_error_block.has_value()) {
+        const ErrorBlock active_eb = state.active_error_block.value();
+        emit_line(state, "if (cb_has_error(" + err_tmp + ")) {");
+        state.indent_level += 1;
+        emit_line(state, "cb_error " + active_eb.err_var + " = " + err_tmp + ";");
+        auto err_scope = scope;
+        TypeId err_tid = symbols.type_err;
+        if (err_tid == INVALID_ID) {
+            err_tid = add_type(arena, TypeNode{1, 1, "err", {}, false});
+        }
+        err_scope[active_eb.err_var] = VarSymbol{active_eb.err_var, err_tid, false, false};
+        auto err_decls = declared_vars;
+        err_decls.insert(active_eb.err_var);
+        const std::optional<ErrorBlock> prev_eb = state.active_error_block;
+        state.active_error_block = std::nullopt;
+        emit_stmt_list(arena, symbols, fn, active_eb.body, err_scope, err_decls, state);
+        state.active_error_block = prev_eb;
+        state.indent_level -= 1;
+        emit_line(state, "}");
+    } else {
+        const std::string early_ret = build_error_bubble_return(arena, symbols, fn, err_tmp);
+        emit_line(state, "if (cb_has_error(" + err_tmp + ")) " + early_ret);
     }
 }
 
@@ -739,12 +879,7 @@ inline void emit_fallible_assignment(
         }
     }
 
-    std::string err_var;
-    if (stmt.error_block.has_error_block && !stmt.error_block.err_var.empty()) {
-        err_var = stmt.error_block.err_var;
-    } else {
-        err_var = "_err" + std::to_string(cid);
-    }
+    const std::string err_var = "_err" + std::to_string(cid);
 
     std::string binding_vars;
     for (const auto& tv : temp_vals) {
@@ -754,21 +889,7 @@ inline void emit_fallible_assignment(
 
     emit_line(state, "auto [" + binding_vars + "] = " + call_cpp + ";");
 
-    if (stmt.error_block.has_error_block) {
-        emit_line(state, "if (!" + err_var + ".empty()) {");
-        state.indent_level += 1;
-        auto err_scope = scope;
-        const TypeId str_tid = add_type(arena, TypeNode{1, 1, "str", {}, false});
-        err_scope[err_var] = VarSymbol{err_var, str_tid, false, false};
-        auto err_decls = declared_vars;
-        err_decls.insert(err_var);
-        emit_stmt_list(arena, symbols, fn, stmt.error_block.body, err_scope, err_decls, state);
-        state.indent_level -= 1;
-        emit_line(state, "}");
-    } else {
-        const std::string early_ret = build_error_bubble_return(arena, symbols, fn, err_var);
-        emit_line(state, "if (!" + err_var + ".empty()) " + early_ret);
-    }
+    emit_active_error_handler_or_bubble(arena, symbols, fn, err_var, scope, declared_vars, state);
 
     for (size_t idx = 0; idx < stmt.targets.size(); ++idx) {
         const ExprId tid = stmt.targets[idx];
@@ -937,11 +1058,16 @@ inline void emit_expr_stmt(
 ) {
     if (stmt.expr < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[stmt.expr].payload)) {
         const auto& call = std::get<FuncCall>(arena.exprs[stmt.expr].payload);
+        if (is_error_builtin_call(arena, call)) {
+            const std::string err_val = build_error_call_value(arena, symbols, call, scope, state);
+            emit_line(state, build_error_bubble_return(arena, symbols, fn, err_val));
+            return;
+        }
         const auto fn_sym = resolve_func_call(arena, call, symbols);
         if (fn_sym.has_value() && fn_sym->returns_err) {
             const std::string call_cpp = emit_expr(arena, symbols, stmt.expr, scope, state);
-            const std::string err_var = (stmt.error_block.has_error_block && !stmt.error_block.err_var.empty())
-                ? stmt.error_block.err_var : next_temp(state, "_err");
+            state.val_counter += 1;
+            const std::string err_var = "_err" + std::to_string(state.val_counter);
 
             if (!fn_sym->return_types.empty()) {
                 std::string bindings;
@@ -951,24 +1077,10 @@ inline void emit_expr_stmt(
                 bindings += err_var;
                 emit_line(state, "auto [" + bindings + "] = " + call_cpp + ";");
             } else {
-                emit_line(state, "std::string " + err_var + " = " + call_cpp + ";");
+                emit_line(state, "cb_error " + err_var + " = " + call_cpp + ";");
             }
 
-            if (stmt.error_block.has_error_block) {
-                emit_line(state, "if (!" + err_var + ".empty()) {");
-                state.indent_level += 1;
-                auto err_scope = scope;
-                const TypeId str_tid = add_type(arena, TypeNode{1, 1, "str", {}, false});
-                err_scope[err_var] = VarSymbol{err_var, str_tid, false};
-                auto err_decls = declared_vars;
-                err_decls.insert(err_var);
-                emit_stmt_list(arena, symbols, fn, stmt.error_block.body, err_scope, err_decls, state);
-                state.indent_level -= 1;
-                emit_line(state, "}");
-            } else {
-                const std::string early_ret = build_error_bubble_return(arena, symbols, fn, err_var);
-                emit_line(state, "if (!" + err_var + ".empty()) " + early_ret);
-            }
+            emit_active_error_handler_or_bubble(arena, symbols, fn, err_var, scope, declared_vars, state);
             return;
         }
     }
@@ -986,12 +1098,28 @@ inline void emit_return(
     EmitterState& state
 ) {
     if (stmt.values.empty()) {
-        emit_line(state, "return;");
+        if (fn.returns_err && fn.return_types.empty()) {
+            emit_line(state, R"(return cb_error{"", 0};)");
+        } else {
+            emit_line(state, "return;");
+        }
         return;
     }
 
+    if (stmt.values.size() == 1) {
+        const ExprId first_id = stmt.values[0];
+        if (first_id < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[first_id].payload)) {
+            const auto& call = std::get<FuncCall>(arena.exprs[first_id].payload);
+            if (is_error_builtin_call(arena, call)) {
+                const std::string err_val = build_error_call_value(arena, symbols, call, scope, state);
+                emit_line(state, build_error_bubble_return(arena, symbols, fn, err_val));
+                return;
+            }
+        }
+    }
+
     std::vector<std::string> rendered_vals;
-    rendered_vals.reserve(stmt.values.size());
+    rendered_vals.reserve(stmt.values.size() + 1);
 
     for (size_t idx = 0; idx < stmt.values.size(); ++idx) {
         const ExprId vid = stmt.values[idx];
@@ -1006,16 +1134,14 @@ inline void emit_return(
                 }
             }
         }
-        if (fn.returns_err && idx == stmt.values.size() - 1 && vid < arena.exprs.size()) {
-            if (std::holds_alternative<StringLiteral>(arena.exprs[vid].payload)) {
-                const auto& slit = std::get<StringLiteral>(arena.exprs[vid].payload);
-                val_cpp = "std::string(\"" + slit.value + "\")";
-            }
-        }
         rendered_vals.push_back(std::move(val_cpp));
     }
 
-    if (rendered_vals.size() == 1 && !(fn.returns_err && !fn.return_types.empty())) {
+    if (fn.returns_err && rendered_vals.size() == fn.return_types.size()) {
+        rendered_vals.push_back(R"(cb_error{"", 0})");
+    }
+
+    if (rendered_vals.size() == 1) {
         emit_line(state, "return " + rendered_vals[0] + ";");
     } else {
         std::string joined;
@@ -1089,8 +1215,14 @@ inline void emit_stmt(
             const std::string& loop_var = for_s.loop_vars[0];
             const std::string start_cpp = emit_expr(arena, symbols, for_s.range_spec.start, scope, state);
             const std::string end_cpp = emit_expr(arena, symbols, for_s.range_spec.end, scope, state);
-            const std::string step_cpp = for_s.range_spec.has_step
-                ? emit_expr(arena, symbols, for_s.range_spec.step, scope, state) : "1";
+            std::string step_cpp = "1";
+            if (for_s.range_spec.has_step) {
+                step_cpp = emit_expr(arena, symbols, for_s.range_spec.step, scope, state);
+            }
+            std::string cmp_op = "<";
+            if (for_s.range_spec.inclusive) {
+                cmp_op = "<=";
+            }
 
             auto loop_scope = scope;
             const TypeId int_tid = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}, false});
@@ -1098,7 +1230,7 @@ inline void emit_stmt(
             auto loop_decls = declared_vars;
             loop_decls.insert(loop_var);
 
-            emit_line(state, "for (int " + loop_var + " = " + start_cpp + "; " + loop_var + " < " + end_cpp + "; " + loop_var + " += " + step_cpp + ") {");
+            emit_line(state, "for (int " + loop_var + " = " + start_cpp + "; " + loop_var + " " + cmp_op + " " + end_cpp + "; " + loop_var + " += " + step_cpp + ") {");
             state.indent_level += 1;
             emit_stmt_list(arena, symbols, fn, for_s.body, loop_scope, loop_decls, state);
             state.indent_level -= 1;
@@ -1181,6 +1313,11 @@ inline void emit_stmt(
         return;
     }
 
+    if (std::holds_alternative<ErrorBlock>(payload)) {
+        state.active_error_block = std::get<ErrorBlock>(payload);
+        return;
+    }
+
     if (std::holds_alternative<DeferStmt>(payload)) {
         const auto& def_s = std::get<DeferStmt>(payload);
         state.defer_counter += 1;
@@ -1188,7 +1325,10 @@ inline void emit_stmt(
         emit_line(state, "auto " + defer_var + " = _defer([&]() {");
         state.indent_level += 1;
         auto def_decls = declared_vars;
+        const std::optional<ErrorBlock> prev_eb = state.active_error_block;
+        state.active_error_block = std::nullopt;
         emit_stmt_list(arena, symbols, fn, def_s.body, scope, def_decls, state);
+        state.active_error_block = prev_eb;
         state.indent_level -= 1;
         emit_line(state, "});");
         return;
@@ -1245,6 +1385,29 @@ inline void emit_fn_decl(
     }
 
     emit_stmt_list(arena, symbols, fn, fn.body, scope, declared_vars, state);
+
+    if (fn.returns_err && fn.return_types.empty()) {
+        bool ends_with_return = false;
+        if (!fn.body.empty()) {
+            const StmtId last_sid = fn.body.back();
+            if (last_sid < arena.stmts.size()) {
+                const auto& last_payload = arena.stmts[last_sid].payload;
+                if (std::holds_alternative<ReturnStmt>(last_payload)) {
+                    ends_with_return = true;
+                } else if (std::holds_alternative<ExprStmt>(last_payload)) {
+                    const auto& es = std::get<ExprStmt>(last_payload);
+                    if (es.expr < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[es.expr].payload)) {
+                        if (is_error_builtin_call(arena, std::get<FuncCall>(arena.exprs[es.expr].payload))) {
+                            ends_with_return = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (!ends_with_return) {
+            emit_line(state, R"(return cb_error{"", 0};)");
+        }
+    }
 
     state.indent_level -= 1;
     emit_line(state, "}");

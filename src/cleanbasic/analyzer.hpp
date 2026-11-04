@@ -49,6 +49,7 @@ struct GlobalSymbolTable {
     std::vector<std::string> link_libs;
     std::unordered_map<std::string, std::string> modules;
     std::unordered_map<std::string, std::unordered_map<std::string, VarSymbol>> fn_scopes;
+    TypeId type_err = INVALID_ID;
 };
 
 struct AnalysisResult {
@@ -61,10 +62,20 @@ inline void register_builtins(AstArena& arena, GlobalSymbolTable& symbols) {
     const TypeId str_t = add_type(arena, TypeNode{1, 1, "str", {}, false});
     const TypeId any_t = add_type(arena, TypeNode{1, 1, "any", {}, false});
     const TypeId int_t = add_type(arena, TypeNode{1, 1, "int", {}, false});
+    const TypeId err_t = add_type(arena, TypeNode{1, 1, "err", {}, false});
+    symbols.type_err = err_t;
+
+    TypeSymbol err_type{};
+    err_type.name = "err";
+    err_type.is_pub = true;
+    err_type.fields["msg"] = str_t;
+    err_type.fields["code"] = int_t;
+    err_type.field_order.push_back(FieldDecl{1, 1, "msg", str_t});
+    err_type.field_order.push_back(FieldDecl{1, 1, "code", int_t});
+    symbols.types["err"] = std::move(err_type);
 
     FnSymbol print_fn{};
     print_fn.name = "print";
-    print_fn.params.push_back(Param{1, 1, "val", str_t, false});
     print_fn.returns_err = false;
     symbols.functions["print"] = std::move(print_fn);
 
@@ -430,7 +441,7 @@ inline void check_fallible_usage(
     const AstArena& arena,
     const FnDecl& fn,
     ExprId expr_id,
-    const ErrorBlock& error_block,
+    bool has_active_on_error,
     const GlobalSymbolTable& symbols,
     bool& out_implicit_bubble
 ) {
@@ -447,23 +458,59 @@ inline void check_fallible_usage(
             const bool callee_fallible = fn_sym.returns_err || fn_sym.is_fallible;
             const bool caller_fallible = fn.returns_err || fn.is_fallible;
             if (callee_fallible) {
-                if (!error_block.has_error_block) {
+                if (!has_active_on_error) {
                     if (caller_fallible) {
                         out_implicit_bubble = true;
                     } else {
-                        std::string msg = "Unhandled error: function returns an error but caller does not declare 'err' or use 'on error' (function '" +
+                        std::string msg = "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function '" +
                             fn.name + "' calls fallible function '" + fn_sym.name + "').";
                         set_analyzer_error(state, expr_node.line, expr_node.col, msg);
                         return;
                     }
                 }
-            } else if (error_block.has_error_block) {
-                std::string msg = "Cannot attach 'on error' block to non-fallible function '" + fn_sym.name + "'.";
-                set_analyzer_error(state, expr_node.line, expr_node.col, msg);
-                return;
             }
         }
     }
+}
+
+inline bool is_error_builtin_call(const AstArena& arena, const FuncCall& call);
+
+inline bool stmt_list_has_exit(const AstArena& arena, const std::vector<StmtId>& stmts) {
+    if (stmts.empty()) {
+        return false;
+    }
+    const StmtId last_sid = stmts.back();
+    if (last_sid >= arena.stmts.size()) {
+        return false;
+    }
+    const auto& last_payload = arena.stmts[last_sid].payload;
+    if (std::holds_alternative<ReturnStmt>(last_payload)) {
+        return true;
+    }
+    if (std::holds_alternative<BreakStmt>(last_payload)) {
+        return true;
+    }
+    if (std::holds_alternative<ExprStmt>(last_payload)) {
+        const auto& estmt = std::get<ExprStmt>(last_payload);
+        if (estmt.expr < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[estmt.expr].payload)) {
+            const auto& call = std::get<FuncCall>(arena.exprs[estmt.expr].payload);
+            if (is_error_builtin_call(arena, call)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline bool is_error_builtin_call(const AstArena& arena, const FuncCall& call) {
+    if (call.callee >= arena.exprs.size()) {
+        return false;
+    }
+    const auto& callee_node = arena.exprs[call.callee];
+    if (std::holds_alternative<Identifier>(callee_node.payload)) {
+        return std::get<Identifier>(callee_node.payload).name == "error";
+    }
+    return false;
 }
 
 inline void validate_expr_calls(
@@ -483,11 +530,32 @@ inline void validate_expr_calls(
 
     if (std::holds_alternative<FuncCall>(payload)) {
         const auto& call = std::get<FuncCall>(payload);
+        if (is_error_builtin_call(arena, call)) {
+            const bool caller_fallible = fn.returns_err || fn.is_fallible;
+            if (!caller_fallible) {
+                std::string msg = "Cannot call 'error(...)' inside infallible function '" + fn.name +
+                    "'; add 'can error' to the function signature.";
+                set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                return;
+            }
+            if (call.args.empty()) {
+                set_analyzer_error(state, expr_node.line, expr_node.col, "'error(...)' requires at least one message argument.");
+                return;
+            }
+            for (const auto& named_arg : call.named_args) {
+                if (named_arg.name != "code") {
+                    std::string msg = "Unknown named argument '" + named_arg.name +
+                        "' in 'error(...)'; only 'code=' is supported.";
+                    set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                    return;
+                }
+            }
+        }
         const auto fn_sym_opt = resolve_func_call(arena, call, symbols);
         if (fn_sym_opt.has_value() && fn_sym_opt->returns_err && !allow_top_level_fallible) {
             if (!fn.returns_err) {
                 std::string msg = "Function '" + fn.name + "' calls fallible function '" + fn_sym_opt->name +
-                    "' without an 'on error' block, but '" + fn.name + "' does not declare 'err' in its return signature.";
+                    "' without an 'on error' block, but '" + fn.name + "' does not declare 'can error' in its signature.";
                 set_analyzer_error(state, expr_node.line, expr_node.col, msg);
                 return;
             }
@@ -567,7 +635,8 @@ inline void analyze_block(
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
     GlobalSymbolTable& symbols,
-    std::unordered_map<std::string, VarSymbol>& scope
+    std::unordered_map<std::string, VarSymbol>& scope,
+    bool inherited_on_error = false
 );
 
 inline void analyze_stmt(
@@ -576,7 +645,8 @@ inline void analyze_stmt(
     const FnDecl& fn,
     StmtId stmt_id,
     GlobalSymbolTable& symbols,
-    std::unordered_map<std::string, VarSymbol>& scope
+    std::unordered_map<std::string, VarSymbol>& scope,
+    bool& has_active_on_error
 ) {
     if (stmt_id >= arena.stmts.size() || state.has_error) {
         return;
@@ -587,7 +657,7 @@ inline void analyze_stmt(
 
     if (std::holds_alternative<VarAssignment>(payload)) {
         auto& vassign = std::get<VarAssignment>(arena.stmts[stmt_id].payload);
-        check_fallible_usage(state, arena, fn, vassign.value, vassign.error_block, symbols, vassign.implicit_bubble);
+        check_fallible_usage(state, arena, fn, vassign.value, has_active_on_error, symbols, vassign.implicit_bubble);
         if (state.has_error) return;
 
         const std::vector<TypeId> val_types = infer_expr_types(arena, vassign.value, symbols, scope);
@@ -647,31 +717,36 @@ inline void analyze_stmt(
         }
 
         validate_expr_calls(state, arena, fn, vassign.value, symbols, true);
-        if (state.has_error) return;
-
-        if (vassign.error_block.has_error_block) {
-            auto err_scope = scope;
-            const TypeId str_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "str", {}, false});
-            err_scope[vassign.error_block.err_var] = VarSymbol{vassign.error_block.err_var, str_t, false, false};
-            analyze_block(state, arena, fn, vassign.error_block.body, symbols, err_scope);
-        }
         return;
     }
 
     if (std::holds_alternative<ExprStmt>(payload)) {
         auto& estmt = std::get<ExprStmt>(arena.stmts[stmt_id].payload);
-        check_fallible_usage(state, arena, fn, estmt.expr, estmt.error_block, symbols, estmt.implicit_bubble);
+        check_fallible_usage(state, arena, fn, estmt.expr, has_active_on_error, symbols, estmt.implicit_bubble);
         if (state.has_error) return;
 
         validate_expr_calls(state, arena, fn, estmt.expr, symbols, true);
+        return;
+    }
+
+    if (std::holds_alternative<ErrorBlock>(payload)) {
+        const auto& err_block = std::get<ErrorBlock>(payload);
+        auto err_scope = scope;
+        TypeId err_t = symbols.type_err;
+        if (err_t == INVALID_ID) {
+            err_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "err", {}, false});
+        }
+        err_scope[err_block.err_var] = VarSymbol{err_block.err_var, err_t, false, false};
+        analyze_block(state, arena, fn, err_block.body, symbols, err_scope, false);
         if (state.has_error) return;
 
-        if (estmt.error_block.has_error_block) {
-            auto err_scope = scope;
-            const TypeId str_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "str", {}, false});
-            err_scope[estmt.error_block.err_var] = VarSymbol{estmt.error_block.err_var, str_t, false, false};
-            analyze_block(state, arena, fn, estmt.error_block.body, symbols, err_scope);
+        if (!stmt_list_has_exit(arena, err_block.body)) {
+            std::string msg = "'on error' block must terminate with an explicit control-flow exit ('return', 'error(...)', or 'break').";
+            set_analyzer_error(state, stmt_node.line, stmt_node.col, msg);
+            return;
         }
+
+        has_active_on_error = true;
         return;
     }
 
@@ -679,18 +754,18 @@ inline void analyze_stmt(
         const auto& if_stmt = std::get<IfStmt>(payload);
         validate_expr_calls(state, arena, fn, if_stmt.condition, symbols, false);
         if (state.has_error) return;
-        analyze_block(state, arena, fn, if_stmt.then_body, symbols, scope);
+        analyze_block(state, arena, fn, if_stmt.then_body, symbols, scope, has_active_on_error);
         if (state.has_error) return;
 
         for (const auto& branch : if_stmt.elif_branches) {
             validate_expr_calls(state, arena, fn, branch.condition, symbols, false);
             if (state.has_error) return;
-            analyze_block(state, arena, fn, branch.body, symbols, scope);
+            analyze_block(state, arena, fn, branch.body, symbols, scope, has_active_on_error);
             if (state.has_error) return;
         }
 
         if (if_stmt.has_else) {
-            analyze_block(state, arena, fn, if_stmt.else_body, symbols, scope);
+            analyze_block(state, arena, fn, if_stmt.else_body, symbols, scope, has_active_on_error);
         }
         return;
     }
@@ -730,7 +805,7 @@ inline void analyze_stmt(
             }
         }
         if (state.has_error) return;
-        analyze_block(state, arena, fn, for_stmt.body, symbols, scope);
+        analyze_block(state, arena, fn, for_stmt.body, symbols, scope, has_active_on_error);
         return;
     }
 
@@ -742,19 +817,19 @@ inline void analyze_stmt(
         for (const auto& scase : sel_stmt.cases) {
             validate_expr_calls(state, arena, fn, scase.match_expr, symbols, false);
             if (state.has_error) return;
-            analyze_block(state, arena, fn, scase.body, symbols, scope);
+            analyze_block(state, arena, fn, scase.body, symbols, scope, has_active_on_error);
             if (state.has_error) return;
         }
 
         if (sel_stmt.has_case_else) {
-            analyze_block(state, arena, fn, sel_stmt.case_else, symbols, scope);
+            analyze_block(state, arena, fn, sel_stmt.case_else, symbols, scope, has_active_on_error);
         }
         return;
     }
 
     if (std::holds_alternative<DeferStmt>(payload)) {
         const auto& dstmt = std::get<DeferStmt>(payload);
-        analyze_block(state, arena, fn, dstmt.body, symbols, scope);
+        analyze_block(state, arena, fn, dstmt.body, symbols, scope, false);
         return;
     }
 
@@ -770,10 +845,20 @@ inline void analyze_stmt(
             validate_expr_calls(state, arena, fn, val_id, symbols, false);
             if (state.has_error) return;
         }
-        if (fn.returns_err && !ret_stmt.values.empty()) {
-            const size_t expected_count = fn.return_types.size() + 1;
+        bool is_return_error_call = false;
+        if (ret_stmt.values.size() == 1) {
+            const ExprId first_id = ret_stmt.values[0];
+            if (first_id < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[first_id].payload)) {
+                const auto& call = std::get<FuncCall>(arena.exprs[first_id].payload);
+                if (is_error_builtin_call(arena, call)) {
+                    is_return_error_call = true;
+                }
+            }
+        }
+        if (!is_return_error_call && !ret_stmt.values.empty()) {
+            const size_t expected_count = fn.return_types.size();
             if (ret_stmt.values.size() != expected_count) {
-                std::string msg = "Function '" + fn.name + "' returns err and expects " +
+                std::string msg = "Function '" + fn.name + "' expects " +
                     std::to_string(expected_count) + " return value(s), got " +
                     std::to_string(ret_stmt.values.size());
                 set_analyzer_error(state, stmt_node.line, stmt_node.col, msg);
@@ -790,13 +875,15 @@ inline void analyze_block(
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
     GlobalSymbolTable& symbols,
-    std::unordered_map<std::string, VarSymbol>& scope
+    std::unordered_map<std::string, VarSymbol>& scope,
+    bool inherited_on_error
 ) {
+    bool active_on_error = inherited_on_error;
     for (const StmtId sid : stmts) {
         if (state.has_error) {
             return;
         }
-        analyze_stmt(state, arena, fn, sid, symbols, scope);
+        analyze_stmt(state, arena, fn, sid, symbols, scope, active_on_error);
     }
 }
 
@@ -812,7 +899,7 @@ inline void analyze_fn(
         scope[param.name] = VarSymbol{param.name, resolved_tid, param.is_byref};
     }
 
-    analyze_block(state, arena, fn, fn.body, symbols, scope);
+    analyze_block(state, arena, fn, fn.body, symbols, scope, false);
     symbols.fn_scopes[fn.name] = std::move(scope);
 }
 

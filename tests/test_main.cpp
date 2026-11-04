@@ -135,9 +135,13 @@ select case x
 case 1
 case else
 end select
+for i = 0 to 10 step 2
+end for
 if a and b or not c
 else if d
 end if
+fn check() can error
+end fn
 on error e
 end error
 defer
@@ -178,8 +182,13 @@ end defer
     CHECK(has_kw("not"));
     CHECK(has_kw("else if"));
     CHECK(has_kw("end if"));
+    CHECK(has_kw("can error"));
     CHECK(has_kw("on error"));
     CHECK(has_kw("end error"));
+    CHECK(has_kw("for"));
+    CHECK(has_kw("to"));
+    CHECK(has_kw("step"));
+    CHECK(has_kw("end for"));
     CHECK(has_kw("defer"));
     CHECK(has_kw("end defer"));
 
@@ -229,6 +238,103 @@ end fn
     const cb::TypeId param1_tid = fn_decl.params[1].type_id;
     CHECK(parse_res.arena.types[param1_tid].is_shared);
 
+    SECTION("Parses classic BASIC 'for i = start to end' with inclusive RangeSpec") {
+        const std::string for_to_code = R"(fn loop_test() as int
+    dim s = 0
+    for i = 1 to 5 step 2
+        s = s + i
+    end for
+    return s
+end fn
+)";
+        const auto lex_ft = cb::tokenize(for_to_code, "for_to.cb");
+        REQUIRE(lex_ft.ok);
+        const auto parse_ft = cb::parse_tokens(lex_ft.tokens, "for_to.cb");
+        REQUIRE(parse_ft.ok);
+        REQUIRE(parse_ft.program.declarations.size() == 1);
+        const auto& fn_ft = std::get<cb::FnDecl>(parse_ft.arena.decls[parse_ft.program.declarations[0]].payload);
+        REQUIRE(fn_ft.body.size() >= 2);
+        const auto& for_stmt = std::get<cb::ForStmt>(parse_ft.arena.stmts[fn_ft.body[1]].payload);
+        CHECK(for_stmt.range_spec.has_range);
+        CHECK(for_stmt.range_spec.inclusive);
+        CHECK(for_stmt.range_spec.has_step);
+    }
+
+    SECTION("Parses 'can error' on value-returning and void functions") {
+        const std::string can_err_code = R"(
+fn connect(ip as str) as int can error
+    return 1
+end fn
+
+fn validate(port as int) can error
+    if port <= 0
+        error("bad port", code=400)
+    end if
+end fn
+)";
+        const auto lex_ce = cb::tokenize(can_err_code, "can_err.cb");
+        REQUIRE(lex_ce.ok);
+        const auto parse_ce = cb::parse_tokens(lex_ce.tokens, "can_err.cb");
+        REQUIRE(parse_ce.ok);
+        REQUIRE(parse_ce.program.declarations.size() == 2);
+        const auto& fn0 = std::get<cb::FnDecl>(parse_ce.arena.decls[parse_ce.program.declarations[0]].payload);
+        const auto& fn1 = std::get<cb::FnDecl>(parse_ce.arena.decls[parse_ce.program.declarations[1]].payload);
+        CHECK(fn0.returns_err);
+        CHECK(fn0.return_types.size() == 1);
+        CHECK(fn1.returns_err);
+        CHECK(fn1.return_types.empty());
+    }
+
+    SECTION("Rejects ':' in named arguments for function calls and struct initialization") {
+        const std::string bad_call_colon = R"(
+fn main()
+    foo(code: 408)
+end fn
+)";
+        const auto lex_c1 = cb::tokenize(bad_call_colon, "bad_call_colon.cb");
+        REQUIRE(lex_c1.ok);
+        const auto parse_c1 = cb::parse_tokens(lex_c1.tokens, "bad_call_colon.cb");
+        CHECK_FALSE(parse_c1.ok);
+        CHECK(parse_c1.error.kind == "ParseError");
+
+        const std::string bad_struct_colon = R"(
+fn main()
+    dim p = Point{x: 10, y: 20}
+end fn
+)";
+        const auto lex_c2 = cb::tokenize(bad_struct_colon, "bad_struct_colon.cb");
+        REQUIRE(lex_c2.ok);
+        const auto parse_c2 = cb::parse_tokens(lex_c2.tokens, "bad_struct_colon.cb");
+        CHECK_FALSE(parse_c2.ok);
+        CHECK(parse_c2.error.kind == "ParseError");
+    }
+
+    SECTION("Rejects legacy trailing 'on error' syntax on variable declarations, assignments, and calls") {
+        const std::string bad_trailing_dim = R"(fn main()
+    dim x = foo() on error e
+        return
+    end error
+end fn
+)";
+        const auto lex_td = cb::tokenize(bad_trailing_dim, "bad_trailing_dim.cb");
+        REQUIRE(lex_td.ok);
+        const auto parse_td = cb::parse_tokens(lex_td.tokens, "bad_trailing_dim.cb");
+        CHECK_FALSE(parse_td.ok);
+        CHECK(parse_td.error.kind == "ParseError");
+
+        const std::string bad_trailing_call = R"(fn main()
+    foo() on error e
+        return
+    end error
+end fn
+)";
+        const auto lex_tc = cb::tokenize(bad_trailing_call, "bad_trailing_call.cb");
+        REQUIRE(lex_tc.ok);
+        const auto parse_tc = cb::parse_tokens(lex_tc.tokens, "bad_trailing_call.cb");
+        CHECK_FALSE(parse_tc.ok);
+        CHECK(parse_tc.error.kind == "ParseError");
+    }
+
     SECTION("Reports ParseError on unclosed control flow block") {
         const std::string bad_code = R"(fn broken()
     if true
@@ -246,8 +352,8 @@ end fn
 TEST_CASE("Analyzer validates fallible calls, const immutability, and implicit bubbling", "[analyzer]") {
     SECTION("Rejects unhandled fallible call in infallible function") {
         const std::string bad_fallible = R"(
-fn risky() as int, err
-    return 1, ""
+fn risky() as int can error
+    return 1
 end fn
 
 fn caller_without_err()
@@ -263,14 +369,15 @@ end fn
         CHECK_FALSE(ana_bad.ok);
         CHECK(ana_bad.error.kind == "AnalyzerError");
         CHECK(ana_bad.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'err' or use 'on error'"
+            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
         ) != std::string::npos);
     }
 
     SECTION("Rejects unhandled fallible call in expression statement") {
         const std::string bad_expr_stmt = R"(
-fn fail() as int, err
-    return 0, "error"
+fn fail() as int can error
+    error("failed", code=500)
+    return 0
 end fn
 
 fn call()
@@ -281,8 +388,90 @@ end fn
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
         CHECK(res.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'err' or use 'on error'"
+            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
         ) != std::string::npos);
+    }
+
+    SECTION("Rejects fallible call occurring before 'on error' block is registered in scope") {
+        const std::string bad_order = R"(
+fn risky() as int can error
+    return 1
+end fn
+
+fn main()
+    dim first = risky()
+    on error e
+        return
+    end error
+    dim second = risky()
+end fn
+)";
+        const auto res = cb::transpile_source(bad_order, "bad_order.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.kind == "AnalyzerError");
+        CHECK(res.error.message.find(
+            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
+        ) != std::string::npos);
+    }
+
+    SECTION("Rejects 'on error' block that does not terminate with return, error(...), or break") {
+        const std::string bad_no_exit = R"(
+fn risky() as int can error
+    return 1
+end fn
+
+fn main()
+    on error e
+        print("Caught error but forgot to exit: " & e.msg)
+    end error
+    dim val = risky()
+end fn
+)";
+        const auto res = cb::transpile_source(bad_no_exit, "bad_no_exit.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.kind == "AnalyzerError");
+        CHECK(res.error.message.find(
+            "'on error' block must terminate with an explicit control-flow exit"
+        ) != std::string::npos);
+    }
+
+    SECTION("Rejects calling error(...) inside an infallible function or with invalid named args") {
+        const std::string bad_error_in_infallible = R"(
+fn not_fallible() as int
+    error("boom", code=1)
+    return 0
+end fn
+)";
+        const auto res_inf = cb::transpile_source(bad_error_in_infallible, "bad_error_inf.cb");
+        CHECK_FALSE(res_inf.ok);
+        CHECK(res_inf.error.kind == "AnalyzerError");
+        CHECK(res_inf.error.message.find("Cannot call 'error(...)' inside infallible function") != std::string::npos);
+
+        const std::string bad_error_kwarg = R"(
+fn fallible_fn() as int can error
+    error("boom", status=500)
+    return 0
+end fn
+)";
+        const auto res_kw = cb::transpile_source(bad_error_kwarg, "bad_error_kw.cb");
+        CHECK_FALSE(res_kw.ok);
+        CHECK(res_kw.error.kind == "AnalyzerError");
+        CHECK(res_kw.error.message.find("Unknown named argument 'status'") != std::string::npos);
+    }
+
+    SECTION("Rejects unhandled fallible call inside variadic print arguments") {
+        const std::string bad_print_arg = R"(
+fn risky() as int can error
+    return 7
+end fn
+
+fn main()
+    print("value=", risky())
+end fn
+)";
+        const auto res = cb::transpile_source(bad_print_arg, "bad_print_arg.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.kind == "AnalyzerError");
     }
 
     SECTION("Rejects const variable reassignment") {
@@ -300,20 +489,21 @@ end fn
 
     SECTION("Annotates implicit_bubble on fallible calls inside fallible functions") {
         const std::string good_code = R"(
-fn risky() as int, err
-    return 1, ""
+fn risky() as int can error
+    return 1
 end fn
 
-fn middle() as int, err
+fn middle() as int can error
     dim val = risky()
-    return val, ""
+    return val
 end fn
 
 fn main()
-    dim res = middle() on error e
-        print(e)
+    on error e
+        print(e.code, ": ", e.msg)
         return
     end error
+    dim res = middle()
 end fn
 )";
 
@@ -351,26 +541,28 @@ end fn
 TEST_CASE("Emitter generates C++17 error bubbling and defer for extern declarations", "[emitter]") {
     const std::string code = R"(
 pub extern type SQL_DB
-pub extern fn connect(path as str) as SQL_DB, err
+pub extern fn connect(path as str) as SQL_DB can error
 pub extern fn SQL_close(db as SQL_DB)
 
-fn process_data() as int, err
-    ' Implicit bubble (needs if (!err.empty()) return ...)
+fn process_data() as int can error
+    ' Implicit bubble (needs if (cb_has_error(_err1)) return ...)
     dim db = connect("data.db")
     
     defer
         SQL_close(db)
     end defer
     
-    return 100, ""
+    return 100
 end fn
 
 fn main()
-    ' Explicit handling
-    dim records = process_data() on error e
-        print("Crash prevented: " & e)
+    ' Explicit scope-level handling
+    on error e
+        print("Crash prevented (" & e.code & "): " & e.msg)
         return
     end error
+
+    dim records = process_data()
 end fn
 )";
 
@@ -378,18 +570,42 @@ end fn
     REQUIRE(res.ok);
 
     const std::string& cpp = res.cpp_code;
+    CHECK(cpp.find("struct cb_error {") != std::string::npos);
     CHECK(cpp.find("template <typename F> struct _DeferTask { F f; ~_DeferTask() { f(); } };") != std::string::npos);
     CHECK(cpp.find("template <typename F> _DeferTask<F> _defer(F f) { return {f}; }") != std::string::npos);
-    CHECK(cpp.find("std::tuple<int, std::string> process_data()") != std::string::npos);
-    CHECK(cpp.find(R"(auto [_val1, _err1] = connect(std::string("data.db"));)") != std::string::npos);
-    CHECK(cpp.find("if (!_err1.empty()) return { {}, _err1 };") != std::string::npos);
+    CHECK(cpp.find("std::tuple<int, cb_error> process_data()") != std::string::npos);
+    CHECK(cpp.find(R"raw(auto [_val1, _err1] = connect(std::string("data.db"));)raw") != std::string::npos);
+    CHECK(cpp.find("if (cb_has_error(_err1)) return { {}, _err1 };") != std::string::npos);
     CHECK(cpp.find("auto db = _val1;") != std::string::npos);
     CHECK(cpp.find("auto _defer_1 = _defer([&]() {") != std::string::npos);
     CHECK(cpp.find("SQL_close(db);") != std::string::npos);
-    CHECK(cpp.find(R"(return { 100, std::string("") };)") != std::string::npos);
-    CHECK(cpp.find("auto [_val2, e] = process_data();") != std::string::npos);
-    CHECK(cpp.find("if (!e.empty()) {") != std::string::npos);
+    CHECK(cpp.find(R"raw(return { 100, cb_error{"", 0} };)raw") != std::string::npos);
+    CHECK(cpp.find("auto [_val2, _err2] = process_data();") != std::string::npos);
+    CHECK(cpp.find("if (cb_has_error(_err2)) {") != std::string::npos);
+    CHECK(cpp.find("cb_error e = _err2;") != std::string::npos);
     CHECK(cpp.find("auto records = _val2;") != std::string::npos);
+
+    SECTION("Emits variadic print, cb_to_str auto-coercion on &, and inclusive for..to loop") {
+        const std::string ergonomic_code = R"(
+fn main()
+    dim score = 95
+    dim ok = true
+    for i = 0 to 3
+        print("i=", i, " ok=", ok)
+    end for
+    print("Score: " & score)
+    print(score & " points")
+    print()
+end fn
+)";
+        const auto erg_res = cb::transpile_source(ergonomic_code, "ergonomic.cb");
+        REQUIRE(erg_res.ok);
+        CHECK(erg_res.cpp_code.find("for (int i = 0; i <= 3; i += 1) {") != std::string::npos);
+        CHECK(erg_res.cpp_code.find(R"raw((std::cout << std::string("i=") << i << std::string(" ok=") << cb_to_str(ok) << std::endl);)raw") != std::string::npos);
+        CHECK(erg_res.cpp_code.find(R"raw((std::string("Score: ") + cb_to_str(score)))raw") != std::string::npos);
+        CHECK(erg_res.cpp_code.find(R"raw((cb_to_str(score) + std::string(" points")))raw") != std::string::npos);
+        CHECK(erg_res.cpp_code.find("(std::cout << std::endl);") != std::string::npos);
+    }
 }
 
 TEST_CASE("End-to-end fixture: multi-file modules, mutability, and UFCS", "[e2e]") {

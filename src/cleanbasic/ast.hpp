@@ -158,14 +158,12 @@ struct ExprNode {
 // ==========================================
 
 struct ErrorBlock {
-    bool has_error_block = false;
-    uint32_t line = 1;
-    uint32_t col = 1;
     std::string err_var;
     std::vector<StmtId> body;
 };
 
 using ErrBlock = ErrorBlock;
+using OnErrorStmt = ErrorBlock;
 
 struct VarAssignment {
     std::vector<ExprId> targets;
@@ -174,7 +172,6 @@ struct VarAssignment {
     bool has_declared_type = false;
     TypeId declared_type = INVALID_ID;
     ExprId value = INVALID_ID;
-    ErrorBlock error_block;
     bool implicit_bubble = false;
 };
 
@@ -182,7 +179,6 @@ using VarDecl = VarAssignment;
 
 struct ExprStmt {
     ExprId expr = INVALID_ID;
-    ErrorBlock error_block;
     bool implicit_bubble = false;
 };
 
@@ -209,6 +205,7 @@ struct RangeSpec {
     ExprId end = INVALID_ID;
     bool has_step = false;
     ExprId step = INVALID_ID;
+    bool inclusive = false;
 };
 
 struct ForStmt {
@@ -257,6 +254,7 @@ using StmtVariant = std::variant<
     IfStmt,
     ForStmt,
     SelectStmt,
+    ErrorBlock,
     DeferStmt,
     SpawnStmt,
     ReturnStmt,

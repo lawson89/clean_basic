@@ -24,32 +24,34 @@ TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "en
                   | ["pub"] "extern" "type" Identifier NEWLINE
 FieldDecl       ::= Identifier "as" Type NEWLINE
 
-FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] NEWLINE
+FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] ["can error"] NEWLINE
                     Statement*
                     "end fn" NEWLINE
-                  | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] NEWLINE
+                  | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] ["can error"] NEWLINE
 ParamList       ::= Param ("," Param)*
 Param           ::= ["byref"] Identifier "as" ["byref"] Type
-ReturnList      ::= "err"
-                  | Type ("," Type)* ["," "err"]
+ReturnList      ::= Type ("," Type)*
 
 Statement       ::= VarDecl | Assignment | ExprStmt
                   | IfStmt | ForStmt | SelectStmt
-                  | DeferBlock | SpawnStmt | ReturnStmt | BreakStmt
+                  | ErrBlock | DeferBlock | SpawnStmt | ReturnStmt | BreakStmt
 
-VarDecl         ::= ("dim" | "const") IdentList ["as" Type] "=" Expr [ErrBlock] NEWLINE
-Assignment      ::= ExprList "=" Expr [ErrBlock] NEWLINE
-ExprStmt        ::= Expr [ErrBlock] NEWLINE
+VarDecl         ::= ("dim" | "const") IdentList ["as" Type] "=" Expr NEWLINE
+Assignment      ::= ExprList "=" Expr NEWLINE
+ExprStmt        ::= Expr NEWLINE
 
-ErrBlock        ::= "on error" Identifier NEWLINE Statement* "end error"
-DeferBlock      ::= "defer" NEWLINE Statement* "end defer"
+ErrBlock        ::= "on error" Identifier NEWLINE Statement* "end error" NEWLINE
+DeferBlock      ::= "defer" NEWLINE Statement* "end defer" NEWLINE
 
 IfStmt          ::= "if" Expr NEWLINE Statement*
                     ("else if" Expr NEWLINE Statement*)*
                     ["else" NEWLINE Statement*]
                     "end if" NEWLINE
 
-ForStmt         ::= "for" Identifier "in" Expr ".." Expr ["step" Expr] NEWLINE
+ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
+                    Statement*
+                    "end for" NEWLINE
+                  | "for" Identifier "in" Expr ".." Expr ["step" Expr] NEWLINE
                     Statement*
                     "end for" NEWLINE
                   | "for" IdentList "in" Expr NEWLINE
@@ -84,10 +86,10 @@ PrimaryExpr     ::= Allocation | Literal | QualifiedIdent | "(" Expr ")"
 Allocation      ::= "new" Type [ "(" [InitFieldList] ")" | "{" [InitFieldList] "}" ]
 
 CallArgList     ::= CallArg ("," CallArg)* [","]
-CallArg         ::= [Identifier (":" | "=")] Expr
+CallArg         ::= [Identifier "="] Expr
 
 InitFieldList   ::= InitField ("," InitField)* [","]
-InitField       ::= [Identifier (":" | "=")] Expr
+InitField       ::= [Identifier "="] Expr
 
 Literal         ::= NumberLiteral | StringLiteral | FStringLiteral
                   | "true" | "false" | "null"
@@ -138,7 +140,7 @@ end fn
 
 ### 2. Memory, Mutability, and UFCS
 
-CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Structs can be initialized using either parenthesized `Type(field=val)` or brace `Type{field: val}` syntax.
+CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Named arguments and struct fields strictly use `=` (`Type(field=val)`).
 
 **main.cb (The Executable Module)**
 
@@ -173,11 +175,11 @@ end fn
 
 ### 3. Error Handling & Cleanup (Static Bubbling & Defer)
 
-CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `err` to their return signature (`as T, err` or `as err`). The transpiler handles the rest.
+CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `can error` to their signature (`fn connect(ip as str) as Connection can error` or void `fn validate_port(port as int) can error`), raise errors with `error("...", [code=N])`, and use tuple-free `return` statements.
 
-1. **Implicit Bubbling:** If a fallible function calls another fallible function, the transpiler automatically injects an invisible check that returns the error upward. The developer writes zero error boilerplate.
-2. **Deterministic Cleanup:** The `defer ... end defer` block guarantees execution when the function exits (via a successful return or an error bubble), mapping cleanly to C++ RAII scope-exit destructors.
-3. **Explicit Handling:** If an infallible function calls a fallible one, it *must* handle the error using the `on error <ident> ... end error` block, binding the error string to a local variable.
+1. **Implicit Bubbling:** If a fallible function calls another fallible function (with no active `on error` handler in scope), the transpiler automatically injects an invisible check that returns the error upward. The developer writes zero error boilerplate.
+2. **Deterministic Cleanup (`defer`):** The `defer ... end defer` block guarantees execution when the function exits (via a successful return, an `on error` return, or an error bubble), mapping cleanly to C++ RAII scope-exit destructors in LIFO order.
+3. **Scope-Level Explicit Handling (`on error`):** An `on error <ident> ... end error` statement block registers an active error handler for all subsequent fallible statements in the enclosing scope (mirroring `defer ... end defer`). It binds `<ident>` as a structured `err` value with `.msg` (`str`) and `.code` (`int`) fields, and its body *must* terminate with an explicit control-flow exit (`return`, `error(...)`, or `break`). Pairing `defer` with `on error` provides clean `try / catch / finally` semantics without C++ exception overhead.
 
 **network.cb (Error Bubbling & Cleanup)**
 
@@ -186,21 +188,21 @@ pub type Connection
     id as int
 end type
 
-' Function can return a Connection OR an error
-pub fn connect(ip as str) as Connection, err
+' Function can return a Connection OR raise a structured error
+pub fn connect(ip as str) as Connection can error
     if ip == ""
-        return Connection(id=0), "IP cannot be empty"
+        error("IP cannot be empty", code=408)
     end if
     
-    return Connection(id=1), ""
+    return Connection(id=1)
 end fn
 
 pub fn close_connection(conn as Connection)
     ' Cleanup logic goes here
 end fn
 
-' Declares 'err', enabling implicit error bubbling
-pub fn process_network() as int, err
+' Declares 'can error', enabling implicit error bubbling
+pub fn process_network() as int can error
     ' IMPLICIT BUBBLING: If connect fails, process_network immediately returns the error.
     dim conn = connect("192.168.1.1")
     
@@ -209,24 +211,25 @@ pub fn process_network() as int, err
         close_connection(conn)
     end defer
     
-    return 100, ""
+    return 100
 end fn
 
 fn start_server()
-    ' start_server() cannot fail. The developer MUST handle the error here.
-    ' The 'on error' block keeps the logic perfectly flat against the margin.
-    dim records = process_network() on error e
-        print("Failed to start server: " & e)
+    ' start_server() cannot fail. Register a scope-level 'on error' handler
+    ' before calling any fallible functions in this scope.
+    on error e
+        print("Failed to start server (code=" & e.code & "): " & e.msg)
         return
     end error
-    
-    print("Connected and processed " & str(records) & " records.")
+
+    dim records = process_network()
+    print("Connected and processed ", records, " records.")
 end fn
 ```
 
 ### 4. Control Flow, Ranges, and Built-in Containers
 
-CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`, `chan[T]`), interpolated strings (`f"..."`), `for ... in start..end [step s]` range and collection loops, and `select case` pattern blocks.
+CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`, `chan[T]`), interpolated strings (`f"..."`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and `select case` pattern blocks.
 
 ```vb
 fn demo_containers() as int
@@ -234,13 +237,17 @@ fn demo_containers() as int
     dim scores as dict[str, int] = {"alice": 100, "bob": 85}
 
     dim total = 0
-    for i in 0..3 step 1
+    for i = 0 to 2 step 1
         total = total + nums[i]
+    end for
+
+    for x in nums
+        print("Item: ", x)
     end for
 
     select case scores["alice"]
         case 100
-            print(f"Perfect score, total={total}")
+            print("Perfect score, total=" & total)
         case else
             print("Keep trying")
     end select

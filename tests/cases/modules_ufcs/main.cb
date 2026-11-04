@@ -34,7 +34,7 @@ fn main()
     ' Auto-dereference shared pointer on UFCS byref call:
     heap_hero.heal(max_potion)
 
-    print(stack_hero.name & ": " & str(stack_hero.health))
-    print(heap_hero.name & ": " & str(heap_hero.health))
-    print("uses_left: " & str(uses_left))
+    print(stack_hero.name, ": ", stack_hero.health)
+    print(heap_hero.name & ": " & heap_hero.health)
+    print("uses_left: " & uses_left)
 end fn

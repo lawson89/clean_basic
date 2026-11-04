@@ -19,7 +19,7 @@ fn main()
     dim empty_nums as list[int] = []
     dim scores as dict[str, int] = {"alice": 42, "bob": 17}
 
-    print("first: " & str(test_containers(nums, scores)))
-    print("empty: " & str(test_containers(empty_nums, scores)))
-    print("score: " & str(scores["alice"]))
+    print("first: " & test_containers(nums, scores))
+    print("empty: ", test_containers(empty_nums, scores))
+    print("score: " & scores["alice"])
 end fn
