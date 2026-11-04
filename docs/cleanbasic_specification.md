@@ -24,20 +24,19 @@ TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "en
                   | ["pub"] "extern" "type" Identifier NEWLINE
 FieldDecl       ::= Identifier "as" Type NEWLINE
 
-FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] ["can error"] NEWLINE
+FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
                     Statement*
                     "end fn" NEWLINE
-                  | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" ReturnList] ["can error"] NEWLINE
+                  | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
 ParamList       ::= Param ("," Param)*
-Param           ::= ["byref"] Identifier "as" ["byref"] Type
-ReturnList      ::= Type ("," Type)*
+Param           ::= ["byref"] Identifier "as" Type
 
 Statement       ::= VarDecl | Assignment | ExprStmt
                   | IfStmt | ForStmt | SelectStmt
-                  | ErrBlock | DeferBlock | SpawnStmt | ReturnStmt | BreakStmt
+                  | ErrBlock | DeferBlock | ReturnStmt | BreakStmt
 
-VarDecl         ::= ("dim" | "const") IdentList ["as" Type] "=" Expr NEWLINE
-Assignment      ::= ExprList "=" Expr NEWLINE
+VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr NEWLINE
+Assignment      ::= Expr "=" Expr NEWLINE
 ExprStmt        ::= Expr NEWLINE
 
 ErrBlock        ::= "on error" Identifier NEWLINE Statement* "end error" NEWLINE
@@ -51,9 +50,6 @@ IfStmt          ::= "if" Expr NEWLINE Statement*
 ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
                     Statement*
                     "end for" NEWLINE
-                  | "for" Identifier "in" Expr ".." Expr ["step" Expr] NEWLINE
-                    Statement*
-                    "end for" NEWLINE
                   | "for" IdentList "in" Expr NEWLINE
                     Statement*
                     "end for" NEWLINE
@@ -63,8 +59,7 @@ SelectStmt      ::= "select case" Expr NEWLINE
                     ["case else" NEWLINE Statement*]
                     "end select" NEWLINE
 
-SpawnStmt       ::= "spawn" FnCall NEWLINE
-ReturnStmt      ::= "return" [ExprList] NEWLINE
+ReturnStmt      ::= "return" [Expr] NEWLINE
 BreakStmt       ::= "break" NEWLINE
 
 Expr            ::= OrExpr
@@ -79,11 +74,10 @@ UnaryExpr       ::= ("+" | "-") UnaryExpr | PostfixExpr
 PostfixExpr     ::= PrimaryExpr
                     ( "." Identifier
                     | "[" Expr "]"
-                    | "(" [CallArgList] ")"
-                    | "{" [InitFieldList] "}" )*
+                    | "(" [CallArgList] ")" )*
 
 PrimaryExpr     ::= Allocation | Literal | QualifiedIdent | "(" Expr ")"
-Allocation      ::= "new" Type [ "(" [InitFieldList] ")" | "{" [InitFieldList] "}" ]
+Allocation      ::= "new" Type [ "(" [InitFieldList] ")" ]
 
 CallArgList     ::= CallArg ("," CallArg)* [","]
 CallArg         ::= [Identifier "="] Expr
@@ -91,7 +85,7 @@ CallArg         ::= [Identifier "="] Expr
 InitFieldList   ::= InitField ("," InitField)* [","]
 InitField       ::= [Identifier "="] Expr
 
-Literal         ::= NumberLiteral | StringLiteral | FStringLiteral
+Literal         ::= NumberLiteral | StringLiteral
                   | "true" | "false" | "null"
                   | ListLiteral | DictLiteral
 ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
@@ -102,11 +96,9 @@ Type            ::= ["shared"] BaseType
 BaseType        ::= "int" | "float" | "str" | "bool"
                   | "list" "[" Type "]"
                   | "dict" "[" Type "," Type "]"
-                  | "chan" "[" Type "]"
                   | QualifiedIdent
 
 IdentList       ::= Identifier ("," Identifier)*
-ExprList        ::= Expr ("," Expr)*
 QualifiedIdent  ::= Identifier ("." Identifier)*
 ```
 
@@ -114,9 +106,13 @@ QualifiedIdent  ::= Identifier ("." Identifier)*
 
 ## 3. Code Examples
 
-### 1. Multi-File Modules & Imports
+### 1. Multi-File Modules, Nested Folder Imports & Visibility
 
 Every `.cb` file is implicitly a module. Everything is private by default; the `pub` keyword exposes types, aliases, and functions to the importer.
+* **Relative Nested Paths:** Module imports (`import "entities/hero.cb"` or `import "../shared/math.cb"`) are resolved relative to the directory of the importing file and normalized to canonical project-relative module IDs (e.g., `entities/hero`).
+* **Default & Explicit Aliases (`as`):** `import "entities/hero.cb"` binds the module alias `hero` (the filename stem). When two modules share a stem (e.g., `ui/button.cb` and `input/button.cb`), use `import "input/button.cb" as input_btn` to disambiguate. Duplicate module aliases in the same file are rejected at compile time.
+* **Diamond Deduplication & Circular Import Rejection:** Shared dependencies imported across multiple modules are loaded once in topological order; circular import chains are rejected with a clear diagnostic.
+* **Module Scoping & C++ Name Mangling:** Imported non-`extern` declarations are emitted with collision-free mangled C++ identifiers (`cb_<sanitized_module_id>__<name>`, e.g., `cb_entities_hero__Player`), allowing different modules to define identical struct or function names without C++ ODR or redefinition conflicts.
 
 **player.cb (The Library Module)**
 
@@ -137,7 +133,6 @@ fn calculate_max_health() as int
     return 100
 end fn
 ```
-
 ### 2. Memory, Mutability, and UFCS
 
 CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Named arguments and struct fields strictly use `=` (`Type(field=val)`).
@@ -229,7 +224,7 @@ end fn
 
 ### 4. Control Flow, Ranges, and Built-in Containers
 
-CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`, `chan[T]`), interpolated strings (`f"..."`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and `select case` pattern blocks.
+CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and `select case` pattern blocks.
 
 ```vb
 fn demo_containers() as int
@@ -247,7 +242,7 @@ fn demo_containers() as int
 
     select case scores["alice"]
         case 100
-            print("Perfect score, total=" & total)
+            print("Perfect score! Total: " & total)
         case else
             print("Keep trying")
     end select
