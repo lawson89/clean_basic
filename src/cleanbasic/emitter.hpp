@@ -100,6 +100,7 @@ inline std::string map_base_type(
     if (t.name == "err") return "cb_error";
     if (t.name == "void") return "void";
     if (t.name == "auto") return "auto";
+    if (t.name == "cptr") return "void*";
     if (t.name == "list") {
         std::string elem = "int";
         if (!t.type_args.empty()) {
@@ -148,9 +149,6 @@ inline std::string map_type_node(
 ) {
     const std::string base_cpp = map_base_type(arena, symbols, current_module_id, resolved);
     std::string cpp = base_cpp;
-    if (resolved.is_shared) {
-        cpp = "std::shared_ptr<" + base_cpp + ">";
-    }
     if (is_byref) {
         cpp += "&";
     }
@@ -175,9 +173,6 @@ inline std::string default_value_for_type(
     TypeId tid
 ) {
     const TypeNode resolved = resolve_alias_node(arena, symbols, current_module_id, tid);
-    if (resolved.is_shared) {
-        return "nullptr";
-    }
     if (resolved.name == "int") return "0";
     if (resolved.name == "float") return "0.0";
     if (resolved.name == "bool") return "false";
@@ -253,35 +248,26 @@ inline std::vector<std::string> order_struct_fields(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view type_name,
-    const std::vector<InitField>& provided_fields,
+    const std::vector<ExprId>& pos_args,
+    const std::vector<NamedArg>& named_args,
     const std::unordered_map<std::string, VarSymbol>& scope,
     EmitterState& state
 ) {
     const std::string type_key = resolve_symbol_key(symbols, state.current_module_id, type_name);
 
-    bool has_named = false;
-    for (const auto& f : provided_fields) {
-        if (f.has_name) {
-            has_named = true;
-            break;
-        }
-    }
-
     const auto it = symbols.types.find(type_key);
-    if (!has_named || it == symbols.types.end() || it->second.field_order.empty()) {
+    if (named_args.empty() || it == symbols.types.end() || it->second.field_order.empty()) {
         std::vector<std::string> rendered;
-        rendered.reserve(provided_fields.size());
-        for (const auto& f : provided_fields) {
-            rendered.push_back(emit_expr(arena, symbols, f.value, scope, state));
+        rendered.reserve(pos_args.size());
+        for (const auto& a : pos_args) {
+            rendered.push_back(emit_expr(arena, symbols, a, scope, state));
         }
         return rendered;
     }
 
     std::unordered_map<std::string, ExprId> named_map;
-    for (const auto& f : provided_fields) {
-        if (f.has_name) {
-            named_map[f.name] = f.value;
-        }
+    for (const auto& na : named_args) {
+        named_map[na.name] = na.value;
     }
 
     std::vector<std::string> ordered;
@@ -302,7 +288,6 @@ inline std::vector<std::string> emit_call_args_with_autoderef(
     const GlobalSymbolTable& symbols,
     const std::vector<ExprId>& pos_args,
     const std::vector<NamedArg>& named_args,
-    const std::optional<FnSymbol>& fn_sym,
     const std::unordered_map<std::string, VarSymbol>& scope,
     EmitterState& state
 ) {
@@ -318,17 +303,6 @@ inline std::vector<std::string> emit_call_args_with_autoderef(
     for (size_t idx = 0; idx < all_exprs.size(); ++idx) {
         const ExprId arg_expr_id = all_exprs[idx];
         std::string arg_cpp = emit_expr(arena, symbols, arg_expr_id, scope, state);
-        const TypeId arg_tid = infer_expr_type(arena, arg_expr_id, symbols, scope, state.current_module_id);
-        const TypeNode& arg_type = get_type_node(arena, arg_tid);
-
-        if (fn_sym.has_value() && idx < fn_sym->params.size()) {
-            const Param& param = fn_sym->params[idx];
-            const TypeNode param_type = resolve_alias_node(arena, symbols, fn_sym->module_id, param.type_id);
-
-            if (arg_type.is_shared && !param_type.is_shared) {
-                arg_cpp = "(*" + arg_cpp + ")";
-            }
-        }
         rendered.push_back(std::move(arg_cpp));
     }
     return rendered;
@@ -417,63 +391,15 @@ inline std::string emit_expr(
 
     if (std::holds_alternative<FieldAccess>(payload)) {
         const auto& faccess = std::get<FieldAccess>(payload);
-        const TypeId target_tid = infer_expr_type(arena, faccess.target, symbols, scope, state.current_module_id);
-        const bool is_shared = (target_tid < arena.types.size()) && arena.types[target_tid].is_shared;
         const std::string target_cpp = emit_expr(arena, symbols, faccess.target, scope, state);
-        std::string accessor = ".";
-        if (is_shared) {
-            accessor = "->";
-        }
-        return target_cpp + accessor + faccess.field_name;
+        return target_cpp + "." + faccess.field_name;
     }
 
     if (std::holds_alternative<IndexAccess>(payload)) {
         const auto& iaccess = std::get<IndexAccess>(payload);
-        const TypeId target_tid = infer_expr_type(arena, iaccess.target, symbols, scope, state.current_module_id);
-        const bool is_shared = (target_tid < arena.types.size()) && arena.types[target_tid].is_shared;
         const std::string target_cpp = emit_expr(arena, symbols, iaccess.target, scope, state);
         const std::string idx_cpp = emit_expr(arena, symbols, iaccess.index, scope, state);
-        if (is_shared) {
-            return "(*" + target_cpp + ")[" + idx_cpp + "]";
-        }
         return target_cpp + "[" + idx_cpp + "]";
-    }
-
-    if (std::holds_alternative<NewExpr>(payload)) {
-        const auto& nexpr = std::get<NewExpr>(payload);
-        const TypeNode res_node = resolve_alias_node(arena, symbols, state.current_module_id, nexpr.target_type);
-        const std::string base_cpp = map_base_type(arena, symbols, state.current_module_id, res_node);
-
-        if (res_node.name == "chan") {
-            std::string elem_cpp = "int";
-            if (!res_node.type_args.empty()) {
-                elem_cpp = map_type(arena, symbols, state.current_module_id, res_node.type_args[0]);
-            }
-            return "std::make_shared<Channel<" + elem_cpp + ">>()";
-        }
-
-        if (nexpr.args.empty()) {
-            return "std::make_shared<" + base_cpp + ">()";
-        }
-
-        const std::string lookup_type_name = resolve_symbol_key(symbols, state.current_module_id, res_node.name);
-        const auto it = symbols.types.find(lookup_type_name);
-        if (it != symbols.types.end() && !it->second.field_order.empty()) {
-            const auto ordered = order_struct_fields(arena, symbols, lookup_type_name, nexpr.args, scope, state);
-            std::string joined;
-            for (size_t i = 0; i < ordered.size(); ++i) {
-                if (i > 0) joined += ", ";
-                joined += ordered[i];
-            }
-            return "std::make_shared<" + base_cpp + ">(" + base_cpp + "{" + joined + "})";
-        }
-
-        std::string joined;
-        for (size_t i = 0; i < nexpr.args.size(); ++i) {
-            if (i > 0) joined += ", ";
-            joined += emit_expr(arena, symbols, nexpr.args[i].value, scope, state);
-        }
-        return "std::make_shared<" + base_cpp + ">(" + joined + ")";
     }
 
     if (std::holds_alternative<ListLiteral>(payload)) {
@@ -505,22 +431,7 @@ inline std::string emit_expr(
         }
         const auto struct_opt = resolve_struct_constructor(arena, call, symbols, state.current_module_id, scope);
         if (struct_opt.has_value()) {
-            std::vector<InitField> init_fields;
-            init_fields.reserve(call.args.size() + call.named_args.size());
-            for (const ExprId pos_arg : call.args) {
-                InitField f{};
-                f.has_name = false;
-                f.value = pos_arg;
-                init_fields.push_back(std::move(f));
-            }
-            for (const auto& na : call.named_args) {
-                InitField f{};
-                f.has_name = true;
-                f.name = na.name;
-                f.value = na.value;
-                init_fields.push_back(std::move(f));
-            }
-            const auto ordered = order_struct_fields(arena, symbols, struct_opt->key, init_fields, scope, state);
+            const auto ordered = order_struct_fields(arena, symbols, struct_opt->key, call.args, call.named_args, scope, state);
             std::string joined;
             for (size_t i = 0; i < ordered.size(); ++i) {
                 if (i > 0) joined += ", ";
@@ -535,12 +446,7 @@ inline std::string emit_expr(
 
             if (fn_name == "len" && call.args.size() == 1) {
                 const ExprId arg_expr = call.args[0];
-                const TypeId arg_type_id = infer_expr_type(arena, arg_expr, symbols, scope, state.current_module_id);
-                const bool is_shared = (arg_type_id < arena.types.size()) && arena.types[arg_type_id].is_shared;
                 const std::string arg_cpp = emit_expr(arena, symbols, arg_expr, scope, state);
-                if (is_shared) {
-                    return "static_cast<int>(" + arg_cpp + "->size())";
-                }
                 return "static_cast<int>(" + arg_cpp + ".size())";
             }
 
@@ -577,7 +483,7 @@ inline std::string emit_expr(
 
             const std::optional<FnSymbol> fn_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
             const auto rendered_args = emit_call_args_with_autoderef(
-                arena, symbols, call.args, call.named_args, fn_sym, scope, state
+                arena, symbols, call.args, call.named_args, scope, state
             );
             std::string joined;
             for (size_t i = 0; i < rendered_args.size(); ++i) {
@@ -602,7 +508,7 @@ inline std::string emit_expr(
                 if (is_module_alias_in_scope(symbols, state.current_module_id, tgt_ident.name, scope, target_mod_id)) {
                     const std::optional<FnSymbol> fn_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
                     const auto rendered_args = emit_call_args_with_autoderef(
-                        arena, symbols, call.args, call.named_args, fn_sym, scope, state
+                        arena, symbols, call.args, call.named_args, scope, state
                     );
                     std::string joined;
                     for (size_t i = 0; i < rendered_args.size(); ++i) {
@@ -621,9 +527,6 @@ inline std::string emit_expr(
             const TypeNode& recv_type = get_type_node(arena, recv_tid);
             const std::string recv_cpp = emit_expr(arena, symbols, receiver, scope, state);
             std::string accessor = ".";
-            if (recv_type.is_shared) {
-                accessor = "->";
-            }
 
             if (recv_type.name == "list" && (method_name == "push" || method_name == "append") && !call.args.empty()) {
                 const std::string arg_cpp = emit_expr(arena, symbols, call.args[0], scope, state);
@@ -648,7 +551,7 @@ inline std::string emit_expr(
                     all_pos.push_back(a);
                 }
                 const auto rendered_args = emit_call_args_with_autoderef(
-                    arena, symbols, all_pos, call.named_args, ufcs_sym, scope, state
+                    arena, symbols, all_pos, call.named_args, scope, state
                 );
                 std::string joined;
                 for (size_t i = 0; i < rendered_args.size(); ++i) {
@@ -742,7 +645,7 @@ inline std::string build_error_bubble_return(
     std::string args;
     const TypeNode tnode = resolve_alias_node(arena, symbols, current_module_id, fn.return_type);
     std::string elem = "{}";
-    if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
+    if (symbols.types.find(tnode.name) != symbols.types.end()) {
         elem = map_type_node(arena, symbols, current_module_id, tnode) + "{}";
     }
     args = elem + ", " + std::string(err_var);
@@ -1006,7 +909,7 @@ inline void emit_return(
     if (stmt.value < arena.exprs.size() && std::holds_alternative<NullLiteral>(arena.exprs[stmt.value].payload) &&
         fn.return_type != INVALID_ID) {
         const TypeNode tnode = resolve_alias_node(arena, symbols, state.current_module_id, fn.return_type);
-        if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
+        if (symbols.types.find(tnode.name) != symbols.types.end()) {
             val_cpp = map_type_node(arena, symbols, state.current_module_id, tnode) + "{}";
         }
     }
@@ -1110,9 +1013,6 @@ inline void emit_stmt(
             std::string iter_cpp = emit_expr(arena, symbols, for_s.iterable, scope, state);
             const TypeId iter_tid = infer_expr_type(arena, for_s.iterable, symbols, scope, state.current_module_id);
             const TypeNode& iter_type = get_type_node(arena, iter_tid);
-            if (iter_type.is_shared) {
-                iter_cpp = "(*" + iter_cpp + ")";
-            }
 
             auto loop_scope = scope;
             auto loop_decls = declared_vars;
@@ -1151,39 +1051,34 @@ inline void emit_stmt(
 
     if (std::holds_alternative<SelectStmt>(payload)) {
         const auto& sel_s = std::get<SelectStmt>(payload);
-        const std::string sel_tmp = next_temp(state, "_select");
         const std::string target_cpp = emit_expr(arena, symbols, sel_s.target, scope, state);
-        emit_line(state, "auto " + sel_tmp + " = " + target_cpp + ";");
+        emit_line(state, "switch (" + target_cpp + ") {");
+        state.indent_level += 1;
 
         for (size_t idx = 0; idx < sel_s.cases.size(); ++idx) {
             const auto& c = sel_s.cases[idx];
             const std::string match_cpp = emit_expr(arena, symbols, c.match_expr, scope, state);
-            std::string kw = "} else if";
-            if (idx == 0) {
-                kw = "if";
-            }
-            emit_line(state, kw + " (" + sel_tmp + " == " + match_cpp + ") {");
+            emit_line(state, "case " + match_cpp + ": {");
             state.indent_level += 1;
             auto c_decls = declared_vars;
             emit_stmt_list(arena, symbols, fn, c.body, scope, c_decls, state);
+            emit_line(state, "break;");
             state.indent_level -= 1;
+            emit_line(state, "}");
         }
 
         if (sel_s.has_case_else) {
-            if (!sel_s.cases.empty()) {
-                emit_line(state, "} else {");
-            } else {
-                emit_line(state, "{");
-            }
+            emit_line(state, "default: {");
             state.indent_level += 1;
             auto else_decls = declared_vars;
             emit_stmt_list(arena, symbols, fn, sel_s.case_else, scope, else_decls, state);
+            emit_line(state, "break;");
             state.indent_level -= 1;
-        }
-
-        if (!sel_s.cases.empty() || sel_s.has_case_else) {
             emit_line(state, "}");
         }
+
+        state.indent_level -= 1;
+        emit_line(state, "}");
         return;
     }
 

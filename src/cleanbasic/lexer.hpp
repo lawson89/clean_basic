@@ -41,7 +41,7 @@ inline bool is_digit_char(char c) {
 inline bool is_single_keyword(std::string_view word) {
     static const std::vector<std::string_view> keywords = {
         "import", "as", "pub", "extern", "alias", "type", "fn",
-        "dim", "const", "byref", "shared", "new", "if", "else",
+        "dim", "const", "byref", "if", "else",
         "for", "in", "to", "step", "case", "defer", "on", "error",
         "return", "break", "and", "or", "not",
         "true", "false", "null"
@@ -56,7 +56,7 @@ inline bool is_single_keyword(std::string_view word) {
 
 inline bool is_type_keyword(std::string_view word) {
     static const std::vector<std::string_view> type_kws = {
-        "int", "float", "bool", "str", "list", "dict", "err"
+        "int", "float", "bool", "str", "list", "dict", "err", "cptr"
     };
     for (const auto& tk : type_kws) {
         if (word == tk) {

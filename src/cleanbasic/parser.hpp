@@ -195,49 +195,6 @@ inline void parse_call_arguments(
     }
 }
 
-inline std::vector<InitField> parse_init_fields(
-    const std::vector<Token>& tokens,
-    ParserState& state,
-    std::string_view closing_kind
-) {
-    std::vector<InitField> fields;
-    if (check(tokens, state, closing_kind)) {
-        return fields;
-    }
-
-    while (!state.has_error) {
-        const Token& peek_tok = peek_offset(tokens, state, 1);
-        if (check(tokens, state, "IDENT") && peek_tok.kind == "COLON") {
-            set_parse_error(state, peek_tok, "Named struct fields must use '=' (e.g., field=value), not ':'");
-            return fields;
-        }
-        if (check(tokens, state, "IDENT") && peek_tok.kind == "ASSIGN") {
-            const Token name_tok = match(tokens, state, "IDENT");
-            state.pos += 1;  // consume '='
-            const ExprId val = parse_expr(tokens, state);
-            InitField f{};
-            f.has_name = true;
-            f.name = name_tok.value;
-            f.value = val;
-            fields.push_back(std::move(f));
-        } else {
-            InitField f{};
-            f.has_name = false;
-            f.value = parse_expr(tokens, state);
-            fields.push_back(std::move(f));
-        }
-
-        if (check(tokens, state, "COMMA")) {
-            match(tokens, state, "COMMA");
-            if (check(tokens, state, closing_kind)) {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-    return fields;
-}
 
 // ==========================================
 // Expression Precedence Climbing
@@ -251,20 +208,6 @@ inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state
     }
     const Token& tok = current(tokens, state);
 
-    if (check(tokens, state, "KEYWORD", "new")) {
-        const Token new_tok = match(tokens, state, "KEYWORD", "new");
-        const TypeId target_type = parse_type(tokens, state);
-        std::vector<InitField> args;
-        if (check(tokens, state, "LPAREN")) {
-            match(tokens, state, "LPAREN");
-            args = parse_init_fields(tokens, state, "RPAREN");
-            match(tokens, state, "RPAREN");
-        }
-        NewExpr node{};
-        node.target_type = target_type;
-        node.args = std::move(args);
-        return add_expr(state.arena, new_tok.line, new_tok.col, std::move(node));
-    }
 
     if (check(tokens, state, "NUMBER")) {
         const Token num_tok = match(tokens, state, "NUMBER");
@@ -508,12 +451,6 @@ inline TypeId parse_type(const std::vector<Token>& tokens, ParserState& state) {
         return INVALID_ID;
     }
     const Token start = current(tokens, state);
-    bool is_shared = false;
-    if (check(tokens, state, "KEYWORD", "shared")) {
-        match(tokens, state, "KEYWORD", "shared");
-        is_shared = true;
-    }
-
     const Token tok = match_ident_or_type(tokens, state);
     std::string type_name = tok.value;
 
@@ -541,7 +478,6 @@ inline TypeId parse_type(const std::vector<Token>& tokens, ParserState& state) {
     node.col = start.col;
     node.name = std::move(type_name);
     node.type_args = std::move(type_args);
-    node.is_shared = is_shared;
     return add_type(state.arena, std::move(node));
 }
 
@@ -1062,7 +998,7 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
     }
     match(tokens, state, "RPAREN");
 
-    TypeId return_type = find_or_add_type(state.arena, "void", {}, false, start_tok.line, start_tok.col);
+    TypeId return_type = find_or_add_type(state.arena, "void", {}, start_tok.line, start_tok.col);
     bool is_fallible = false;
     if (check(tokens, state, "KEYWORD", "as")) {
         match(tokens, state, "KEYWORD", "as");

@@ -26,7 +26,6 @@ struct TypeNode {
     uint32_t col = 1;
     std::string name;
     std::vector<TypeId> type_args;
-    bool is_shared = false;
 };
 
 struct Param {
@@ -101,17 +100,6 @@ struct FuncCall {
     std::vector<NamedArg> named_args;
 };
 
-struct InitField {
-    bool has_name = false;
-    std::string name;
-    ExprId value = INVALID_ID;
-};
-
-struct NewExpr {
-    TypeId target_type = INVALID_ID;
-    std::vector<InitField> args;
-};
-
 struct ListLiteral {
     std::vector<ExprId> elements;
 };
@@ -136,7 +124,6 @@ using ExprVariant = std::variant<
     FieldAccess,
     IndexAccess,
     FuncCall,
-    NewExpr,
     ListLiteral,
     DictLiteral
 >;
@@ -344,13 +331,11 @@ inline bool is_void_type(const AstArena& arena, TypeId tid) {
 inline TypeId find_type(
     const AstArena& arena,
     std::string_view name,
-    const std::vector<TypeId>& type_args = {},
-    bool is_shared = false
+    const std::vector<TypeId>& type_args = {}
 ) {
     for (size_t i = 0; i < arena.types.size(); ++i) {
         const TypeNode& existing = arena.types[i];
         if (existing.name == name &&
-            existing.is_shared == is_shared &&
             existing.type_args == type_args) {
             return static_cast<TypeId>(i);
         }
@@ -359,7 +344,7 @@ inline TypeId find_type(
 }
 
 inline TypeId add_type(AstArena& arena, TypeNode node) {
-    const TypeId existing = find_type(arena, node.name, node.type_args, node.is_shared);
+    const TypeId existing = find_type(arena, node.name, node.type_args);
     if (existing != INVALID_ID) {
         return existing;
     }
@@ -372,11 +357,10 @@ inline TypeId find_or_add_type(
     AstArena& arena,
     std::string_view name,
     const std::vector<TypeId>& type_args = {},
-    bool is_shared = false,
     uint32_t line = 1,
     uint32_t col = 1
 ) {
-    const TypeId existing = find_type(arena, name, type_args, is_shared);
+    const TypeId existing = find_type(arena, name, type_args);
     if (existing != INVALID_ID) {
         return existing;
     }
@@ -385,7 +369,6 @@ inline TypeId find_or_add_type(
     node.col = col;
     node.name = std::string(name);
     node.type_args = type_args;
-    node.is_shared = is_shared;
     const TypeId id = static_cast<TypeId>(arena.types.size());
     arena.types.push_back(std::move(node));
     return id;

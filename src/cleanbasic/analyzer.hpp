@@ -72,6 +72,7 @@ struct GlobalSymbolTable {
     TypeId type_null = INVALID_ID;
     TypeId type_any = INVALID_ID;
     TypeId type_err = INVALID_ID;
+    TypeId type_cptr = INVALID_ID;
 };
 
 struct AnalysisResult {
@@ -90,6 +91,7 @@ inline void register_builtins(AstArena& arena, GlobalSymbolTable& symbols) {
     const TypeId null_t = find_or_add_type(arena, "null");
     const TypeId any_t = find_or_add_type(arena, "any");
     const TypeId err_t = find_or_add_type(arena, "err");
+    const TypeId cptr_t = find_or_add_type(arena, "cptr");
 
     symbols.type_int = int_t;
     symbols.type_float = float_t;
@@ -100,6 +102,7 @@ inline void register_builtins(AstArena& arena, GlobalSymbolTable& symbols) {
     symbols.type_null = null_t;
     symbols.type_any = any_t;
     symbols.type_err = err_t;
+    symbols.type_cptr = cptr_t;
 
     TypeSymbol err_type{};
     err_type.name = "err";
@@ -146,7 +149,7 @@ inline void register_builtins(AstArena& arena, GlobalSymbolTable& symbols) {
 inline bool is_builtin_type_name(std::string_view name) {
     return name == "int" || name == "float" || name == "str" || name == "bool" ||
            name == "void" || name == "auto" || name == "null" || name == "any" ||
-           name == "err" || name == "list" || name == "dict";
+           name == "err" || name == "list" || name == "dict" || name == "cptr";
 }
 
 inline bool is_builtin_symbol_name(std::string_view name) {
@@ -447,7 +450,6 @@ inline TypeNode resolve_alias_node(
         next_node.col = curr.col;
         next_node.name = aliased.name;
         next_node.type_args = aliased.type_args;
-        next_node.is_shared = curr.is_shared || aliased.is_shared;
         curr = std::move(next_node);
     }
 
@@ -474,7 +476,7 @@ inline TypeId resolve_alias(
         return tid;
     }
     const TypeNode resolved_node = resolve_alias_node(arena, symbols, current_module_id, tid);
-    const TypeId found = find_type(arena, resolved_node.name, resolved_node.type_args, resolved_node.is_shared);
+    const TypeId found = find_type(arena, resolved_node.name, resolved_node.type_args);
     if (found != INVALID_ID) {
         return found;
     }
@@ -524,15 +526,6 @@ inline TypeId infer_expr_type(
         return symbols.type_auto;
     }
 
-    if (std::holds_alternative<NewExpr>(payload)) {
-        const auto& nexpr = std::get<NewExpr>(payload);
-        const TypeNode resolved = resolve_alias_node(arena, symbols, current_module_id, nexpr.target_type);
-        const TypeId shared_tid = find_type(arena, resolved.name, resolved.type_args, true);
-        if (shared_tid != INVALID_ID) {
-            return shared_tid;
-        }
-        return resolve_alias(arena, symbols, current_module_id, nexpr.target_type);
-    }
 
     if (std::holds_alternative<ListLiteral>(payload)) {
         const auto& llit = std::get<ListLiteral>(payload);
@@ -540,7 +533,7 @@ inline TypeId infer_expr_type(
         if (!llit.elements.empty()) {
             elem_type = infer_expr_type(arena, llit.elements[0], symbols, scope, current_module_id);
         }
-        const TypeId list_tid = find_type(arena, "list", {elem_type}, false);
+        const TypeId list_tid = find_type(arena, "list", {elem_type});
         if (list_tid != INVALID_ID) {
             return list_tid;
         }
@@ -555,7 +548,7 @@ inline TypeId infer_expr_type(
             k_type = infer_expr_type(arena, dlit.entries[0].key, symbols, scope, current_module_id);
             v_type = infer_expr_type(arena, dlit.entries[0].value, symbols, scope, current_module_id);
         }
-        const TypeId dict_tid = find_type(arena, "dict", {k_type, v_type}, false);
+        const TypeId dict_tid = find_type(arena, "dict", {k_type, v_type});
         if (dict_tid != INVALID_ID) {
             return dict_tid;
         }
@@ -602,7 +595,7 @@ inline TypeId infer_expr_type(
         }
         const auto struct_opt = resolve_struct_constructor(arena, call, symbols, current_module_id, scope);
         if (struct_opt.has_value()) {
-            const TypeId raw_tid = find_type(arena, struct_opt->key, {}, false);
+            const TypeId raw_tid = find_type(arena, struct_opt->key, {});
             if (raw_tid != INVALID_ID) {
                 return raw_tid;
             }
@@ -867,13 +860,6 @@ inline void validate_expr_calls(
         return;
     }
 
-    if (std::holds_alternative<NewExpr>(payload)) {
-        const auto& nexpr = std::get<NewExpr>(payload);
-        for (const auto& arg : nexpr.args) {
-            validate_expr_calls(state, arena, fn, arg.value, symbols, scope, false);
-        }
-        return;
-    }
 
     if (std::holds_alternative<ListLiteral>(payload)) {
         const auto& llit = std::get<ListLiteral>(payload);
@@ -993,7 +979,7 @@ inline void analyze_stmt(
         auto err_scope = scope;
         TypeId err_t = symbols.type_err;
         if (err_t == INVALID_ID) {
-            err_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "err", {}, false});
+            err_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "err", {}});
         }
         err_scope[err_block.err_var] = VarSymbol{err_block.err_var, err_t, false, false};
         analyze_block(state, arena, fn, err_block.body, symbols, err_scope, false);
@@ -1038,7 +1024,7 @@ inline void analyze_stmt(
                 validate_expr_calls(state, arena, fn, for_stmt.range_spec.step, symbols, scope, false);
             }
             if (!for_stmt.loop_vars.empty()) {
-                const TypeId int_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}, false});
+                const TypeId int_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}});
                 scope[for_stmt.loop_vars[0]] = VarSymbol{for_stmt.loop_vars[0], int_t, false};
             }
         } else if (for_stmt.has_iterable) {
@@ -1057,7 +1043,7 @@ inline void analyze_stmt(
                     }
                 } else {
                     for (const auto& lv : for_stmt.loop_vars) {
-                        const TypeId auto_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "auto", {}, false});
+                        const TypeId auto_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "auto", {}});
                         scope[lv] = VarSymbol{lv, auto_t, false};
                     }
                 }
@@ -1072,6 +1058,12 @@ inline void analyze_stmt(
         const auto& sel_stmt = std::get<SelectStmt>(payload);
         validate_expr_calls(state, arena, fn, sel_stmt.target, symbols, scope, false);
         if (state.has_error) return;
+
+        const TypeId target_tid = infer_expr_type(arena, sel_stmt.target, symbols, scope, state.module_id);
+        if (target_tid != symbols.type_int && target_tid != symbols.type_bool) {
+            set_analyzer_error(state, stmt_node.line, stmt_node.col, "select case expression must be of type 'int' or 'bool'");
+            return;
+        }
 
         for (const auto& scase : sel_stmt.cases) {
             validate_expr_calls(state, arena, fn, scase.match_expr, symbols, scope, false);
@@ -1239,8 +1231,7 @@ inline AnalysisResult analyze_program(
             const std::string key_copy = tsym.key;
             result.symbols.types[key_copy] = std::move(tsym);
             // Pre-register canonical struct types in the arena
-            find_or_add_type(arena, key_copy, {}, false);
-            find_or_add_type(arena, key_copy, {}, true);
+            find_or_add_type(arena, key_copy, {});
         }
     }
 

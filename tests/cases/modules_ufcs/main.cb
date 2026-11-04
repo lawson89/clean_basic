@@ -4,12 +4,10 @@
 ' EXPECT_CPP: int uses_left = 3;
 ' EXPECT_CPP: uses_left = 2;
 ' EXPECT_CPP: cb_player__Player stack_hero = cb_player__Player{std::string("Alice"), 10};
-' EXPECT_CPP: std::shared_ptr<cb_player__Player> heap_hero = std::make_shared<cb_player__Player>(cb_player__Player{std::string("Bob"), 10});
 ' EXPECT_CPP: cb_player__heal(stack_hero, max_potion);
-' EXPECT_CPP: cb_player__heal((*heap_hero), max_potion);
 ' FORBID_CPP: throw
+' FORBID_CPP: std::make_shared
 ' EXPECT_OUT: Alice: 60
-' EXPECT_OUT: Bob: 60
 ' EXPECT_OUT: uses_left: 2
 
 import "player.cb"
@@ -25,16 +23,9 @@ fn main()
     ' MEMORY: Stack allocation (flat, fast, zero cleanup needed)
     dim stack_hero = player.Player(name="Alice", health=10)
 
-    ' MEMORY: Heap allocation (requires 'shared' and 'new')
-    dim heap_hero as shared player.Player = new player.Player(name="Bob", health=10)
-
     ' UFCS (Unified Function Call Syntax):
     stack_hero.heal(max_potion)
 
-    ' Auto-dereference shared pointer on UFCS byref call:
-    heap_hero.heal(max_potion)
-
     print(stack_hero.name, ": ", stack_hero.health)
-    print(heap_hero.name & ": " & heap_hero.health)
     print("uses_left: " & uses_left)
 end fn

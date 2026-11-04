@@ -206,7 +206,7 @@ TEST_CASE("Parser builds AST for control flow and types and reports syntax error
     const std::string code = R"(
 pub alias ScoreMap = dict[str, list[int]]
 
-fn compute(byref items as list[int], tag as shared str) as int
+fn compute(byref items as list[int], tag as str) as int
     dim total = 0
     for i = 0 to 10 step 2
         select case i
@@ -235,8 +235,6 @@ end fn
     CHECK(fn_decl.name == "compute");
     REQUIRE(fn_decl.params.size() == 2);
     CHECK(fn_decl.params[0].is_byref);
-    const cb::TypeId param1_tid = fn_decl.params[1].type_id;
-    CHECK(parse_res.arena.types[param1_tid].is_shared);
 
     SECTION("Parses classic BASIC 'for i = start to end' with inclusive RangeSpec") {
         const std::string for_to_code = R"(fn loop_test() as int
@@ -666,7 +664,7 @@ end fn
 
         size_t int_count = 0;
         for (const auto& tnode : parse_im.arena.types) {
-            if (tnode.name == "int" && !tnode.is_shared && tnode.type_args.empty()) {
+            if (tnode.name == "int" && tnode.type_args.empty()) {
                 int_count += 1;
             }
         }
@@ -838,6 +836,10 @@ TEST_CASE("End-to-end fixture: struct initialization and field access", "[e2e]")
 
 TEST_CASE("End-to-end fixture: for range loop with step", "[e2e]") {
     cb::test_e2e::run_e2e_fixture("for_range_step", "tests/cases/for_range_step.cb");
+}
+
+TEST_CASE("End-to-end fixture: cptr interop", "[e2e]") {
+    cb::test_e2e::run_e2e_fixture("cptr_interop", "tests/cases/cptr_interop.cb");
 }
 
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
