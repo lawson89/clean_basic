@@ -842,6 +842,10 @@ TEST_CASE("End-to-end fixture: cptr interop", "[e2e]") {
     cb::test_e2e::run_e2e_fixture("cptr_interop", "tests/cases/cptr_interop.cb");
 }
 
+
+TEST_CASE("End-to-end fixture: fibonacci sequence", "[e2e]") {
+    cb::test_e2e::run_e2e_fixture("fibonacci", "tests/cases/fibonacci.cb");
+}
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
     const std::string artifact_dir = "build/test_artifacts/cli_build";
     std::error_code ec;
