@@ -1,0 +1,23 @@
+' EXPECT_CPP: struct cb_entities_hero__Unit {
+' EXPECT_CPP: struct cb_entities_enemy__Unit {
+' EXPECT_CPP: void cb_entities_hero__boost(cb_entities_hero__Unit& u, int amount)
+' EXPECT_CPP: void cb_entities_enemy__boost(cb_entities_enemy__Unit& u, int amount)
+' EXPECT_CPP: int cb_combat_battle__clash(cb_entities_hero__Unit& h, cb_entities_enemy__Unit& e, int dmg)
+' FORBID_CPP: throw
+' EXPECT_OUT: Paladin HP: 105
+' EXPECT_OUT: Goblin HP: 25, Threat: 4
+
+import "entities/hero.cb"
+import "entities/enemy.cb" as foe
+import "combat/battle.cb"
+
+fn main()
+    dim h = hero.Unit(name="Paladin", hp=100)
+    dim g = foe.Unit(name="Goblin", hp=40, threat=3)
+
+    g.boost(10)
+    dim rem_hp = battle.clash(h, g, 25)
+
+    print(h.name & " HP: " & h.hp)
+    print(g.name & " HP: " & rem_hp & ", Threat: " & g.threat)
+end fn

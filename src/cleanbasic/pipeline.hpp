@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace cb {
@@ -30,6 +31,145 @@ struct BuildFileResult {
     DiagnosticError error;
 };
 
+struct ModuleLoaderState {
+    std::string root_base_dir = ".";
+    std::vector<std::string> loading_stack;
+    std::vector<std::string> loading_path_stack;
+    std::unordered_set<std::string> loaded_modules;
+    std::vector<DeclId> merged_decls;
+    DiagnosticError error;
+    bool has_error = false;
+};
+
+inline bool is_in_stack(const std::vector<std::string>& stack, std::string_view item) {
+    for (const auto& s : stack) {
+        if (s == item) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline std::string parent_dir_of(std::string_view file_path) {
+    const size_t slash_idx = file_path.find_last_of('/');
+    if (slash_idx != std::string_view::npos) {
+        return std::string(file_path.substr(0, slash_idx));
+    }
+    return ".";
+}
+
+inline void load_module_declarations_recursive(
+    AstArena& arena,
+    const std::vector<DeclId>& decl_ids,
+    std::string_view current_module_id,
+    std::string_view current_file_path,
+    ModuleLoaderState& loader
+) {
+    if (loader.has_error) {
+        return;
+    }
+
+    const std::string current_dir = parent_dir_of(current_file_path);
+
+    for (const DeclId did : decl_ids) {
+        if (did >= arena.decls.size()) {
+            continue;
+        }
+        arena.decls[did].module_id = std::string(current_module_id);
+        arena.decls[did].file_name = std::string(current_file_path);
+
+        if (std::holds_alternative<ImportDecl>(arena.decls[did].payload)) {
+            auto imp = std::get<ImportDecl>(arena.decls[did].payload);
+            if (imp.kind == "module" && imp.target.size() > 3 &&
+                imp.target.substr(imp.target.size() - 3) == ".cb") {
+                std::string target_module_id = resolve_module_id(current_module_id, imp.target);
+
+                std::string candidate_path = current_dir + "/" + imp.target;
+                std::ifstream mod_in(candidate_path);
+                if (!mod_in.is_open()) {
+                    candidate_path = loader.root_base_dir + "/" + imp.target;
+                    mod_in.open(candidate_path);
+                    if (mod_in.is_open()) {
+                        target_module_id = resolve_module_id("", imp.target);
+                    }
+                }
+                if (!mod_in.is_open()) {
+                    candidate_path = imp.target;
+                    mod_in.open(candidate_path);
+                    if (mod_in.is_open()) {
+                        target_module_id = resolve_module_id("", imp.target);
+                    }
+                }
+
+                imp.resolved_module_id = target_module_id;
+                arena.decls[did].payload = imp;
+
+                const std::string norm_candidate = normalize_rel_path(candidate_path);
+                if (is_in_stack(loader.loading_stack, target_module_id) ||
+                    (mod_in.is_open() && is_in_stack(loader.loading_path_stack, norm_candidate))) {
+                    loader.has_error = true;
+                    loader.error = make_error(
+                        "ImportError",
+                        "Circular module import detected when importing '" + imp.target + "' (module '" + target_module_id + "').",
+                        std::string(current_file_path),
+                        arena.decls[did].line,
+                        arena.decls[did].col
+                    );
+                    if (mod_in.is_open()) {
+                        mod_in.close();
+                    }
+                }
+
+                if (mod_in.is_open()) {
+                    if (loader.loaded_modules.find(target_module_id) == loader.loaded_modules.end()) {
+                        std::ostringstream mod_ss;
+                        mod_ss << mod_in.rdbuf();
+                        mod_in.close();
+
+                        const auto mod_lex = tokenize(mod_ss.str(), candidate_path);
+                        if (!mod_lex.ok) {
+                            loader.has_error = true;
+                            loader.error = mod_lex.error;
+                            return;
+                        }
+                        auto mod_parse = parse_tokens_with_arena(
+                            mod_lex.tokens,
+                            std::move(arena),
+                            candidate_path
+                        );
+                        if (!mod_parse.ok) {
+                            arena = std::move(mod_parse.arena);
+                            loader.has_error = true;
+                            loader.error = mod_parse.error;
+                            return;
+                        }
+                        arena = std::move(mod_parse.arena);
+
+                        loader.loading_stack.push_back(target_module_id);
+                        loader.loading_path_stack.push_back(norm_candidate);
+                        load_module_declarations_recursive(
+                            arena,
+                            mod_parse.program.declarations,
+                            target_module_id,
+                            candidate_path,
+                            loader
+                        );
+                        loader.loading_path_stack.pop_back();
+                        loader.loading_stack.pop_back();
+                        if (loader.has_error) {
+                            return;
+                        }
+                        loader.loaded_modules.insert(target_module_id);
+                    } else {
+                        mod_in.close();
+                    }
+                }
+            }
+        }
+        loader.merged_decls.push_back(did);
+    }
+}
+
 inline TranspileResult transpile_source(
     std::string_view source,
     std::string_view file_name = "main.cb"
@@ -44,51 +184,24 @@ inline TranspileResult transpile_source(
         return TranspileResult{false, "", {}, parse_res.error};
     }
 
-    std::string base_dir = ".";
-    const size_t slash_idx = file_name.find_last_of('/');
-    if (slash_idx != std::string_view::npos) {
-        base_dir = std::string(file_name.substr(0, slash_idx));
+    ModuleLoaderState loader{};
+    loader.root_base_dir = parent_dir_of(file_name);
+    const std::string norm_root = normalize_rel_path(file_name);
+    if (!norm_root.empty()) {
+        loader.loading_path_stack.push_back(norm_root);
     }
 
-    std::vector<DeclId> merged_decls;
-    for (const DeclId did : parse_res.program.declarations) {
-        if (did < parse_res.arena.decls.size() &&
-            std::holds_alternative<ImportDecl>(parse_res.arena.decls[did].payload)) {
-            const auto imp = std::get<ImportDecl>(parse_res.arena.decls[did].payload);
-            if (imp.kind == "module" && imp.target.size() > 3 &&
-                imp.target.substr(imp.target.size() - 3) == ".cb") {
-                std::string candidate_path = base_dir + "/" + imp.target;
-                std::ifstream mod_in(candidate_path);
-                if (!mod_in.is_open()) {
-                    candidate_path = imp.target;
-                    mod_in.open(candidate_path);
-                }
-                if (mod_in.is_open()) {
-                    std::ostringstream mod_ss;
-                    mod_ss << mod_in.rdbuf();
-                    mod_in.close();
-                    const auto mod_lex = tokenize(mod_ss.str(), candidate_path);
-                    if (!mod_lex.ok) {
-                        return TranspileResult{false, "", {}, mod_lex.error};
-                    }
-                    auto mod_parse = parse_tokens_with_arena(
-                        mod_lex.tokens,
-                        std::move(parse_res.arena),
-                        candidate_path
-                    );
-                    if (!mod_parse.ok) {
-                        return TranspileResult{false, "", {}, mod_parse.error};
-                    }
-                    parse_res.arena = std::move(mod_parse.arena);
-                    for (const DeclId mdid : mod_parse.program.declarations) {
-                        merged_decls.push_back(mdid);
-                    }
-                }
-            }
-        }
-        merged_decls.push_back(did);
+    load_module_declarations_recursive(
+        parse_res.arena,
+        parse_res.program.declarations,
+        "",
+        file_name,
+        loader
+    );
+    if (loader.has_error) {
+        return TranspileResult{false, "", {}, loader.error};
     }
-    parse_res.program.declarations = std::move(merged_decls);
+    parse_res.program.declarations = std::move(loader.merged_decls);
 
     auto ana_res = analyze_program(parse_res.arena, parse_res.program);
     if (!ana_res.ok) {

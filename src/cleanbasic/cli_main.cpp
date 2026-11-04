@@ -82,7 +82,10 @@ inline int run_cli(std::string_view prog_name, const std::vector<std::string_vie
 
     if (args.show_help || !args.ok) {
         print_usage(prog_name);
-        return args.ok ? 0 : 1;
+        if (args.ok) {
+            return 0;
+        }
+        return 1;
     }
 
     const BuildFileResult res = build_file(
@@ -112,7 +115,10 @@ inline int run_cli(std::string_view prog_name, const std::vector<std::string_vie
 }  // namespace cb
 
 int main(int argc, char** argv) {
-    const std::string_view prog_name = (argc > 0) ? std::string_view(argv[0]) : "cleanbasic";
+    std::string_view prog_name = "cleanbasic";
+    if (argc > 0) {
+        prog_name = std::string_view(argv[0]);
+    }
     std::vector<std::string_view> raw_args;
     if (argc > 1) {
         raw_args.reserve(static_cast<size_t>(argc - 1));

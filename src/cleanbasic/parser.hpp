@@ -140,9 +140,6 @@ inline void expect_newline_or_eof(const std::vector<Token>& tokens, ParserState&
 
 inline std::string strip_quotes(std::string_view raw) {
     constexpr char single_quote = static_cast<char>(39);
-    if (raw.size() >= 3 && raw[0] == 'f' && (raw[1] == '"' || raw[1] == single_quote) && raw.back() == raw[1]) {
-        return std::string(raw.substr(2, raw.size() - 3));
-    }
     if (raw.size() >= 2 && (raw.front() == '"' || raw.front() == single_quote) && raw.back() == raw.front()) {
         return std::string(raw.substr(1, raw.size() - 2));
     }
@@ -242,27 +239,11 @@ inline std::vector<InitField> parse_init_fields(
     return fields;
 }
 
-inline std::string flatten_type_expr_name(const AstArena& arena, ExprId expr_id, ParserState& state, const Token& tok) {
-    if (expr_id >= arena.exprs.size()) {
-        set_parse_error(state, tok, "Invalid struct type name in initializer");
-        return "";
-    }
-    const auto& payload = arena.exprs[expr_id].payload;
-    if (std::holds_alternative<Identifier>(payload)) {
-        return std::get<Identifier>(payload).name;
-    }
-    if (std::holds_alternative<FieldAccess>(payload)) {
-        const auto& fa = std::get<FieldAccess>(payload);
-        std::string base = flatten_type_expr_name(arena, fa.target, state, tok);
-        return base + "." + fa.field_name;
-    }
-    set_parse_error(state, tok, "Invalid struct type name in initializer");
-    return "";
-}
-
 // ==========================================
 // Expression Precedence Climbing
 // ==========================================
+
+inline ExprId parse_expr(const std::vector<Token>& tokens, ParserState& state);
 
 inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state) {
     if (state.has_error) {
@@ -278,10 +259,6 @@ inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state
             match(tokens, state, "LPAREN");
             args = parse_init_fields(tokens, state, "RPAREN");
             match(tokens, state, "RPAREN");
-        } else if (check(tokens, state, "LBRACE")) {
-            match(tokens, state, "LBRACE");
-            args = parse_init_fields(tokens, state, "RBRACE");
-            match(tokens, state, "RBRACE");
         }
         NewExpr node{};
         node.target_type = target_type;
@@ -301,18 +278,8 @@ inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state
         const Token str_tok = match(tokens, state, "STRING");
         StringLiteral node{};
         node.value = strip_quotes(str_tok.value);
-        node.is_fstring = false;
         return add_expr(state.arena, str_tok.line, str_tok.col, std::move(node));
     }
-
-    if (check(tokens, state, "F_STRING")) {
-        const Token f_tok = match(tokens, state, "F_STRING");
-        StringLiteral node{};
-        node.value = strip_quotes(f_tok.value);
-        node.is_fstring = true;
-        return add_expr(state.arena, f_tok.line, f_tok.col, std::move(node));
-    }
-
     if (check(tokens, state, "KEYWORD", "true") || check(tokens, state, "KEYWORD", "false")) {
         const Token b_tok = match(tokens, state, "KEYWORD");
         BoolLiteral node{};
@@ -421,21 +388,6 @@ inline ExprId parse_postfix(const std::vector<Token>& tokens, ParserState& state
             node.args = std::move(pos_args);
             node.named_args = std::move(named_args);
             expr = add_expr(state.arena, p_tok.line, p_tok.col, std::move(node));
-        } else if (check(tokens, state, "LBRACE")) {
-            if (expr < state.arena.exprs.size() &&
-                (std::holds_alternative<Identifier>(state.arena.exprs[expr].payload) ||
-                 std::holds_alternative<FieldAccess>(state.arena.exprs[expr].payload))) {
-                const Token b_tok = match(tokens, state, "LBRACE");
-                const std::string type_name = flatten_type_expr_name(state.arena, expr, state, b_tok);
-                std::vector<InitField> fields = parse_init_fields(tokens, state, "RBRACE");
-                match(tokens, state, "RBRACE");
-                StructInit node{};
-                node.type_name = type_name;
-                node.fields = std::move(fields);
-                expr = add_expr(state.arena, b_tok.line, b_tok.col, std::move(node));
-            } else {
-                break;
-            }
         } else {
             break;
         }
@@ -572,7 +524,7 @@ inline TypeId parse_type(const std::vector<Token>& tokens, ParserState& state) {
     }
 
     std::vector<TypeId> type_args;
-    if ((type_name == "list" || type_name == "chan") && check(tokens, state, "LBRACKET")) {
+    if (type_name == "list" && check(tokens, state, "LBRACKET")) {
         match(tokens, state, "LBRACKET");
         type_args.push_back(parse_type(tokens, state));
         match(tokens, state, "RBRACKET");
@@ -608,19 +560,10 @@ inline StmtId parse_assignment_or_expr_stmt(const std::vector<Token>& tokens, Pa
         const bool is_dim = (decl_kw.value == "dim");
         const bool is_const = (decl_kw.value == "const");
 
-        std::vector<ExprId> targets;
         const Token first_ident = match(tokens, state, "IDENT");
         Identifier first_id_node{};
         first_id_node.name = first_ident.value;
-        targets.push_back(add_expr(state.arena, first_ident.line, first_ident.col, std::move(first_id_node)));
-
-        while (check(tokens, state, "COMMA")) {
-            match(tokens, state, "COMMA");
-            const Token next_ident = match(tokens, state, "IDENT");
-            Identifier next_id_node{};
-            next_id_node.name = next_ident.value;
-            targets.push_back(add_expr(state.arena, next_ident.line, next_ident.col, std::move(next_id_node)));
-        }
+        const ExprId target_expr = add_expr(state.arena, first_ident.line, first_ident.col, std::move(first_id_node));
 
         bool has_declared_type = false;
         TypeId decl_type = INVALID_ID;
@@ -635,7 +578,7 @@ inline StmtId parse_assignment_or_expr_stmt(const std::vector<Token>& tokens, Pa
         expect_newline_or_eof(tokens, state);
 
         VarAssignment stmt{};
-        stmt.targets = std::move(targets);
+        stmt.target = target_expr;
         stmt.is_dim = is_dim;
         stmt.is_const = is_const;
         stmt.has_declared_type = has_declared_type;
@@ -646,20 +589,13 @@ inline StmtId parse_assignment_or_expr_stmt(const std::vector<Token>& tokens, Pa
 
     const ExprId first_expr = parse_expr(tokens, state);
 
-    if (check(tokens, state, "COMMA") || check(tokens, state, "ASSIGN")) {
-        std::vector<ExprId> targets;
-        targets.push_back(first_expr);
-        while (check(tokens, state, "COMMA")) {
-            match(tokens, state, "COMMA");
-            targets.push_back(parse_expr(tokens, state));
-        }
-
+    if (check(tokens, state, "ASSIGN")) {
         match(tokens, state, "ASSIGN");
         const ExprId val_expr = parse_expr(tokens, state);
         expect_newline_or_eof(tokens, state);
 
         VarAssignment stmt{};
-        stmt.targets = std::move(targets);
+        stmt.target = first_expr;
         stmt.has_declared_type = false;
         stmt.declared_type = INVALID_ID;
         stmt.value = val_expr;
@@ -759,17 +695,12 @@ inline StmtId parse_for_stmt(const std::vector<Token>& tokens, ParserState& stat
     bool has_iterable = false;
     ExprId iterable = INVALID_ID;
 
-    if (check(tokens, state, "ASSIGN") || check(tokens, state, "OP", "=")) {
+    if (check(tokens, state, "ASSIGN")) {
         if (loop_vars.size() != 1) {
             set_parse_error(state, start, "Range 'for' loop only supports a single loop variable");
             return INVALID_ID;
         }
-        Token eq_tok{};
-        if (check(tokens, state, "ASSIGN")) {
-            eq_tok = match(tokens, state, "ASSIGN");
-        } else {
-            eq_tok = match(tokens, state, "OP", "=");
-        }
+        const Token eq_tok = match(tokens, state, "ASSIGN");
         const ExprId start_expr = parse_expr(tokens, state);
         match(tokens, state, "KEYWORD", "to");
         const ExprId end_expr = parse_expr(tokens, state);
@@ -790,34 +721,8 @@ inline StmtId parse_for_stmt(const std::vector<Token>& tokens, ParserState& stat
         range_spec.inclusive = true;
     } else {
         match(tokens, state, "KEYWORD", "in");
-        const ExprId first_expr = parse_expr(tokens, state);
-
-        if (check(tokens, state, "RANGE")) {
-            if (loop_vars.size() != 1) {
-                set_parse_error(state, start, "Range 'for' loop only supports a single loop variable");
-                return INVALID_ID;
-            }
-            const Token r_tok = match(tokens, state, "RANGE");
-            const ExprId end_expr = parse_expr(tokens, state);
-            bool has_step = false;
-            ExprId step_expr = INVALID_ID;
-            if (check(tokens, state, "KEYWORD", "step")) {
-                match(tokens, state, "KEYWORD", "step");
-                has_step = true;
-                step_expr = parse_expr(tokens, state);
-            }
-            range_spec.has_range = true;
-            range_spec.line = r_tok.line;
-            range_spec.col = r_tok.col;
-            range_spec.start = first_expr;
-            range_spec.end = end_expr;
-            range_spec.has_step = has_step;
-            range_spec.step = step_expr;
-            range_spec.inclusive = false;
-        } else {
-            has_iterable = true;
-            iterable = first_expr;
-        }
+        has_iterable = true;
+        iterable = parse_expr(tokens, state);
     }
 
     expect_newline_or_eof(tokens, state);
@@ -949,34 +854,15 @@ inline StmtId parse_defer_stmt(const std::vector<Token>& tokens, ParserState& st
     return add_stmt(state.arena, start.line, start.col, std::move(stmt));
 }
 
-inline StmtId parse_spawn_stmt(const std::vector<Token>& tokens, ParserState& state) {
-    const Token start = match(tokens, state, "KEYWORD", "spawn");
-    const ExprId expr = parse_expr(tokens, state);
-    if (expr >= state.arena.exprs.size() || !std::holds_alternative<FuncCall>(state.arena.exprs[expr].payload)) {
-        set_parse_error(state, start, "'spawn' requires a function call expression");
-        return INVALID_ID;
-    }
-    expect_newline_or_eof(tokens, state);
-
-    SpawnStmt stmt{};
-    stmt.call_expr = expr;
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
-}
-
 inline StmtId parse_return_stmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "return");
-    std::vector<ExprId> values;
+    ReturnStmt stmt{};
     if (!check(tokens, state, "NEWLINE") && !check(tokens, state, "EOF")) {
-        values.push_back(parse_expr(tokens, state));
-        while (check(tokens, state, "COMMA")) {
-            match(tokens, state, "COMMA");
-            values.push_back(parse_expr(tokens, state));
-        }
+        stmt.has_value = true;
+        stmt.value = parse_expr(tokens, state);
     }
     expect_newline_or_eof(tokens, state);
 
-    ReturnStmt stmt{};
-    stmt.values = std::move(values);
     return add_stmt(state.arena, start.line, start.col, std::move(stmt));
 }
 
@@ -1008,9 +894,6 @@ inline StmtId parse_statement(const std::vector<Token>& tokens, ParserState& sta
     }
     if (check(tokens, state, "KEYWORD", "defer")) {
         return parse_defer_stmt(tokens, state);
-    }
-    if (check(tokens, state, "KEYWORD", "spawn")) {
-        return parse_spawn_stmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "return")) {
         return parse_return_stmt(tokens, state);
@@ -1154,10 +1037,6 @@ inline Param parse_param(const std::vector<Token>& tokens, ParserState& state) {
     }
     const Token name_tok = match(tokens, state, "IDENT");
     match(tokens, state, "KEYWORD", "as");
-    if (check(tokens, state, "KEYWORD", "byref")) {
-        match(tokens, state, "KEYWORD", "byref");
-        is_byref = true;
-    }
     const TypeId t_node = parse_type(tokens, state);
     Param p{};
     p.line = name_tok.line;
@@ -1166,33 +1045,6 @@ inline Param parse_param(const std::vector<Token>& tokens, ParserState& state) {
     p.type_id = t_node;
     p.is_byref = is_byref;
     return p;
-}
-
-inline void parse_return_list(
-    const std::vector<Token>& tokens,
-    ParserState& state,
-    std::vector<TypeId>& return_types,
-    bool& returns_err
-) {
-    return_types.clear();
-    returns_err = false;
-
-    if (check(tokens, state, "TYPE_KW", "err")) {
-        match(tokens, state, "TYPE_KW", "err");
-        returns_err = true;
-        return;
-    }
-
-    return_types.push_back(parse_type(tokens, state));
-    while (check(tokens, state, "COMMA")) {
-        match(tokens, state, "COMMA");
-        if (check(tokens, state, "TYPE_KW", "err")) {
-            match(tokens, state, "TYPE_KW", "err");
-            returns_err = true;
-            break;
-        }
-        return_types.push_back(parse_type(tokens, state));
-    }
 }
 
 inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state, bool is_pub, bool is_extern, const Token& start_tok) {
@@ -1210,15 +1062,20 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
     }
     match(tokens, state, "RPAREN");
 
-    std::vector<TypeId> return_types;
-    bool returns_err = false;
+    TypeId return_type = find_or_add_type(state.arena, "void", {}, false, start_tok.line, start_tok.col);
+    bool is_fallible = false;
     if (check(tokens, state, "KEYWORD", "as")) {
         match(tokens, state, "KEYWORD", "as");
-        parse_return_list(tokens, state, return_types, returns_err);
+        if (check(tokens, state, "TYPE_KW", "err")) {
+            match(tokens, state, "TYPE_KW", "err");
+            is_fallible = true;
+        } else {
+            return_type = parse_type(tokens, state);
+        }
     }
     if (check(tokens, state, "KEYWORD", "can error")) {
         match(tokens, state, "KEYWORD", "can error");
-        returns_err = true;
+        is_fallible = true;
     }
     expect_newline_or_eof(tokens, state);
 
@@ -1227,9 +1084,8 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
         FnDecl decl{};
         decl.name = name_tok.value;
         decl.params = std::move(params);
-        decl.return_types = std::move(return_types);
-        decl.returns_err = returns_err;
-        decl.is_fallible = returns_err;
+        decl.return_type = return_type;
+        decl.is_fallible = is_fallible;
         decl.body = std::move(body);
         decl.is_pub = is_pub;
         decl.is_extern = true;
@@ -1251,9 +1107,8 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
     FnDecl decl{};
     decl.name = name_tok.value;
     decl.params = std::move(params);
-    decl.return_types = std::move(return_types);
-    decl.returns_err = returns_err;
-    decl.is_fallible = returns_err;
+    decl.return_type = return_type;
+    decl.is_fallible = is_fallible;
     decl.body = std::move(body);
     decl.is_pub = is_pub;
     decl.is_extern = is_extern;
@@ -1347,32 +1202,7 @@ inline ParseResult parse_tokens_with_arena(
 }
 
 inline ParseResult parse_tokens(const std::vector<Token>& tokens, std::string_view file_name = "main.cb") {
-    ParserState state{};
-    state.file_name = std::string(file_name);
-
-    Program prog{};
-    prog.file_name = state.file_name;
-
-    skip_newlines(tokens, state);
-    while (!state.has_error && !check(tokens, state, "EOF")) {
-        const DeclId decl_id = parse_top_level_decl(tokens, state);
-        if (state.has_error) {
-            break;
-        }
-        prog.declarations.push_back(decl_id);
-        skip_newlines(tokens, state);
-    }
-
-    ParseResult result{};
-    if (state.has_error) {
-        result.ok = false;
-        result.error = std::move(state.error);
-    } else {
-        result.ok = true;
-        result.program = std::move(prog);
-        result.arena = std::move(state.arena);
-    }
-    return result;
+    return parse_tokens_with_arena(tokens, AstArena{}, file_name);
 }
 
 }  // namespace cb

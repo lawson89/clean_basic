@@ -208,7 +208,7 @@ pub alias ScoreMap = dict[str, list[int]]
 
 fn compute(byref items as list[int], tag as shared str) as int
     dim total = 0
-    for i in 0..10 step 2
+    for i = 0 to 10 step 2
         select case i
         case 2
             total = total + 2
@@ -279,10 +279,12 @@ end fn
         REQUIRE(parse_ce.program.declarations.size() == 2);
         const auto& fn0 = std::get<cb::FnDecl>(parse_ce.arena.decls[parse_ce.program.declarations[0]].payload);
         const auto& fn1 = std::get<cb::FnDecl>(parse_ce.arena.decls[parse_ce.program.declarations[1]].payload);
-        CHECK(fn0.returns_err);
-        CHECK(fn0.return_types.size() == 1);
-        CHECK(fn1.returns_err);
-        CHECK(fn1.return_types.empty());
+        CHECK(fn0.is_fallible);
+        CHECK(fn0.return_type != cb::INVALID_ID);
+        CHECK(fn1.is_fallible);
+        CHECK(fn1.return_type != cb::INVALID_ID);
+        CHECK(parse_ce.arena.types[fn1.return_type].name == "void");
+        CHECK(parse_ce.arena.types[fn1.return_type].name == "void");
     }
 
     SECTION("Rejects ':' in named arguments for function calls and struct initialization") {
@@ -299,7 +301,7 @@ end fn
 
         const std::string bad_struct_colon = R"(
 fn main()
-    dim p = Point{x: 10, y: 20}
+    dim p = new Point(x: 10, y: 20)
 end fn
 )";
         const auto lex_c2 = cb::tokenize(bad_struct_colon, "bad_struct_colon.cb");
@@ -307,6 +309,34 @@ end fn
         const auto parse_c2 = cb::parse_tokens(lex_c2.tokens, "bad_struct_colon.cb");
         CHECK_FALSE(parse_c2.ok);
         CHECK(parse_c2.error.kind == "ParseError");
+    }
+
+    SECTION("Rejects removed redundant syntax ('for i in a..b', 'Type{...}', 'new Type{...}', and trailing 'as byref')") {
+        const std::vector<std::string> removed_syntaxes = {
+            R"(fn main()
+    for i in 0..10
+    end for
+end fn
+)",
+            R"(fn main()
+    dim p = Point{x=1, y=2}
+end fn
+)",
+            R"(fn main()
+    dim p as shared Point = new Point{x=1, y=2}
+end fn
+)",
+            R"(fn heal(p as byref Player)
+end fn
+)"
+        };
+        for (const auto& snippet : removed_syntaxes) {
+            const auto lex_rem = cb::tokenize(snippet, "removed.cb");
+            REQUIRE(lex_rem.ok);
+            const auto parse_rem = cb::parse_tokens(lex_rem.tokens, "removed.cb");
+            CHECK_FALSE(parse_rem.ok);
+            CHECK(parse_rem.error.kind == "ParseError");
+        }
     }
 
     SECTION("Rejects legacy trailing 'on error' syntax on variable declarations, assignments, and calls") {
@@ -347,6 +377,7 @@ end fn
         CHECK_FALSE(bad_parse.ok);
         CHECK(bad_parse.error.kind == "ParseError");
     }
+
 }
 
 TEST_CASE("Analyzer validates fallible calls, const immutability, and implicit bubbling", "[analyzer]") {
@@ -472,6 +503,7 @@ end fn
         const auto res = cb::transpile_source(bad_print_arg, "bad_print_arg.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
+
     }
 
     SECTION("Rejects const variable reassignment") {
@@ -516,17 +548,14 @@ end fn
 
         const auto it_risky = ana_good.symbols.functions.find("risky");
         REQUIRE(it_risky != ana_good.symbols.functions.end());
-        CHECK(it_risky->second.returns_err);
         CHECK(it_risky->second.is_fallible);
 
         const auto it_middle = ana_good.symbols.functions.find("middle");
         REQUIRE(it_middle != ana_good.symbols.functions.end());
-        CHECK(it_middle->second.returns_err);
         CHECK(it_middle->second.is_fallible);
 
         const auto it_main = ana_good.symbols.functions.find("main");
         REQUIRE(it_main != ana_good.symbols.functions.end());
-        CHECK_FALSE(it_main->second.returns_err);
         CHECK_FALSE(it_main->second.is_fallible);
 
         const cb::DeclId middle_decl_id = parse_good.program.declarations[1];
@@ -606,10 +635,193 @@ end fn
         CHECK(erg_res.cpp_code.find(R"raw((cb_to_str(score) + std::string(" points")))raw") != std::string::npos);
         CHECK(erg_res.cpp_code.find("(std::cout << std::endl);") != std::string::npos);
     }
+
+    SECTION("Deduplicates canonical TypeNodes in AstArena and emits from const AstArena&") {
+        const std::string immut_code = R"(
+pub type Box
+    val as int
+end type
+
+fn compute() as int
+    dim a = 10
+    dim b = 20
+    dim c = 30
+    dim s1 = "hello"
+    dim s2 = "world"
+    dim b1 = Box(val=a)
+    dim b2 = Box(val=b)
+    return b1.val + b2.val + c
+end fn
+)";
+        const auto lex_im = cb::tokenize(immut_code, "immut.cb");
+        REQUIRE(lex_im.ok);
+        auto parse_im = cb::parse_tokens(lex_im.tokens, "immut.cb");
+        REQUIRE(parse_im.ok);
+        const auto ana_im = cb::analyze_program(parse_im.arena, parse_im.program);
+        REQUIRE(ana_im.ok);
+
+        const size_t types_after_analysis = parse_im.arena.types.size();
+        CHECK(cb::find_type(parse_im.arena, "int") == ana_im.symbols.type_int);
+        CHECK(cb::find_type(parse_im.arena, "str") == ana_im.symbols.type_str);
+
+        size_t int_count = 0;
+        for (const auto& tnode : parse_im.arena.types) {
+            if (tnode.name == "int" && !tnode.is_shared && tnode.type_args.empty()) {
+                int_count += 1;
+            }
+        }
+        CHECK(int_count == 1);
+
+        const cb::AstArena& const_arena = parse_im.arena;
+        const std::string emitted = cb::emit_program(const_arena, ana_im.symbols, parse_im.program);
+        CHECK(const_arena.types.size() == types_after_analysis);
+        CHECK(emitted.find("struct Box {") != std::string::npos);
+        CHECK(emitted.find("int compute()") != std::string::npos);
+    }
 }
 
 TEST_CASE("End-to-end fixture: multi-file modules, mutability, and UFCS", "[e2e]") {
     cb::test_e2e::run_e2e_fixture("modules_ufcs", "tests/cases/modules_ufcs/main.cb");
+}
+
+TEST_CASE("End-to-end fixture: nested folder modules, name collision mangling, and relative imports", "[e2e]") {
+    cb::test_e2e::run_e2e_fixture("nested_modules", "tests/cases/nested_modules/main.cb");
+}
+
+TEST_CASE("Module scoping, pub visibility, duplicate aliases, diamond deduplication, and circular imports", "[modules]") {
+    const std::string base_dir = "build/test_artifacts/module_edge_cases";
+    std::error_code ec;
+    std::filesystem::remove_all(base_dir, ec);
+    std::filesystem::create_directories(base_dir + "/sub", ec);
+    REQUIRE(!ec);
+
+    SECTION("Rejects circular imports with clear diagnostic") {
+        {
+            std::ofstream fa(base_dir + "/a.cb");
+            fa << R"(import "sub/b.cb"
+pub fn fa() as int
+    return 1
+end fn
+)";
+        }
+        {
+            std::ofstream fb(base_dir + "/sub/b.cb");
+            fb << R"(import "../a.cb"
+pub fn fb() as int
+    return 2
+end fn
+)";
+        }
+        const auto res = cb::build_file(base_dir + "/a.cb", base_dir + "/out.cpp", false);
+        REQUIRE_FALSE(res.ok);
+        CHECK(res.error.kind == "ImportError");
+        CHECK(res.error.message.find("Circular module import detected") != std::string::npos);
+    }
+
+    SECTION("Deduplicates diamond imports and preserves topological order") {
+        {
+            std::ofstream fcommon(base_dir + "/sub/common.cb");
+            fcommon << R"(pub type SharedCfg
+    scale as int
+end type
+)";
+        }
+        {
+            std::ofstream fleft(base_dir + "/left.cb");
+            fleft << R"(import "sub/common.cb"
+pub fn make_cfg(s as int) as common.SharedCfg
+    return common.SharedCfg(scale=s)
+end fn
+)";
+        }
+        {
+            std::ofstream fmain(base_dir + "/diamond_main.cb");
+            fmain << R"(import "sub/common.cb"
+import "left.cb"
+fn main()
+    dim c = left.make_cfg(7)
+    print(c.scale)
+end fn
+)";
+        }
+        const auto res = cb::build_file(base_dir + "/diamond_main.cb", base_dir + "/diamond_out.cpp", false);
+        REQUIRE(res.ok);
+        const std::string cpp = cb::test_e2e::read_file_text(base_dir + "/diamond_out.cpp");
+        const size_t first_pos = cpp.find("struct cb_sub_common__SharedCfg {");
+        REQUIRE(first_pos != std::string::npos);
+        CHECK(cpp.find("struct cb_sub_common__SharedCfg {", first_pos + 1) == std::string::npos);
+    }
+
+    SECTION("Rejects duplicate module import aliases in the same file") {
+        {
+            std::ofstream f1(base_dir + "/mod.cb");
+            f1 << R"(pub fn f() as int
+    return 1
+end fn
+)";
+        }
+        {
+            std::ofstream f2(base_dir + "/sub/mod.cb");
+            f2 << R"(pub fn f() as int
+    return 2
+end fn
+)";
+        }
+        {
+            std::ofstream fmain(base_dir + "/dup_alias.cb");
+            fmain << R"(import "mod.cb"
+import "sub/mod.cb"
+fn main()
+    print(1)
+end fn
+)";
+        }
+        const auto res = cb::build_file(base_dir + "/dup_alias.cb", base_dir + "/dup_out.cpp", false);
+        REQUIRE_FALSE(res.ok);
+        CHECK(res.error.kind == "AnalyzerError");
+        CHECK(res.error.message.find("Duplicate module import alias 'mod'") != std::string::npos);
+    }
+
+    SECTION("Enforces private by default (non-pub functions and types are rejected across modules)") {
+        {
+            std::ofstream flib(base_dir + "/secret.cb");
+            flib << R"(type HiddenType
+    v as int
+end type
+
+fn hidden_fn() as int
+    return 42
+end fn
+
+pub fn public_fn() as int
+    return hidden_fn()
+end fn
+)";
+        }
+        {
+            std::ofstream fcall(base_dir + "/call_priv.cb");
+            fcall << R"(import "secret.cb"
+fn main()
+    dim x = secret.hidden_fn()
+end fn
+)";
+        }
+        const auto res_fn = cb::build_file(base_dir + "/call_priv.cb", base_dir + "/priv_fn.cpp", false);
+        REQUIRE_FALSE(res_fn.ok);
+        CHECK(res_fn.error.message.find("is private to module 'secret'") != std::string::npos);
+
+        {
+            std::ofstream ftype(base_dir + "/construct_priv.cb");
+            ftype << R"(import "secret.cb"
+fn main()
+    dim h = secret.HiddenType(v=1)
+end fn
+)";
+        }
+        const auto res_type = cb::build_file(base_dir + "/construct_priv.cb", base_dir + "/priv_type.cpp", false);
+        REQUIRE_FALSE(res_type.ok);
+        CHECK(res_type.error.message.find("is private to module 'secret'") != std::string::npos);
+    }
 }
 
 TEST_CASE("End-to-end fixture: network error bubbling and defer cleanup", "[e2e]") {

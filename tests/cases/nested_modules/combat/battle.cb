@@ -1,0 +1,8 @@
+import "../entities/hero.cb"
+import "../entities/enemy.cb" as foe
+
+pub fn clash(byref h as hero.Unit, byref e as foe.Unit, dmg as int) as int
+    e.hp = e.hp - dmg
+    h.boost(5)
+    return e.hp
+end fn

@@ -27,10 +27,6 @@ constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#include <cstdint>
 #include <tuple>
 #include <utility>
 #include <functional>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <queue>
 
 struct cb_error {
     std::string msg = "";
@@ -52,26 +48,6 @@ inline bool cb_has_error(const cb_error& val) { return !val.msg.empty() || val.c
 
 template <typename F> struct _DeferTask { F f; ~_DeferTask() { f(); } };
 template <typename F> _DeferTask<F> _defer(F f) { return {f}; }
-
-template <typename T>
-struct Channel {
-    std::queue<T> queue_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-
-    void send(T val) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        queue_.push(std::move(val));
-        cv_.notify_one();
-    }
-    T recv() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] { return !queue_.empty(); });
-        T val = std::move(queue_.front());
-        queue_.pop();
-        return val;
-    }
-};
 )";
 
 struct EmitterState {
@@ -81,6 +57,7 @@ struct EmitterState {
     uint32_t val_counter = 0;
     uint32_t defer_counter = 0;
     std::optional<ErrorBlock> active_error_block = std::nullopt;
+    std::string current_module_id = "";
 };
 
 inline void emit_line(EmitterState& state, std::string_view line = "") {
@@ -103,15 +80,17 @@ inline std::string next_temp(EmitterState& state, std::string_view prefix = "_tm
 }
 
 inline std::string map_type(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
     TypeId tid,
     bool is_byref = false
 );
 
 inline std::string map_base_type(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
     const TypeNode& t
 ) {
     if (t.name == "int") return "int";
@@ -122,26 +101,36 @@ inline std::string map_base_type(
     if (t.name == "void") return "void";
     if (t.name == "auto") return "auto";
     if (t.name == "list") {
-        const std::string elem = !t.type_args.empty() ? map_type(arena, symbols, t.type_args[0]) : "int";
+        std::string elem = "int";
+        if (!t.type_args.empty()) {
+            elem = map_type(arena, symbols, current_module_id, t.type_args[0]);
+        }
         return "std::vector<" + elem + ">";
     }
     if (t.name == "dict") {
-        const std::string k = (t.type_args.size() > 0) ? map_type(arena, symbols, t.type_args[0]) : "std::string";
-        const std::string v = (t.type_args.size() > 1) ? map_type(arena, symbols, t.type_args[1]) : "int";
+        std::string k = "std::string";
+        if (t.type_args.size() > 0) {
+            k = map_type(arena, symbols, current_module_id, t.type_args[0]);
+        }
+        std::string v = "int";
+        if (t.type_args.size() > 1) {
+            v = map_type(arena, symbols, current_module_id, t.type_args[1]);
+        }
         return "std::unordered_map<" + k + ", " + v + ">";
     }
     if (t.name == "chan") {
-        const std::string elem = !t.type_args.empty() ? map_type(arena, symbols, t.type_args[0]) : "int";
+        std::string elem = "int";
+        if (!t.type_args.empty()) {
+            elem = map_type(arena, symbols, current_module_id, t.type_args[0]);
+        }
         return "std::shared_ptr<Channel<" + elem + ">>";
     }
-    const size_t dot_idx = t.name.rfind('.');
-    if (dot_idx != std::string::npos) {
-        const std::string mod_prefix = t.name.substr(0, dot_idx);
-        const std::string base_name = t.name.substr(dot_idx + 1);
-        if (symbols.types.find(base_name) != symbols.types.end() ||
-            symbols.modules.find(mod_prefix) != symbols.modules.end()) {
-            return base_name;
-        }
+    const std::string key = resolve_symbol_key(symbols, current_module_id, t.name);
+    if (symbols.types.count(key)) {
+        return symbols.types.at(key).cpp_name;
+    }
+    if (symbols.aliases.count(key)) {
+        return symbols.aliases.at(key).cpp_name;
     }
     std::string sanitized = t.name;
     for (char& c : sanitized) {
@@ -150,29 +139,42 @@ inline std::string map_base_type(
     return sanitized;
 }
 
-inline std::string map_type(
-    AstArena& arena,
+inline std::string map_type_node(
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    TypeId tid,
-    bool is_byref
+    std::string_view current_module_id,
+    const TypeNode& resolved,
+    bool is_byref = false
 ) {
-    const TypeId resolved_id = resolve_alias(arena, symbols, tid);
-    const TypeNode& resolved = (resolved_id < arena.types.size()) ? arena.types[resolved_id] : TypeNode{};
-    const std::string base_cpp = map_base_type(arena, symbols, resolved);
-    std::string cpp = resolved.is_shared ? ("std::shared_ptr<" + base_cpp + ">") : base_cpp;
+    const std::string base_cpp = map_base_type(arena, symbols, current_module_id, resolved);
+    std::string cpp = base_cpp;
+    if (resolved.is_shared) {
+        cpp = "std::shared_ptr<" + base_cpp + ">";
+    }
     if (is_byref) {
         cpp += "&";
     }
     return cpp;
 }
 
-inline std::string default_value_for_type(
-    AstArena& arena,
+inline std::string map_type(
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
+    TypeId tid,
+    bool is_byref
+) {
+    const TypeNode resolved = resolve_alias_node(arena, symbols, current_module_id, tid);
+    return map_type_node(arena, symbols, current_module_id, resolved, is_byref);
+}
+
+inline std::string default_value_for_type(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
     TypeId tid
 ) {
-    const TypeId resolved_id = resolve_alias(arena, symbols, tid);
-    const TypeNode& resolved = (resolved_id < arena.types.size()) ? arena.types[resolved_id] : TypeNode{};
+    const TypeNode resolved = resolve_alias_node(arena, symbols, current_module_id, tid);
     if (resolved.is_shared) {
         return "nullptr";
     }
@@ -180,7 +182,7 @@ inline std::string default_value_for_type(
     if (resolved.name == "float") return "0.0";
     if (resolved.name == "bool") return "false";
     if (resolved.name == "str") return "std::string(\"\")";
-    return map_type(arena, symbols, resolved_id) + "{}";
+    return map_type_node(arena, symbols, current_module_id, resolved) + "{}";
 }
 
 inline std::string cpp_fn_name(std::string_view name) {
@@ -189,16 +191,16 @@ inline std::string cpp_fn_name(std::string_view name) {
 }
 
 inline std::string fn_return_cpp_type(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
     const FnDecl& fn
 ) {
     std::vector<std::string> ret_cpp;
-    ret_cpp.reserve(fn.return_types.size() + (fn.returns_err ? 1 : 0));
-    for (const TypeId rtid : fn.return_types) {
-        ret_cpp.push_back(map_type(arena, symbols, rtid));
+    if (fn.return_type != INVALID_ID && !is_void_type(arena, fn.return_type)) {
+        ret_cpp.push_back(map_type(arena, symbols, current_module_id, fn.return_type));
     }
-    if (fn.returns_err) {
+    if (fn.is_fallible) {
         ret_cpp.push_back("cb_error");
     }
     if (ret_cpp.empty()) {
@@ -216,97 +218,46 @@ inline std::string fn_return_cpp_type(
 }
 
 inline std::string fn_signature(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
     const FnDecl& fn
 ) {
-    const std::string ret_str = fn_return_cpp_type(arena, symbols, fn);
+    const std::string ret_str = fn_return_cpp_type(arena, symbols, current_module_id, fn);
     std::string params_str;
     for (size_t i = 0; i < fn.params.size(); ++i) {
         if (i > 0) params_str += ", ";
         const auto& p = fn.params[i];
-        params_str += map_type(arena, symbols, p.type_id, p.is_byref);
+        params_str += map_type(arena, symbols, current_module_id, p.type_id, p.is_byref);
         params_str += " ";
         params_str += p.name;
     }
-    return ret_str + " " + cpp_fn_name(fn.name) + "(" + params_str + ")";
+    const std::string key = resolve_symbol_key(symbols, current_module_id, fn.name);
+    std::string cpp_name = cpp_fn_name(fn.name);
+    if (symbols.functions.count(key) > 0) {
+        cpp_name = symbols.functions.at(key).cpp_name;
+    }
+    return ret_str + " " + cpp_name + "(" + params_str + ")";
 }
 
 inline std::string emit_expr(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     ExprId expr_id,
     const std::unordered_map<std::string, VarSymbol>& scope,
     EmitterState& state
 );
 
-inline std::string emit_fstring(
-    AstArena& arena,
-    std::string_view raw_content,
-    const std::unordered_map<std::string, VarSymbol>& scope
-) {
-    std::vector<std::string> cpp_parts;
-    size_t i = 0;
-    while (i < raw_content.size()) {
-        const size_t open_brace = raw_content.find('{', i);
-        if (open_brace == std::string_view::npos) {
-            std::string literal_part(raw_content.substr(i));
-            if (!literal_part.empty()) {
-                cpp_parts.push_back("std::string(\"" + literal_part + "\")");
-            }
-            break;
-        }
-        if (open_brace > i) {
-            std::string literal_part(raw_content.substr(i, open_brace - i));
-            cpp_parts.push_back("std::string(\"" + literal_part + "\")");
-        }
-        const size_t close_brace = raw_content.find('}', open_brace);
-        if (close_brace == std::string_view::npos) {
-            std::string rest(raw_content.substr(open_brace));
-            cpp_parts.push_back("std::string(\"" + rest + "\")");
-            break;
-        }
-        const std::string expr_str(raw_content.substr(open_brace + 1, close_brace - open_brace - 1));
-        const size_t start = expr_str.find_first_not_of(" \t\r\n");
-        const size_t end = expr_str.find_last_not_of(" \t\r\n");
-        const std::string var_name = (start != std::string::npos) ? expr_str.substr(start, end - start + 1) : "";
-
-        const auto it = scope.find(var_name);
-        bool is_str = false;
-        if (it != scope.end()) {
-            const TypeId tid = it->second.type_id;
-            if (tid < arena.types.size() && arena.types[tid].name == "str") {
-                is_str = true;
-            }
-        }
-        if (is_str) {
-            cpp_parts.push_back(var_name);
-        } else {
-            cpp_parts.push_back("std::to_string(" + var_name + ")");
-        }
-        i = close_brace + 1;
-    }
-    if (cpp_parts.empty()) {
-        return "std::string(\"\")";
-    }
-    std::string result;
-    for (size_t p = 0; p < cpp_parts.size(); ++p) {
-        if (p > 0) result += " + ";
-        result += cpp_parts[p];
-    }
-    return result;
-}
 
 inline std::vector<std::string> order_struct_fields(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view type_name,
     const std::vector<InitField>& provided_fields,
     const std::unordered_map<std::string, VarSymbol>& scope,
     EmitterState& state
 ) {
-    const size_t dot_idx = type_name.rfind('.');
-    const std::string base_name = (dot_idx != std::string_view::npos) ? std::string(type_name.substr(dot_idx + 1)) : std::string(type_name);
+    const std::string type_key = resolve_symbol_key(symbols, state.current_module_id, type_name);
 
     bool has_named = false;
     for (const auto& f : provided_fields) {
@@ -316,7 +267,7 @@ inline std::vector<std::string> order_struct_fields(
         }
     }
 
-    const auto it = symbols.types.find(base_name);
+    const auto it = symbols.types.find(type_key);
     if (!has_named || it == symbols.types.end() || it->second.field_order.empty()) {
         std::vector<std::string> rendered;
         rendered.reserve(provided_fields.size());
@@ -340,14 +291,14 @@ inline std::vector<std::string> order_struct_fields(
         if (fit != named_map.end()) {
             ordered.push_back(emit_expr(arena, symbols, fit->second, scope, state));
         } else {
-            ordered.push_back(default_value_for_type(arena, symbols, fdecl.type_id));
+            ordered.push_back(default_value_for_type(arena, symbols, it->second.module_id, fdecl.type_id));
         }
     }
     return ordered;
 }
 
 inline std::vector<std::string> emit_call_args_with_autoderef(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const std::vector<ExprId>& pos_args,
     const std::vector<NamedArg>& named_args,
@@ -367,13 +318,12 @@ inline std::vector<std::string> emit_call_args_with_autoderef(
     for (size_t idx = 0; idx < all_exprs.size(); ++idx) {
         const ExprId arg_expr_id = all_exprs[idx];
         std::string arg_cpp = emit_expr(arena, symbols, arg_expr_id, scope, state);
-        const TypeId arg_tid = infer_expr_type(arena, arg_expr_id, symbols, scope);
-        const TypeNode& arg_type = (arg_tid < arena.types.size()) ? arena.types[arg_tid] : TypeNode{};
+        const TypeId arg_tid = infer_expr_type(arena, arg_expr_id, symbols, scope, state.current_module_id);
+        const TypeNode& arg_type = get_type_node(arena, arg_tid);
 
         if (fn_sym.has_value() && idx < fn_sym->params.size()) {
             const Param& param = fn_sym->params[idx];
-            const TypeId param_tid = resolve_alias(arena, symbols, param.type_id);
-            const TypeNode& param_type = (param_tid < arena.types.size()) ? arena.types[param_tid] : TypeNode{};
+            const TypeNode param_type = resolve_alias_node(arena, symbols, fn_sym->module_id, param.type_id);
 
             if (arg_type.is_shared && !param_type.is_shared) {
                 arg_cpp = "(*" + arg_cpp + ")";
@@ -385,7 +335,7 @@ inline std::vector<std::string> emit_call_args_with_autoderef(
 }
 
 inline std::string emit_expr(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     ExprId expr_id,
     const std::unordered_map<std::string, VarSymbol>& scope,
@@ -403,11 +353,8 @@ inline std::string emit_expr(
     }
 
     if (std::holds_alternative<StringLiteral>(payload)) {
-        const auto& slit = std::get<StringLiteral>(payload);
-        if (slit.is_fstring) {
-            return emit_fstring(arena, slit.value, scope);
-        }
-        return "std::string(\"" + slit.value + "\")";
+        const std::string q(1, '"');
+        return "std::string(" + q + std::get<StringLiteral>(payload).value + q + ")";
     }
 
     if (std::holds_alternative<BoolLiteral>(payload)) {
@@ -427,15 +374,18 @@ inline std::string emit_expr(
 
     if (std::holds_alternative<UnaryOp>(payload)) {
         const auto& uop = std::get<UnaryOp>(payload);
-        const std::string op_str = (uop.op == "not") ? "!" : uop.op;
+        std::string op_str = uop.op;
+        if (uop.op == "not") {
+            op_str = "!";
+        }
         return "(" + op_str + emit_expr(arena, symbols, uop.operand, scope, state) + ")";
     }
 
     if (std::holds_alternative<BinaryOp>(payload)) {
         const auto& bop = std::get<BinaryOp>(payload);
         if (bop.op == "&") {
-            const TypeId left_tid = infer_expr_type(arena, bop.left, symbols, scope);
-            const TypeId right_tid = infer_expr_type(arena, bop.right, symbols, scope);
+            const TypeId left_tid = infer_expr_type(arena, bop.left, symbols, scope, state.current_module_id);
+            const TypeId right_tid = infer_expr_type(arena, bop.right, symbols, scope, state.current_module_id);
             std::string left_cpp = emit_expr(arena, symbols, bop.left, scope, state);
             std::string right_cpp = emit_expr(arena, symbols, bop.right, scope, state);
             bool left_is_str = false;
@@ -467,15 +417,19 @@ inline std::string emit_expr(
 
     if (std::holds_alternative<FieldAccess>(payload)) {
         const auto& faccess = std::get<FieldAccess>(payload);
-        const TypeId target_tid = infer_expr_type(arena, faccess.target, symbols, scope);
+        const TypeId target_tid = infer_expr_type(arena, faccess.target, symbols, scope, state.current_module_id);
         const bool is_shared = (target_tid < arena.types.size()) && arena.types[target_tid].is_shared;
         const std::string target_cpp = emit_expr(arena, symbols, faccess.target, scope, state);
-        return target_cpp + (is_shared ? "->" : ".") + faccess.field_name;
+        std::string accessor = ".";
+        if (is_shared) {
+            accessor = "->";
+        }
+        return target_cpp + accessor + faccess.field_name;
     }
 
     if (std::holds_alternative<IndexAccess>(payload)) {
         const auto& iaccess = std::get<IndexAccess>(payload);
-        const TypeId target_tid = infer_expr_type(arena, iaccess.target, symbols, scope);
+        const TypeId target_tid = infer_expr_type(arena, iaccess.target, symbols, scope, state.current_module_id);
         const bool is_shared = (target_tid < arena.types.size()) && arena.types[target_tid].is_shared;
         const std::string target_cpp = emit_expr(arena, symbols, iaccess.target, scope, state);
         const std::string idx_cpp = emit_expr(arena, symbols, iaccess.index, scope, state);
@@ -485,29 +439,16 @@ inline std::string emit_expr(
         return target_cpp + "[" + idx_cpp + "]";
     }
 
-    if (std::holds_alternative<StructInit>(payload)) {
-        const auto& sinit = std::get<StructInit>(payload);
-        const TypeId raw_tid = add_type(arena, TypeNode{expr_node.line, expr_node.col, sinit.type_name, {}, false});
-        const TypeId resolved_t = resolve_alias(arena, symbols, raw_tid);
-        const std::string cpp_type = map_type(arena, symbols, resolved_t);
-        const std::string type_name_for_fields = (resolved_t < arena.types.size()) ? arena.types[resolved_t].name : sinit.type_name;
-        const auto ordered = order_struct_fields(arena, symbols, type_name_for_fields, sinit.fields, scope, state);
-        std::string joined;
-        for (size_t i = 0; i < ordered.size(); ++i) {
-            if (i > 0) joined += ", ";
-            joined += ordered[i];
-        }
-        return cpp_type + "{" + joined + "}";
-    }
-
     if (std::holds_alternative<NewExpr>(payload)) {
         const auto& nexpr = std::get<NewExpr>(payload);
-        const TypeId resolved_t = resolve_alias(arena, symbols, nexpr.target_type);
-        const TypeNode& res_node = (resolved_t < arena.types.size()) ? arena.types[resolved_t] : TypeNode{};
-        const std::string base_cpp = map_base_type(arena, symbols, res_node);
+        const TypeNode res_node = resolve_alias_node(arena, symbols, state.current_module_id, nexpr.target_type);
+        const std::string base_cpp = map_base_type(arena, symbols, state.current_module_id, res_node);
 
         if (res_node.name == "chan") {
-            const std::string elem_cpp = !res_node.type_args.empty() ? map_type(arena, symbols, res_node.type_args[0]) : "int";
+            std::string elem_cpp = "int";
+            if (!res_node.type_args.empty()) {
+                elem_cpp = map_type(arena, symbols, state.current_module_id, res_node.type_args[0]);
+            }
             return "std::make_shared<Channel<" + elem_cpp + ">>()";
         }
 
@@ -515,11 +456,7 @@ inline std::string emit_expr(
             return "std::make_shared<" + base_cpp + ">()";
         }
 
-        std::string lookup_type_name = res_node.name;
-        const size_t dot_idx = lookup_type_name.rfind('.');
-        if (dot_idx != std::string::npos) {
-            lookup_type_name = lookup_type_name.substr(dot_idx + 1);
-        }
+        const std::string lookup_type_name = resolve_symbol_key(symbols, state.current_module_id, res_node.name);
         const auto it = symbols.types.find(lookup_type_name);
         if (it != symbols.types.end() && !it->second.field_order.empty()) {
             const auto ordered = order_struct_fields(arena, symbols, lookup_type_name, nexpr.args, scope, state);
@@ -566,7 +503,7 @@ inline std::string emit_expr(
         if (call.callee >= arena.exprs.size()) {
             return "";
         }
-        const auto struct_opt = resolve_struct_constructor(arena, call, symbols);
+        const auto struct_opt = resolve_struct_constructor(arena, call, symbols, state.current_module_id, scope);
         if (struct_opt.has_value()) {
             std::vector<InitField> init_fields;
             init_fields.reserve(call.args.size() + call.named_args.size());
@@ -583,13 +520,13 @@ inline std::string emit_expr(
                 f.value = na.value;
                 init_fields.push_back(std::move(f));
             }
-            const auto ordered = order_struct_fields(arena, symbols, struct_opt->name, init_fields, scope, state);
+            const auto ordered = order_struct_fields(arena, symbols, struct_opt->key, init_fields, scope, state);
             std::string joined;
             for (size_t i = 0; i < ordered.size(); ++i) {
                 if (i > 0) joined += ", ";
                 joined += ordered[i];
             }
-            return struct_opt->name + "{" + joined + "}";
+            return struct_opt->cpp_name + "{" + joined + "}";
         }
         const auto& callee_node = arena.exprs[call.callee];
 
@@ -598,7 +535,7 @@ inline std::string emit_expr(
 
             if (fn_name == "len" && call.args.size() == 1) {
                 const ExprId arg_expr = call.args[0];
-                const TypeId arg_type_id = infer_expr_type(arena, arg_expr, symbols, scope);
+                const TypeId arg_type_id = infer_expr_type(arena, arg_expr, symbols, scope, state.current_module_id);
                 const bool is_shared = (arg_type_id < arena.types.size()) && arena.types[arg_type_id].is_shared;
                 const std::string arg_cpp = emit_expr(arena, symbols, arg_expr, scope, state);
                 if (is_shared) {
@@ -609,7 +546,7 @@ inline std::string emit_expr(
 
             if (fn_name == "str" && call.args.size() == 1) {
                 const ExprId arg_expr = call.args[0];
-                const TypeId arg_type_id = infer_expr_type(arena, arg_expr, symbols, scope);
+                const TypeId arg_type_id = infer_expr_type(arena, arg_expr, symbols, scope, state.current_module_id);
                 const std::string arg_cpp = emit_expr(arena, symbols, arg_expr, scope, state);
                 if (arg_type_id < arena.types.size() && arena.types[arg_type_id].name == "str") {
                     return arg_cpp;
@@ -626,7 +563,7 @@ inline std::string emit_expr(
                 }
                 std::string stream_expr = "(std::cout";
                 for (const ExprId arg_id : call.args) {
-                    const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope);
+                    const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope, state.current_module_id);
                     std::string arg_cpp = emit_expr(arena, symbols, arg_id, scope, state);
                     if (arg_tid < arena.types.size() &&
                         (arena.types[arg_tid].name == "bool" || arena.types[arg_tid].name == "err")) {
@@ -638,11 +575,7 @@ inline std::string emit_expr(
                 return stream_expr;
             }
 
-            std::optional<FnSymbol> fn_sym;
-            const auto it = symbols.functions.find(fn_name);
-            if (it != symbols.functions.end()) {
-                fn_sym = it->second;
-            }
+            const std::optional<FnSymbol> fn_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
             const auto rendered_args = emit_call_args_with_autoderef(
                 arena, symbols, call.args, call.named_args, fn_sym, scope, state
             );
@@ -651,17 +584,46 @@ inline std::string emit_expr(
                 if (i > 0) joined += ", ";
                 joined += rendered_args[i];
             }
-            return cpp_fn_name(fn_name) + "(" + joined + ")";
+            std::string target_cpp_name = cpp_fn_name(fn_name);
+            if (fn_sym.has_value()) {
+                target_cpp_name = fn_sym->cpp_name;
+            }
+            return target_cpp_name + "(" + joined + ")";
         }
 
         if (std::holds_alternative<FieldAccess>(callee_node.payload)) {
             const auto& faccess = std::get<FieldAccess>(callee_node.payload);
             const ExprId receiver = faccess.target;
             const std::string& method_name = faccess.field_name;
-            const TypeId recv_tid = infer_expr_type(arena, receiver, symbols, scope);
-            const TypeNode& recv_type = (recv_tid < arena.types.size()) ? arena.types[recv_tid] : TypeNode{};
+
+            if (receiver < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[receiver].payload)) {
+                const auto& tgt_ident = std::get<Identifier>(arena.exprs[receiver].payload);
+                std::string target_mod_id;
+                if (is_module_alias_in_scope(symbols, state.current_module_id, tgt_ident.name, scope, target_mod_id)) {
+                    const std::optional<FnSymbol> fn_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
+                    const auto rendered_args = emit_call_args_with_autoderef(
+                        arena, symbols, call.args, call.named_args, fn_sym, scope, state
+                    );
+                    std::string joined;
+                    for (size_t i = 0; i < rendered_args.size(); ++i) {
+                        if (i > 0) joined += ", ";
+                        joined += rendered_args[i];
+                    }
+                    std::string target_cpp_name = cpp_fn_name(method_name);
+                    if (fn_sym.has_value()) {
+                        target_cpp_name = fn_sym->cpp_name;
+                    }
+                    return target_cpp_name + "(" + joined + ")";
+                }
+            }
+
+            const TypeId recv_tid = infer_expr_type(arena, receiver, symbols, scope, state.current_module_id);
+            const TypeNode& recv_type = get_type_node(arena, recv_tid);
             const std::string recv_cpp = emit_expr(arena, symbols, receiver, scope, state);
-            const std::string accessor = recv_type.is_shared ? "->" : ".";
+            std::string accessor = ".";
+            if (recv_type.is_shared) {
+                accessor = "->";
+            }
 
             if (recv_type.name == "list" && (method_name == "push" || method_name == "append") && !call.args.empty()) {
                 const std::string arg_cpp = emit_expr(arena, symbols, call.args[0], scope, state);
@@ -677,8 +639,8 @@ inline std::string emit_expr(
                 return recv_cpp + "->" + method_name + "(" + joined + ")";
             }
 
-            const auto it = symbols.functions.find(method_name);
-            if (it != symbols.functions.end()) {
+            const std::optional<FnSymbol> ufcs_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
+            if (ufcs_sym.has_value()) {
                 std::vector<ExprId> all_pos;
                 all_pos.reserve(1 + call.args.size());
                 all_pos.push_back(receiver);
@@ -686,14 +648,14 @@ inline std::string emit_expr(
                     all_pos.push_back(a);
                 }
                 const auto rendered_args = emit_call_args_with_autoderef(
-                    arena, symbols, all_pos, call.named_args, it->second, scope, state
+                    arena, symbols, all_pos, call.named_args, ufcs_sym, scope, state
                 );
                 std::string joined;
                 for (size_t i = 0; i < rendered_args.size(); ++i) {
                     if (i > 0) joined += ", ";
                     joined += rendered_args[i];
                 }
-                return cpp_fn_name(method_name) + "(" + joined + ")";
+                return ufcs_sym->cpp_name + "(" + joined + ")";
             }
 
             std::string joined;
@@ -717,7 +679,7 @@ inline std::string emit_expr(
 }
 
 inline std::string build_error_call_value(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FuncCall& call,
     const std::unordered_map<std::string, VarSymbol>& scope,
@@ -726,7 +688,7 @@ inline std::string build_error_call_value(
     std::string msg_cpp = R"(std::string(""))";
     if (call.args.size() == 1) {
         const ExprId arg_id = call.args[0];
-        const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope);
+        const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope, state.current_module_id);
         std::string part = emit_expr(arena, symbols, arg_id, scope, state);
         bool is_str = false;
         if (arg_tid < arena.types.size() && arena.types[arg_tid].name == "str") {
@@ -743,7 +705,7 @@ inline std::string build_error_call_value(
                 combined += " + ";
             }
             const ExprId arg_id = call.args[i];
-            const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope);
+            const TypeId arg_tid = infer_expr_type(arena, arg_id, symbols, scope, state.current_module_id);
             std::string part = emit_expr(arena, symbols, arg_id, scope, state);
             bool is_str = false;
             if (arg_tid < arena.types.size() && arena.types[arg_tid].name == "str") {
@@ -768,35 +730,27 @@ inline std::string build_error_call_value(
 }
 
 inline std::string build_error_bubble_return(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
     const FnDecl& fn,
     std::string_view err_var
 ) {
-    if (fn.return_types.empty()) {
+    if (fn.return_type == INVALID_ID || is_void_type(arena, fn.return_type)) {
         return "return " + std::string(err_var) + ";";
     }
     std::string args;
-    for (size_t i = 0; i < fn.return_types.size(); ++i) {
-        if (i > 0) {
-            args += ", ";
-        }
-        const TypeId resolved_id = resolve_alias(arena, symbols, fn.return_types[i]);
-        std::string elem = "{}";
-        if (resolved_id < arena.types.size()) {
-            const TypeNode& tnode = arena.types[resolved_id];
-            if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
-                elem = map_type(arena, symbols, resolved_id) + "{}";
-            }
-        }
-        args += elem;
+    const TypeNode tnode = resolve_alias_node(arena, symbols, current_module_id, fn.return_type);
+    std::string elem = "{}";
+    if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
+        elem = map_type_node(arena, symbols, current_module_id, tnode) + "{}";
     }
-    args += ", " + std::string(err_var);
+    args = elem + ", " + std::string(err_var);
     return "return { " + args + " };";
 }
 
 inline void emit_stmt(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     StmtId stmt_id,
@@ -806,7 +760,7 @@ inline void emit_stmt(
 );
 
 inline void emit_stmt_list(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
@@ -822,7 +776,7 @@ inline void emit_stmt_list(
 }
 
 inline void emit_active_error_handler_or_bubble(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     const std::string& err_tmp,
@@ -838,7 +792,7 @@ inline void emit_active_error_handler_or_bubble(
         auto err_scope = scope;
         TypeId err_tid = symbols.type_err;
         if (err_tid == INVALID_ID) {
-            err_tid = add_type(arena, TypeNode{1, 1, "err", {}, false});
+            err_tid = find_type(arena, "err");
         }
         err_scope[active_eb.err_var] = VarSymbol{active_eb.err_var, err_tid, false, false};
         auto err_decls = declared_vars;
@@ -850,13 +804,13 @@ inline void emit_active_error_handler_or_bubble(
         state.indent_level -= 1;
         emit_line(state, "}");
     } else {
-        const std::string early_ret = build_error_bubble_return(arena, symbols, fn, err_tmp);
+        const std::string early_ret = build_error_bubble_return(arena, symbols, state.current_module_id, fn, err_tmp);
         emit_line(state, "if (cb_has_error(" + err_tmp + ")) " + early_ret);
     }
 }
 
 inline void emit_fallible_assignment(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     const VarAssignment& stmt,
@@ -869,62 +823,51 @@ inline void emit_fallible_assignment(
     state.val_counter += 1;
     const uint32_t cid = state.val_counter;
 
-    std::vector<std::string> temp_vals;
-    temp_vals.reserve(stmt.targets.size());
-    if (stmt.targets.size() == 1) {
-        temp_vals.push_back("_val" + std::to_string(cid));
-    } else {
-        for (size_t idx = 0; idx < stmt.targets.size(); ++idx) {
-            temp_vals.push_back("_val" + std::to_string(cid) + "_" + std::to_string(idx + 1));
-        }
-    }
-
+    const bool has_value = (fn_sym.return_type != INVALID_ID && !is_void_type(arena, fn_sym.return_type));
+    const std::string val_tmp = "_val" + std::to_string(cid);
     const std::string err_var = "_err" + std::to_string(cid);
 
-    std::string binding_vars;
-    for (const auto& tv : temp_vals) {
-        binding_vars += tv + ", ";
+    if (has_value) {
+        emit_line(state, "auto [" + val_tmp + ", " + err_var + "] = " + call_cpp + ";");
+    } else {
+        emit_line(state, "auto " + err_var + " = " + call_cpp + ";");
     }
-    binding_vars += err_var;
-
-    emit_line(state, "auto [" + binding_vars + "] = " + call_cpp + ";");
 
     emit_active_error_handler_or_bubble(arena, symbols, fn, err_var, scope, declared_vars, state);
 
-    for (size_t idx = 0; idx < stmt.targets.size(); ++idx) {
-        const ExprId tid = stmt.targets[idx];
-        const std::string& val_tmp = temp_vals[idx];
+    if (stmt.target != INVALID_ID) {
+        const ExprId tid = stmt.target;
         if (tid < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[tid].payload)) {
             const std::string& name = std::get<Identifier>(arena.exprs[tid].payload).name;
-            TypeId ret_t = INVALID_ID;
+            TypeId ret_t = symbols.type_auto;
             if (stmt.has_declared_type) {
-                ret_t = resolve_alias(arena, symbols, stmt.declared_type);
-            } else if (idx < fn_sym.return_types.size()) {
-                ret_t = fn_sym.return_types[idx];
-            } else {
-                ret_t = add_type(arena, TypeNode{1, 1, "auto", {}, false});
+                ret_t = resolve_alias(arena, symbols, state.current_module_id, stmt.declared_type);
+            } else if (has_value) {
+                ret_t = resolve_alias(arena, symbols, fn_sym.module_id, fn_sym.return_type);
             }
             const bool is_new_decl = stmt.is_dim || stmt.is_const || (declared_vars.find(name) == declared_vars.end());
             scope[name] = VarSymbol{name, ret_t, false, stmt.is_const};
             declared_vars.insert(name);
+            std::string rhs = has_value ? val_tmp : "0";
             if (is_new_decl) {
                 if (stmt.is_const) {
-                    emit_line(state, "const auto " + name + " = " + val_tmp + ";");
+                    emit_line(state, "const auto " + name + " = " + rhs + ";");
                 } else {
-                    emit_line(state, "auto " + name + " = " + val_tmp + ";");
+                    emit_line(state, "auto " + name + " = " + rhs + ";");
                 }
             } else {
-                emit_line(state, name + " = " + val_tmp + ";");
+                emit_line(state, name + " = " + rhs + ";");
             }
         } else {
             const std::string lhs_cpp = emit_expr(arena, symbols, tid, scope, state);
-            emit_line(state, lhs_cpp + " = " + val_tmp + ";");
+            std::string rhs = has_value ? val_tmp : "0";
+            emit_line(state, lhs_cpp + " = " + rhs + ";");
         }
     }
 }
 
 inline void emit_var_assignment(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     const VarAssignment& stmt,
@@ -934,35 +877,25 @@ inline void emit_var_assignment(
 ) {
     if (stmt.value < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[stmt.value].payload)) {
         const auto& call = std::get<FuncCall>(arena.exprs[stmt.value].payload);
-        const auto fn_sym = resolve_func_call(arena, call, symbols);
-        if (fn_sym.has_value() && fn_sym->returns_err) {
+        const auto fn_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
+        if (fn_sym.has_value() && fn_sym->is_fallible) {
             emit_fallible_assignment(arena, symbols, fn, stmt, *fn_sym, scope, declared_vars, state);
             return;
         }
     }
 
     std::string val_cpp = emit_expr(arena, symbols, stmt.value, scope, state);
-    const auto val_types = infer_expr_types(arena, stmt.value, symbols, scope);
+    const TypeId val_type = infer_expr_type(arena, stmt.value, symbols, scope, state.current_module_id);
 
-    if (stmt.has_declared_type && !stmt.targets.empty()) {
-        const ExprId target_id = stmt.targets[0];
+    if (stmt.has_declared_type && stmt.target != INVALID_ID) {
+        const ExprId target_id = stmt.target;
         if (target_id < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[target_id].payload)) {
             const std::string& name = std::get<Identifier>(arena.exprs[target_id].payload).name;
-            const TypeId resolved_t = resolve_alias(arena, symbols, stmt.declared_type);
+            const TypeId resolved_t = resolve_alias(arena, symbols, state.current_module_id, stmt.declared_type);
+            const TypeNode res_node = resolve_alias_node(arena, symbols, state.current_module_id, stmt.declared_type);
             scope[name] = VarSymbol{name, resolved_t, false};
             declared_vars.insert(name);
-            const std::string cpp_type = map_type(arena, symbols, resolved_t);
-            TypeNode res_node{};
-            if (resolved_t < arena.types.size()) {
-                res_node = arena.types[resolved_t];
-            }
-            if (res_node.name == "chan" && stmt.value < arena.exprs.size() && std::holds_alternative<NewExpr>(arena.exprs[stmt.value].payload)) {
-                std::string elem_cpp = "int";
-                if (!res_node.type_args.empty()) {
-                    elem_cpp = map_type(arena, symbols, res_node.type_args[0]);
-                }
-                val_cpp = "std::make_shared<Channel<" + elem_cpp + ">>()";
-            }
+            const std::string cpp_type = map_type_node(arena, symbols, state.current_module_id, res_node);
             std::string prefix;
             if (stmt.is_const) {
                 prefix = "const ";
@@ -972,52 +905,9 @@ inline void emit_var_assignment(
         }
     }
 
-    if (stmt.targets.size() > 1) {
-        std::vector<std::string> names;
-        bool all_new_idents = true;
-        for (const ExprId tid : stmt.targets) {
-            if (tid >= arena.exprs.size() || !std::holds_alternative<Identifier>(arena.exprs[tid].payload)) {
-                all_new_idents = false;
-                break;
-            }
-            const std::string& name = std::get<Identifier>(arena.exprs[tid].payload).name;
-            if (declared_vars.find(name) != declared_vars.end()) {
-                all_new_idents = false;
-                break;
-            }
-        }
-
-        names.reserve(stmt.targets.size());
-        for (size_t idx = 0; idx < stmt.targets.size(); ++idx) {
-            const ExprId tid = stmt.targets[idx];
-            if (tid < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[tid].payload)) {
-                const std::string& name = std::get<Identifier>(arena.exprs[tid].payload).name;
-                const TypeId inferred = (idx < val_types.size()) ? val_types[idx] : add_type(arena, TypeNode{1, 1, "auto", {}, false});
-                scope[name] = VarSymbol{name, inferred, false};
-                declared_vars.insert(name);
-                names.push_back(name);
-            } else {
-                names.push_back(emit_expr(arena, symbols, tid, scope, state));
-            }
-        }
-
-        std::string joined;
-        for (size_t i = 0; i < names.size(); ++i) {
-            if (i > 0) joined += ", ";
-            joined += names[i];
-        }
-
-        if (all_new_idents) {
-            emit_line(state, "auto [" + joined + "] = " + val_cpp + ";");
-        } else {
-            emit_line(state, "std::tie(" + joined + ") = " + val_cpp + ";");
-        }
-        return;
-    }
-
-    if (!stmt.targets.empty()) {
-        const ExprId target_id = stmt.targets[0];
-        const TypeId inferred_t = !val_types.empty() ? val_types[0] : add_type(arena, TypeNode{1, 1, "auto", {}, false});
+    if (stmt.target != INVALID_ID) {
+        const ExprId target_id = stmt.target;
+        TypeId inferred_t = (val_type != INVALID_ID) ? val_type : symbols.type_auto;
 
         if (target_id < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[target_id].payload)) {
             const std::string& name = std::get<Identifier>(arena.exprs[target_id].payload).name;
@@ -1030,7 +920,7 @@ inline void emit_var_assignment(
                 }
                 std::string cpp_t = "auto";
                 if (inferred_name != "auto") {
-                    cpp_t = map_type(arena, symbols, inferred_t);
+                    cpp_t = map_type(arena, symbols, state.current_module_id, inferred_t);
                 }
                 std::string prefix;
                 if (stmt.is_const) {
@@ -1048,7 +938,7 @@ inline void emit_var_assignment(
 }
 
 inline void emit_expr_stmt(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     const ExprStmt& stmt,
@@ -1060,24 +950,20 @@ inline void emit_expr_stmt(
         const auto& call = std::get<FuncCall>(arena.exprs[stmt.expr].payload);
         if (is_error_builtin_call(arena, call)) {
             const std::string err_val = build_error_call_value(arena, symbols, call, scope, state);
-            emit_line(state, build_error_bubble_return(arena, symbols, fn, err_val));
+            emit_line(state, build_error_bubble_return(arena, symbols, state.current_module_id, fn, err_val));
             return;
         }
-        const auto fn_sym = resolve_func_call(arena, call, symbols);
-        if (fn_sym.has_value() && fn_sym->returns_err) {
+        const auto fn_sym = resolve_func_call(arena, call, symbols, state.current_module_id, scope);
+        if (fn_sym.has_value() && fn_sym->is_fallible) {
             const std::string call_cpp = emit_expr(arena, symbols, stmt.expr, scope, state);
             state.val_counter += 1;
             const std::string err_var = "_err" + std::to_string(state.val_counter);
 
-            if (!fn_sym->return_types.empty()) {
-                std::string bindings;
-                for (size_t i = 0; i < fn_sym->return_types.size(); ++i) {
-                    bindings += next_temp(state, "_discard") + ", ";
-                }
-                bindings += err_var;
-                emit_line(state, "auto [" + bindings + "] = " + call_cpp + ";");
+            if (fn_sym->return_type != INVALID_ID && !is_void_type(arena, fn_sym->return_type)) {
+                std::string discard = next_temp(state, "_discard");
+                emit_line(state, "auto [" + discard + ", " + err_var + "] = " + call_cpp + ";");
             } else {
-                emit_line(state, "cb_error " + err_var + " = " + call_cpp + ";");
+                emit_line(state, "auto " + err_var + " = " + call_cpp + ";");
             }
 
             emit_active_error_handler_or_bubble(arena, symbols, fn, err_var, scope, declared_vars, state);
@@ -1090,15 +976,15 @@ inline void emit_expr_stmt(
 }
 
 inline void emit_return(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     const ReturnStmt& stmt,
     const std::unordered_map<std::string, VarSymbol>& scope,
     EmitterState& state
 ) {
-    if (stmt.values.empty()) {
-        if (fn.returns_err && fn.return_types.empty()) {
+    if (!stmt.has_value) {
+        if (fn.is_fallible && (fn.return_type == INVALID_ID || is_void_type(arena, fn.return_type))) {
             emit_line(state, R"(return cb_error{"", 0};)");
         } else {
             emit_line(state, "return;");
@@ -1106,55 +992,34 @@ inline void emit_return(
         return;
     }
 
-    if (stmt.values.size() == 1) {
-        const ExprId first_id = stmt.values[0];
-        if (first_id < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[first_id].payload)) {
-            const auto& call = std::get<FuncCall>(arena.exprs[first_id].payload);
-            if (is_error_builtin_call(arena, call)) {
-                const std::string err_val = build_error_call_value(arena, symbols, call, scope, state);
-                emit_line(state, build_error_bubble_return(arena, symbols, fn, err_val));
-                return;
-            }
+    const ExprId first_id = stmt.value;
+    if (first_id < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[first_id].payload)) {
+        const auto& call = std::get<FuncCall>(arena.exprs[first_id].payload);
+        if (is_error_builtin_call(arena, call)) {
+            const std::string err_val = build_error_call_value(arena, symbols, call, scope, state);
+            emit_line(state, build_error_bubble_return(arena, symbols, state.current_module_id, fn, err_val));
+            return;
         }
     }
 
-    std::vector<std::string> rendered_vals;
-    rendered_vals.reserve(stmt.values.size() + 1);
-
-    for (size_t idx = 0; idx < stmt.values.size(); ++idx) {
-        const ExprId vid = stmt.values[idx];
-        std::string val_cpp = emit_expr(arena, symbols, vid, scope, state);
-        if (vid < arena.exprs.size() && std::holds_alternative<NullLiteral>(arena.exprs[vid].payload) &&
-            idx < fn.return_types.size()) {
-            const TypeId resolved_id = resolve_alias(arena, symbols, fn.return_types[idx]);
-            if (resolved_id < arena.types.size()) {
-                const TypeNode& tnode = arena.types[resolved_id];
-                if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
-                    val_cpp = map_type(arena, symbols, resolved_id) + "{}";
-                }
-            }
+    std::string val_cpp = emit_expr(arena, symbols, stmt.value, scope, state);
+    if (stmt.value < arena.exprs.size() && std::holds_alternative<NullLiteral>(arena.exprs[stmt.value].payload) &&
+        fn.return_type != INVALID_ID) {
+        const TypeNode tnode = resolve_alias_node(arena, symbols, state.current_module_id, fn.return_type);
+        if (!tnode.is_shared && symbols.types.find(tnode.name) != symbols.types.end()) {
+            val_cpp = map_type_node(arena, symbols, state.current_module_id, tnode) + "{}";
         }
-        rendered_vals.push_back(std::move(val_cpp));
     }
 
-    if (fn.returns_err && rendered_vals.size() == fn.return_types.size()) {
-        rendered_vals.push_back(R"(cb_error{"", 0})");
-    }
-
-    if (rendered_vals.size() == 1) {
-        emit_line(state, "return " + rendered_vals[0] + ";");
+    if (fn.is_fallible) {
+        emit_line(state, "return { " + val_cpp + R"(, cb_error{"", 0} };)");
     } else {
-        std::string joined;
-        for (size_t i = 0; i < rendered_vals.size(); ++i) {
-            if (i > 0) joined += ", ";
-            joined += rendered_vals[i];
-        }
-        emit_line(state, "return { " + joined + " };");
+        emit_line(state, "return " + val_cpp + ";");
     }
 }
 
 inline void emit_stmt(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     StmtId stmt_id,
@@ -1225,7 +1090,10 @@ inline void emit_stmt(
             }
 
             auto loop_scope = scope;
-            const TypeId int_tid = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}, false});
+            TypeId int_tid = symbols.type_int;
+            if (int_tid == INVALID_ID) {
+                int_tid = find_type(arena, "int");
+            }
             loop_scope[loop_var] = VarSymbol{loop_var, int_tid, false};
             auto loop_decls = declared_vars;
             loop_decls.insert(loop_var);
@@ -1240,8 +1108,8 @@ inline void emit_stmt(
 
         if (for_s.has_iterable) {
             std::string iter_cpp = emit_expr(arena, symbols, for_s.iterable, scope, state);
-            const TypeId iter_tid = infer_expr_type(arena, for_s.iterable, symbols, scope);
-            const TypeNode& iter_type = (iter_tid < arena.types.size()) ? arena.types[iter_tid] : TypeNode{};
+            const TypeId iter_tid = infer_expr_type(arena, for_s.iterable, symbols, scope, state.current_module_id);
+            const TypeNode& iter_type = get_type_node(arena, iter_tid);
             if (iter_type.is_shared) {
                 iter_cpp = "(*" + iter_cpp + ")";
             }
@@ -1254,7 +1122,10 @@ inline void emit_stmt(
 
             if (for_s.loop_vars.size() == 1) {
                 const std::string& lv = for_s.loop_vars[0];
-                const TypeId elem_t = !iter_type.type_args.empty() ? iter_type.type_args[0] : add_type(arena, TypeNode{1, 1, "auto", {}, false});
+                TypeId elem_t = symbols.type_auto;
+                if (!iter_type.type_args.empty()) {
+                    elem_t = iter_type.type_args[0];
+                }
                 loop_scope[lv] = VarSymbol{lv, elem_t, false};
                 emit_line(state, "for (auto& " + lv + " : " + iter_cpp + ") {");
             } else {
@@ -1287,7 +1158,10 @@ inline void emit_stmt(
         for (size_t idx = 0; idx < sel_s.cases.size(); ++idx) {
             const auto& c = sel_s.cases[idx];
             const std::string match_cpp = emit_expr(arena, symbols, c.match_expr, scope, state);
-            const std::string kw = (idx == 0) ? "if" : "} else if";
+            std::string kw = "} else if";
+            if (idx == 0) {
+                kw = "if";
+            }
             emit_line(state, kw + " (" + sel_tmp + " == " + match_cpp + ") {");
             state.indent_level += 1;
             auto c_decls = declared_vars;
@@ -1334,12 +1208,7 @@ inline void emit_stmt(
         return;
     }
 
-    if (std::holds_alternative<SpawnStmt>(payload)) {
-        const auto& sp_s = std::get<SpawnStmt>(payload);
-        const std::string call_cpp = emit_expr(arena, symbols, sp_s.call_expr, scope, state);
-        emit_line(state, "std::thread([=]() mutable { " + call_cpp + "; }).detach();");
-        return;
-    }
+
 
     if (std::holds_alternative<ReturnStmt>(payload)) {
         emit_return(arena, symbols, fn, std::get<ReturnStmt>(payload), scope, state);
@@ -1353,40 +1222,45 @@ inline void emit_stmt(
 }
 
 inline void emit_struct_decl(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const TypeDecl& td,
     EmitterState& state
 ) {
-    emit_line(state, "struct " + td.name + " {");
+    const std::string key = resolve_symbol_key(symbols, state.current_module_id, td.name);
+    std::string cpp_name = td.name;
+    if (symbols.types.count(key) > 0) {
+        cpp_name = symbols.types.at(key).cpp_name;
+    }
+    emit_line(state, "struct " + cpp_name + " {");
     state.indent_level += 1;
     for (const auto& f : td.fields) {
-        emit_line(state, map_type(arena, symbols, f.type_id) + " " + f.name + "{};");
+        emit_line(state, map_type(arena, symbols, state.current_module_id, f.type_id) + " " + f.name + "{};");
     }
     state.indent_level -= 1;
     emit_line(state, "};");
 }
 
 inline void emit_fn_decl(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const FnDecl& fn,
     EmitterState& state
 ) {
-    emit_line(state, fn_signature(arena, symbols, fn) + " {");
+    emit_line(state, fn_signature(arena, symbols, state.current_module_id, fn) + " {");
     state.indent_level += 1;
 
     std::unordered_map<std::string, VarSymbol> scope;
     std::unordered_set<std::string> declared_vars;
     for (const auto& p : fn.params) {
-        const TypeId resolved_t = resolve_alias(arena, symbols, p.type_id);
+        const TypeId resolved_t = resolve_alias(arena, symbols, state.current_module_id, p.type_id);
         scope[p.name] = VarSymbol{p.name, resolved_t, p.is_byref};
         declared_vars.insert(p.name);
     }
 
     emit_stmt_list(arena, symbols, fn, fn.body, scope, declared_vars, state);
 
-    if (fn.returns_err && fn.return_types.empty()) {
+    if (fn.is_fallible && (fn.return_type == INVALID_ID || is_void_type(arena, fn.return_type))) {
         bool ends_with_return = false;
         if (!fn.body.empty()) {
             const StmtId last_sid = fn.body.back();
@@ -1414,7 +1288,7 @@ inline void emit_fn_decl(
 }
 
 inline std::string emit_program(
-    AstArena& arena,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const Program& program
 ) {
@@ -1434,60 +1308,74 @@ inline std::string emit_program(
     if (!symbols.headers.empty()) {
         emit_line(state);
         for (const auto& hdr : symbols.headers) {
-            emit_line(state, "#include \"" + hdr + "\"");
+            emit_line(state, R"(#include ")" + hdr + R"(")");
         }
     }
 
-    std::vector<TypeDecl> struct_decls;
-    std::vector<AliasDecl> alias_decls;
-    std::vector<FnDecl> fn_decls;
-
+    std::vector<std::pair<std::string, TypeDecl>> struct_decls;
+    std::vector<std::pair<std::string, AliasDecl>> alias_decls;
+    std::vector<std::pair<std::string, FnDecl>> fn_decls;
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
         const auto& decl_node = arena.decls[did];
         if (std::holds_alternative<TypeDecl>(decl_node.payload)) {
             const auto& td = std::get<TypeDecl>(decl_node.payload);
-            if (!td.is_extern) struct_decls.push_back(td);
+            if (!td.is_extern) struct_decls.push_back({decl_node.module_id, td});
         } else if (std::holds_alternative<AliasDecl>(decl_node.payload)) {
-            alias_decls.push_back(std::get<AliasDecl>(decl_node.payload));
+            alias_decls.push_back({decl_node.module_id, std::get<AliasDecl>(decl_node.payload)});
         } else if (std::holds_alternative<FnDecl>(decl_node.payload)) {
             const auto& fd = std::get<FnDecl>(decl_node.payload);
-            if (!fd.is_extern) fn_decls.push_back(fd);
+            if (!fd.is_extern) fn_decls.push_back({decl_node.module_id, fd});
         }
     }
 
     if (!struct_decls.empty() || !alias_decls.empty()) {
         emit_line(state);
-        for (const auto& td : struct_decls) {
-            emit_line(state, "struct " + td.name + ";");
+        for (const auto& pair : struct_decls) {
+            state.current_module_id = pair.first;
+            const std::string key = resolve_symbol_key(symbols, state.current_module_id, pair.second.name);
+            std::string cpp_name = pair.second.name;
+            if (symbols.types.count(key) > 0) {
+                cpp_name = symbols.types.at(key).cpp_name;
+            }
+            emit_line(state, "struct " + cpp_name + ";");
         }
-        for (const auto& ad : alias_decls) {
-            emit_line(state, "using " + ad.name + " = " + map_type(arena, symbols, ad.target_type) + ";");
+        for (const auto& pair : alias_decls) {
+            state.current_module_id = pair.first;
+            const std::string key = resolve_symbol_key(symbols, state.current_module_id, pair.second.name);
+            std::string cpp_name = pair.second.name;
+            if (symbols.aliases.count(key) > 0) {
+                cpp_name = symbols.aliases.at(key).cpp_name;
+            }
+            emit_line(state, "using " + cpp_name + " = " + map_type(arena, symbols, state.current_module_id, pair.second.target_type) + ";");
         }
     }
 
     if (!struct_decls.empty()) {
         emit_line(state);
-        for (const auto& td : struct_decls) {
-            emit_struct_decl(arena, symbols, td, state);
+        for (const auto& pair : struct_decls) {
+            state.current_module_id = pair.first;
+            emit_struct_decl(arena, symbols, pair.second, state);
             emit_line(state);
         }
     }
 
     if (!fn_decls.empty()) {
         emit_line(state, "// Forward Declarations");
-        for (const auto& fd : fn_decls) {
-            emit_line(state, fn_signature(arena, symbols, fd) + ";");
+        for (const auto& pair : fn_decls) {
+            state.current_module_id = pair.first;
+            emit_line(state, fn_signature(arena, symbols, state.current_module_id, pair.second) + ";");
         }
         emit_line(state);
     }
 
-    for (const auto& fd : fn_decls) {
-        emit_fn_decl(arena, symbols, fd, state);
+    for (const auto& pair : fn_decls) {
+        state.current_module_id = pair.first;
+        emit_fn_decl(arena, symbols, pair.second, state);
         emit_line(state);
     }
 
-    if (symbols.functions.find("main") != symbols.functions.end()) {
+    if (symbols.functions.find(symbol_key("", "main")) != symbols.functions.end()) {
         emit_line(state, "int main() {");
         state.indent_level += 1;
         emit_line(state, "cb_main();");
@@ -1504,6 +1392,7 @@ inline std::string emit_program(
     return out;
 }
 
-}  // namespace cb
+} // namespace cb
 
-#endif  // CLEANBASIC_EMITTER_HPP
+#endif // CLEANBASIC_EMITTER_HPP
+

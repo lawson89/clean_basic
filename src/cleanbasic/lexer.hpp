@@ -43,7 +43,7 @@ inline bool is_single_keyword(std::string_view word) {
         "import", "as", "pub", "extern", "alias", "type", "fn",
         "dim", "const", "byref", "shared", "new", "if", "else",
         "for", "in", "to", "step", "case", "defer", "on", "error",
-        "spawn", "return", "break", "and", "or", "not",
+        "return", "break", "and", "or", "not",
         "true", "false", "null"
     };
     for (const auto& kw : keywords) {
@@ -56,7 +56,7 @@ inline bool is_single_keyword(std::string_view word) {
 
 inline bool is_type_keyword(std::string_view word) {
     static const std::vector<std::string_view> type_kws = {
-        "int", "float", "bool", "str", "list", "dict", "chan", "err"
+        "int", "float", "bool", "str", "list", "dict", "err"
     };
     for (const auto& tk : type_kws) {
         if (word == tk) {
@@ -179,16 +179,11 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
             return res;
         }
 
-        // 5. F-String or String literal
-        if ((ch == 'f' && i + 1 < n && code[i + 1] == '"') || ch == '"') {
-            const bool is_fstr = (ch == 'f');
+        // 5. String literal
+        if (ch == '"') {
             const char quote = '"';
             const std::size_t start_idx = i;
-            if (is_fstr) {
-                i += 2;
-            } else {
-                i += 1;
-            }
+            i += 1;
             bool closed = false;
             while (i < n && code[i] != static_cast<char>(10)) {
                 if (code[i] == backslash_char && i + 1 < n) {
@@ -214,11 +209,7 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
                 return res;
             }
             Token tok{};
-            if (is_fstr) {
-                tok.kind = "F_STRING";
-            } else {
-                tok.kind = "STRING";
-            }
+            tok.kind = "STRING";
             tok.value = std::string(code.substr(start_idx, i - start_idx));
             tok.line = line_num;
             tok.col = col;
@@ -272,19 +263,16 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
             continue;
         }
 
-        // 7. Numbers (taking care not to consume '..' range operator)
+        // 7. Numbers
         if (is_digit_char(ch)) {
             const std::size_t start_idx = i;
             while (i < n && is_digit_char(code[i])) {
                 i += 1;
             }
             if (i + 1 < n && code[i] == '.' && is_digit_char(code[i + 1])) {
-                std::size_t frac_end = i + 1;
-                while (frac_end < n && is_digit_char(code[frac_end])) {
-                    frac_end += 1;
-                }
-                if (!(frac_end < n && code[frac_end] == '.')) {
-                    i = frac_end;
+                i += 1;
+                while (i < n && is_digit_char(code[i])) {
+                    i += 1;
                 }
             }
             Token tok{};
@@ -296,12 +284,7 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
             continue;
         }
 
-        // 8. Multi-character operators: .., ==, !=, <=, >=
-        if (ch == '.' && i + 1 < n && code[i + 1] == '.') {
-            res.tokens.push_back(Token{"RANGE", "..", line_num, col});
-            i += 2;
-            continue;
-        }
+        // 8. Multi-character operators: ==, !=, <=, >=
         if ((ch == '=' || ch == '!' || ch == '<' || ch == '>') && i + 1 < n && code[i + 1] == '=') {
             res.tokens.push_back(Token{"OP_CMP", std::string(code.substr(i, 2)), line_num, col});
             i += 2;
