@@ -1,0 +1,146 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CleanBasic",
+  "scopeName": "source.cleanbasic",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#declarations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#function-calls" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.apostrophe.cleanbasic",
+          "match": "'.*$"
+        },
+        {
+          "name": "comment.line.number-sign.cleanbasic",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.cleanbasic",
+      "begin": "\"",
+      "end": "\"|(?=$)",
+      "patterns": [
+        {
+          "name": "constant.character.escape.cleanbasic",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.function.cleanbasic" },
+            "2": { "name": "entity.name.function.cleanbasic" }
+          }
+        },
+        {
+          "match": "\\b(type|alias)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.type.cleanbasic" },
+            "2": { "name": "entity.name.type.cleanbasic" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.multiword.cleanbasic",
+          "match": "\\b(?:import\\s+header|import\\s+link|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+for|end\\s+defer|end\\s+error|on\\s+error|can\\s+error)\\b"
+        },
+        {
+          "name": "keyword.control.cleanbasic",
+          "match": "\\b(?:import|as|pub|extern|type|alias|fn|return|if|else|for|to|step|in|case|defer|break)\\b"
+        },
+        {
+          "name": "storage.modifier.cleanbasic",
+          "match": "\\b(?:dim|const|byref)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.cleanbasic",
+          "match": "\\b(?:and|or|not)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.cleanbasic",
+          "match": "\\b(?:int|float|str|bool|cptr|err|list|dict)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.cleanbasic",
+          "match": "\\b(?:print|len|str|error)(?=\\s*\\()"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.cleanbasic",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.cleanbasic",
+          "match": "\\bnull\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.cleanbasic",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.cleanbasic",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.cleanbasic",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.cleanbasic",
+          "match": "\\+|-|\\*|/|&"
+        },
+        {
+          "name": "keyword.operator.assignment.cleanbasic",
+          "match": "="
+        }
+      ]
+    },
+    "function-calls": {
+      "patterns": [
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.call.cleanbasic" }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -909,7 +909,7 @@ inline DeclId parse_alias_decl(const std::vector<Token>& tokens, ParserState& st
     decl.name = name_tok.value;
     decl.target_type = target_type;
     decl.is_pub = is_pub;
-    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl));
+    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
 }
 
 inline DeclId parse_type_decl(const std::vector<Token>& tokens, ParserState& state, bool is_pub, bool is_extern, const Token& start_tok) {
@@ -933,7 +933,7 @@ inline DeclId parse_type_decl(const std::vector<Token>& tokens, ParserState& sta
             decl.fields = std::move(fields);
             decl.is_pub = is_pub;
             decl.is_extern = is_extern;
-            return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl));
+            return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
         }
     }
 
@@ -954,7 +954,7 @@ inline DeclId parse_type_decl(const std::vector<Token>& tokens, ParserState& sta
         expect_newline_or_eof(tokens, state);
     }
 
-    match(tokens, state, "KEYWORD", "end type");
+    const Token end_tok = match(tokens, state, "KEYWORD", "end type");
     expect_newline_or_eof(tokens, state);
 
     TypeDecl decl{};
@@ -962,7 +962,7 @@ inline DeclId parse_type_decl(const std::vector<Token>& tokens, ParserState& sta
     decl.fields = std::move(fields);
     decl.is_pub = is_pub;
     decl.is_extern = is_extern;
-    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl));
+    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, end_tok.line, name_tok.line, name_tok.col);
 }
 
 inline Param parse_param(const std::vector<Token>& tokens, ParserState& state) {
@@ -1028,7 +1028,7 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
         decl.body = std::move(body);
         decl.is_pub = is_pub;
         decl.is_extern = true;
-        return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl));
+        return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
     }
 
     while (!state.has_error && !check(tokens, state, "KEYWORD", "end fn")) {
@@ -1040,7 +1040,7 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
         skip_newlines(tokens, state);
     }
 
-    match(tokens, state, "KEYWORD", "end fn");
+    const Token end_tok = match(tokens, state, "KEYWORD", "end fn");
     expect_newline_or_eof(tokens, state);
 
     FnDecl decl{};
@@ -1051,7 +1051,7 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
     decl.body = std::move(body);
     decl.is_pub = is_pub;
     decl.is_extern = is_extern;
-    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl));
+    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, end_tok.line, name_tok.line, name_tok.col);
 }
 
 inline DeclId parse_top_level_decl(const std::vector<Token>& tokens, ParserState& state) {

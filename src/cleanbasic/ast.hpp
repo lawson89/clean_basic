@@ -282,6 +282,9 @@ using DeclVariant = std::variant<
 struct DeclNode {
     uint32_t line = 1;
     uint32_t col = 1;
+    uint32_t end_line = 1;
+    uint32_t name_line = 1;
+    uint32_t name_col = 1;
     DeclVariant payload;
     std::string module_id = "";
     std::string file_name = "main.cb";
@@ -520,12 +523,30 @@ inline DeclId add_decl(
     uint32_t col,
     DeclVariant payload,
     std::string_view module_id = "",
-    std::string_view file_name = "main.cb"
+    std::string_view file_name = "main.cb",
+    uint32_t end_line = 0,
+    uint32_t name_line = 0,
+    uint32_t name_col = 0
 ) {
     const DeclId id = static_cast<DeclId>(arena.decls.size());
     DeclNode node{};
     node.line = line;
     node.col = col;
+    if (end_line > 0) {
+        node.end_line = end_line;
+    } else {
+        node.end_line = line;
+    }
+    if (name_line > 0) {
+        node.name_line = name_line;
+    } else {
+        node.name_line = line;
+    }
+    if (name_col > 0) {
+        node.name_col = name_col;
+    } else {
+        node.name_col = col;
+    }
     node.payload = std::move(payload);
     node.module_id = std::string(module_id);
     node.file_name = std::string(file_name);

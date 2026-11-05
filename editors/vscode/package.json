@@ -1,0 +1,77 @@
+{
+  "name": "cleanbasic",
+  "displayName": "CleanBasic",
+  "description": "CleanBasic language support: TextMate syntax highlighting, code snippets, and Language Server Protocol (cleanbasic lsp) client.",
+  "version": "0.1.0",
+  "publisher": "cleanbasic",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:cleanbasic"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "cleanbasic",
+        "aliases": [
+          "CleanBasic",
+          "cleanbasic",
+          "cb"
+        ],
+        "extensions": [
+          ".cb"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "cleanbasic",
+        "scopeName": "source.cleanbasic",
+        "path": "./syntaxes/cleanbasic.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "cleanbasic",
+        "path": "./snippets/cleanbasic.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "cleanbasic.restartServer",
+        "title": "CleanBasic: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "CleanBasic",
+      "properties": {
+        "cleanbasic.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the cleanbasic executable. Defaults to <workspaceFolder>/build/cleanbasic if present, otherwise 'cleanbasic' on your system PATH."
+        },
+        "cleanbasic.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the JSON-RPC communication between VS Code and the CleanBasic Language Server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

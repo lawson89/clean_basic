@@ -1,0 +1,105 @@
+{
+  "Function Declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2}) as ${3:int}",
+      "\t${0}",
+      "end fn"
+    ],
+    "description": "Declare a CleanBasic function"
+  },
+  "Public Function Declaration": {
+    "prefix": "pub fn",
+    "body": [
+      "pub fn ${1:name}(${2}) as ${3:int}",
+      "\t${0}",
+      "end fn"
+    ],
+    "description": "Declare a public CleanBasic function"
+  },
+  "Fallible Function Declaration": {
+    "prefix": "fnerr",
+    "body": [
+      "fn ${1:name}(${2}) as ${3:int} can error",
+      "\t${0}",
+      "end fn"
+    ],
+    "description": "Declare a fallible CleanBasic function (can error)"
+  },
+  "Type Declaration": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Name}",
+      "\t${2:field} as ${3:int}",
+      "end type"
+    ],
+    "description": "Declare a CleanBasic value struct type"
+  },
+  "Public Type Declaration": {
+    "prefix": "pub type",
+    "body": [
+      "pub type ${1:Name}",
+      "\t${2:field} as ${3:int}",
+      "end type"
+    ],
+    "description": "Declare a public CleanBasic value struct type"
+  },
+  "If Block": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition}",
+      "\t${0}",
+      "end if"
+    ],
+    "description": "If conditional block"
+  },
+  "For Range Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:i} = ${2:0} to ${3:10}",
+      "\t${0}",
+      "end for"
+    ],
+    "description": "Inclusive range for loop"
+  },
+  "For In Loop": {
+    "prefix": "forin",
+    "body": [
+      "for ${1:item} in ${2:collection}",
+      "\t${0}",
+      "end for"
+    ],
+    "description": "Collection iteration for-in loop"
+  },
+  "Select Case Block": {
+    "prefix": "select",
+    "body": [
+      "select case ${1:value}",
+      "\tcase ${2:0}",
+      "\t\t${0}",
+      "\tcase else",
+      "\t\t",
+      "end select"
+    ],
+    "description": "Select case block (int or bool)"
+  },
+  "On Error Handler": {
+    "prefix": "onerror",
+    "body": [
+      "on error ${1:e}",
+      "\tprint(\"Error: \" & ${1:e}.msg)",
+      "\treturn${0}",
+      "end error"
+    ],
+    "description": "Scope-level on error handler block"
+  },
+  "Defer Block": {
+    "prefix": "defer",
+    "body": [
+      "defer",
+      "\t${0}",
+      "end defer"
+    ],
+    "description": "Deterministic scope-exit cleanup block"
+  }
+}

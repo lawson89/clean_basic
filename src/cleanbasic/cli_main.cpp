@@ -41,7 +41,7 @@ inline CliArgs parse_cli_args(const std::vector<std::string_view>& raw_args) {
         return args;
     }
 
-    if (raw_args.size() == 1 && (raw_args[0] == "lsp" || raw_args[0] == "--lsp")) {
+    if (!raw_args.empty() && (raw_args[0] == "lsp" || raw_args[0] == "--lsp")) {
         args.run_lsp = true;
         args.ok = true;
         return args;

@@ -25,6 +25,10 @@ struct TypeSymbol {
     bool is_pub = false;
     bool is_extern = false;
     std::string cpp_name;
+    std::string file_name = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t end_line = 1;
 };
 
 struct FnSymbol {
@@ -37,6 +41,10 @@ struct FnSymbol {
     bool is_pub = false;
     bool is_extern = false;
     std::string cpp_name;
+    std::string file_name = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t end_line = 1;
 };
 
 struct AliasSymbol {
@@ -46,6 +54,10 @@ struct AliasSymbol {
     TypeId target_type;
     bool is_pub = false;
     std::string cpp_name;
+    std::string file_name = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t end_line = 1;
 };
 
 struct VarSymbol {
@@ -53,6 +65,10 @@ struct VarSymbol {
     TypeId type_id = INVALID_ID;
     bool is_byref = false;
     bool is_const = false;
+    std::string file_name = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t end_line = 1;
 };
 
 struct GlobalSymbolTable {
@@ -921,7 +937,16 @@ inline void analyze_stmt(
                         const auto& tgt_node = arena.exprs[tgt_id];
                         if (std::holds_alternative<Identifier>(tgt_node.payload)) {
                             const auto& ident = std::get<Identifier>(tgt_node.payload);
-                            scope[ident.name] = VarSymbol{ident.name, resolved_decl, false, vassign.is_const};
+                            scope[ident.name] = VarSymbol{
+                                ident.name,
+                                resolved_decl,
+                                false,
+                                vassign.is_const,
+                                state.file_name,
+                                tgt_node.line,
+                                tgt_node.col,
+                                tgt_node.line
+                            };
                         }
                     }
                 }
@@ -932,8 +957,20 @@ inline void analyze_stmt(
                         const auto& tgt_node = arena.exprs[tgt_id];
                         if (std::holds_alternative<Identifier>(tgt_node.payload)) {
                             const auto& ident = std::get<Identifier>(tgt_node.payload);
-                            TypeId inferred = (val_type != INVALID_ID) ? val_type : symbols.type_int;
-                            scope[ident.name] = VarSymbol{ident.name, inferred, false, vassign.is_const};
+                            TypeId inferred = symbols.type_int;
+                            if (val_type != INVALID_ID) {
+                                inferred = val_type;
+                            }
+                            scope[ident.name] = VarSymbol{
+                                ident.name,
+                                inferred,
+                                false,
+                                vassign.is_const,
+                                state.file_name,
+                                tgt_node.line,
+                                tgt_node.col,
+                                tgt_node.line
+                            };
                         }
                     }
                 }
@@ -981,7 +1018,18 @@ inline void analyze_stmt(
         if (err_t == INVALID_ID) {
             err_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "err", {}});
         }
-        err_scope[err_block.err_var] = VarSymbol{err_block.err_var, err_t, false, false};
+        const VarSymbol err_var_sym{
+            err_block.err_var,
+            err_t,
+            false,
+            false,
+            state.file_name,
+            stmt_node.line,
+            stmt_node.col,
+            stmt_node.line
+        };
+        err_scope[err_block.err_var] = err_var_sym;
+        scope[err_block.err_var] = err_var_sym;
         analyze_block(state, arena, fn, err_block.body, symbols, err_scope, false);
         if (state.has_error) return;
 
@@ -1025,7 +1073,16 @@ inline void analyze_stmt(
             }
             if (!for_stmt.loop_vars.empty()) {
                 const TypeId int_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}});
-                scope[for_stmt.loop_vars[0]] = VarSymbol{for_stmt.loop_vars[0], int_t, false};
+                scope[for_stmt.loop_vars[0]] = VarSymbol{
+                    for_stmt.loop_vars[0],
+                    int_t,
+                    false,
+                    false,
+                    state.file_name,
+                    stmt_node.line,
+                    stmt_node.col,
+                    stmt_node.line
+                };
             }
         } else if (for_stmt.has_iterable) {
             validate_expr_calls(state, arena, fn, for_stmt.iterable, symbols, scope, false);
@@ -1033,18 +1090,54 @@ inline void analyze_stmt(
             if (iter_tid < arena.types.size()) {
                 const auto& iter_t = arena.types[iter_tid];
                 if (iter_t.name == "list" && !iter_t.type_args.empty() && !for_stmt.loop_vars.empty()) {
-                    scope[for_stmt.loop_vars[0]] = VarSymbol{for_stmt.loop_vars[0], iter_t.type_args[0], false};
+                    scope[for_stmt.loop_vars[0]] = VarSymbol{
+                        for_stmt.loop_vars[0],
+                        iter_t.type_args[0],
+                        false,
+                        false,
+                        state.file_name,
+                        stmt_node.line,
+                        stmt_node.col,
+                        stmt_node.line
+                    };
                 } else if (iter_t.name == "dict" && iter_t.type_args.size() == 2) {
                     if (for_stmt.loop_vars.size() >= 1) {
-                        scope[for_stmt.loop_vars[0]] = VarSymbol{for_stmt.loop_vars[0], iter_t.type_args[0], false};
+                        scope[for_stmt.loop_vars[0]] = VarSymbol{
+                            for_stmt.loop_vars[0],
+                            iter_t.type_args[0],
+                            false,
+                            false,
+                            state.file_name,
+                            stmt_node.line,
+                            stmt_node.col,
+                            stmt_node.line
+                        };
                     }
                     if (for_stmt.loop_vars.size() >= 2) {
-                        scope[for_stmt.loop_vars[1]] = VarSymbol{for_stmt.loop_vars[1], iter_t.type_args[1], false};
+                        scope[for_stmt.loop_vars[1]] = VarSymbol{
+                            for_stmt.loop_vars[1],
+                            iter_t.type_args[1],
+                            false,
+                            false,
+                            state.file_name,
+                            stmt_node.line,
+                            stmt_node.col,
+                            stmt_node.line
+                        };
                     }
                 } else {
                     for (const auto& lv : for_stmt.loop_vars) {
                         const TypeId auto_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "auto", {}});
-                        scope[lv] = VarSymbol{lv, auto_t, false};
+                        scope[lv] = VarSymbol{
+                            lv,
+                            auto_t,
+                            false,
+                            false,
+                            state.file_name,
+                            stmt_node.line,
+                            stmt_node.col,
+                            stmt_node.line
+                        };
                     }
                 }
             }
@@ -1145,7 +1238,16 @@ inline void analyze_fn(
     std::unordered_map<std::string, VarSymbol> scope;
     for (const auto& param : fn.params) {
         const TypeId resolved_tid = resolve_alias(arena, symbols, state.module_id, param.type_id);
-        scope[param.name] = VarSymbol{param.name, resolved_tid, param.is_byref};
+        scope[param.name] = VarSymbol{
+            param.name,
+            resolved_tid,
+            param.is_byref,
+            false,
+            state.file_name,
+            param.line,
+            param.col,
+            param.line
+        };
     }
 
     analyze_block(state, arena, fn, fn.body, symbols, scope, false);
@@ -1217,6 +1319,10 @@ inline AnalysisResult analyze_program(
             asym.target_type = adecl.target_type;
             asym.is_pub = adecl.is_pub;
             asym.cpp_name = make_cpp_type_name(decl_node.module_id, adecl.name, false);
+            asym.file_name = decl_node.file_name;
+            asym.line = decl_node.name_line;
+            asym.col = decl_node.name_col;
+            asym.end_line = decl_node.end_line;
             result.symbols.aliases[asym.key] = std::move(asym);
         } else if (std::holds_alternative<TypeDecl>(payload)) {
             const auto& tdecl = std::get<TypeDecl>(payload);
@@ -1228,6 +1334,10 @@ inline AnalysisResult analyze_program(
             tsym.is_extern = tdecl.is_extern;
             tsym.cpp_name = make_cpp_type_name(decl_node.module_id, tdecl.name, tdecl.is_extern);
             tsym.field_order = tdecl.fields;
+            tsym.file_name = decl_node.file_name;
+            tsym.line = decl_node.name_line;
+            tsym.col = decl_node.name_col;
+            tsym.end_line = decl_node.end_line;
             const std::string key_copy = tsym.key;
             result.symbols.types[key_copy] = std::move(tsym);
             // Pre-register canonical struct types in the arena
@@ -1258,6 +1368,10 @@ inline AnalysisResult analyze_program(
             fsym.is_extern = fdecl.is_extern;
             fsym.is_fallible = fdecl.is_fallible;
             fsym.cpp_name = make_cpp_fn_name(decl_node.module_id, fdecl.name, fdecl.is_extern);
+            fsym.file_name = decl_node.file_name;
+            fsym.line = decl_node.name_line;
+            fsym.col = decl_node.name_col;
+            fsym.end_line = decl_node.end_line;
             fsym.params.reserve(fdecl.params.size());
             for (const auto& p : fdecl.params) {
                 Param resolved_p = p;
