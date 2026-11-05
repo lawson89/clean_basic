@@ -993,6 +993,9 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
         params.push_back(parse_param(tokens, state));
         while (check(tokens, state, "COMMA")) {
             match(tokens, state, "COMMA");
+            if (check(tokens, state, "RPAREN")) {
+                break;
+            }
             params.push_back(parse_param(tokens, state));
         }
     }

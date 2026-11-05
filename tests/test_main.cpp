@@ -1374,3 +1374,81 @@ end fn
         CHECK(m4_msg.value().find("private to module") != std::string::npos);
     }
 }
+
+TEST_CASE("Implicit multiline continuation inside (), [], and {} and trailing parameter commas", "[lexer][parser][multiline]") {
+    SECTION("Multiline function params with trailing comma, struct constructors, list/dict literals, and parenthesized expressions transpile") {
+        const std::string src = R"(type Config
+    host as str
+    port as int
+    retries as int
+end type
+
+fn make_config(
+    host as str,
+    port as int, # inline hash comment
+    retries as int, ' trailing comma + single-quote comment
+) as Config
+    return Config(
+        host = host,
+        port = port,
+        retries = retries,
+    )
+end fn
+
+fn main() as int
+    dim cfg = make_config(
+        "localhost",
+        8080,
+        3,
+    )
+
+    dim ports as list[int] = [
+        80,
+        443,
+        cfg.port,
+    ]
+
+    dim labels as dict[str, int] = {
+        "http": ports[0],
+        "https": ports[1],
+        "app": ports[2],
+    }
+
+    dim ok = (
+        cfg.port == 8080
+        and cfg.retries == 3
+        and labels["app"] == 8080
+    )
+
+    if ok
+        return 0
+    end if
+    return 1
+end fn
+)";
+        const auto res = cb::transpile_source(src, "multiline.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cpp_code.find("Config make_config(std::string host, int port, int retries)") != std::string::npos);
+    }
+
+    SECTION("Line and column numbers remain exact inside and after multiline bracketed blocks") {
+        const std::string src = R"(fn compute(
+    a as int,
+    b as int,
+) as int
+    dim items as list[int] = [
+        a,
+        b,
+    ]
+    undeclared_var = items[0]
+    return 0
+end fn
+)";
+        const auto check_res = cb::check_source(src, "diag_multiline.cb");
+        REQUIRE_FALSE(check_res.ok);
+        CHECK(check_res.error.kind == "AnalyzerError");
+        CHECK(check_res.error.line == 9);
+        CHECK(check_res.error.col == 5);
+        CHECK(check_res.error.message.find("Undeclared variable 'undeclared_var'") != std::string::npos);
+    }
+}

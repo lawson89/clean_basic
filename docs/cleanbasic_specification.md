@@ -39,7 +39,7 @@ FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as
                     Statement*
                     "end fn" NEWLINE
                   | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
-ParamList       ::= Param ("," Param)*
+ParamList       ::= Param ("," Param)* [","]
 Param           ::= ["byref"] Identifier "as" Type
 
 Statement       ::= VarDecl | Assignment | ExprStmt

@@ -106,6 +106,7 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
 
     uint32_t line_num = 1;
     std::size_t line_start = 0;
+    uint32_t bracket_depth = 0;
     std::size_t i = 0;
     const std::size_t n = code.size();
 
@@ -127,19 +128,21 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
             continue;
         }
 
-        // 3. Consecutive newlines collapsed into a single NEWLINE token
+        // 3. Consecutive newlines collapsed into a single NEWLINE token (suppressed inside open brackets)
         if (ch == nl_ch) {
             uint32_t nl_count = 0;
             while (i < n && code[i] == nl_ch) {
                 nl_count += 1;
                 i += 1;
             }
-            Token tok{};
-            tok.kind = "NEWLINE";
-            tok.value = std::string(1, nl_ch);
-            tok.line = line_num;
-            tok.col = col;
-            res.tokens.push_back(std::move(tok));
+            if (bracket_depth == 0) {
+                Token tok{};
+                tok.kind = "NEWLINE";
+                tok.value = std::string(1, nl_ch);
+                tok.line = line_num;
+                tok.col = col;
+                res.tokens.push_back(std::move(tok));
+            }
             line_num += nl_count;
             line_start = i;
             continue;
@@ -323,31 +326,43 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
             continue;
         }
         if (ch == '(') {
+            bracket_depth += 1;
             res.tokens.push_back(Token{"LPAREN", "(", line_num, col});
             i += 1;
             continue;
         }
         if (ch == ')') {
+            if (bracket_depth > 0) {
+                bracket_depth -= 1;
+            }
             res.tokens.push_back(Token{"RPAREN", ")", line_num, col});
             i += 1;
             continue;
         }
         if (ch == '[') {
+            bracket_depth += 1;
             res.tokens.push_back(Token{"LBRACKET", "[", line_num, col});
             i += 1;
             continue;
         }
         if (ch == ']') {
+            if (bracket_depth > 0) {
+                bracket_depth -= 1;
+            }
             res.tokens.push_back(Token{"RBRACKET", "]", line_num, col});
             i += 1;
             continue;
         }
         if (ch == '{') {
+            bracket_depth += 1;
             res.tokens.push_back(Token{"LBRACE", "{", line_num, col});
             i += 1;
             continue;
         }
         if (ch == '}') {
+            if (bracket_depth > 0) {
+                bracket_depth -= 1;
+            }
             res.tokens.push_back(Token{"RBRACE", "}", line_num, col});
             i += 1;
             continue;

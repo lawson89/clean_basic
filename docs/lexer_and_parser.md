@@ -47,12 +47,13 @@ struct LexResult {
 | `LPAREN` / `RPAREN` | `(`, `)` | Parenthesized expressions, parameter lists, and function/constructor argument lists. |
 | `LBRACKET` / `RBRACKET` | `[`, `]` | Generic type parameter brackets (`list[int]`), index access (`a[i]`), and list literals (`[1, 2]`). |
 | `LBRACE` / `RBRACE` | `{`, `}` | Dictionary literals (`{"a": 1}`). |
-| `NEWLINE` | `"\n"` | Statement terminator. Consecutive `\n` characters (and blank/comment-only lines) collapse into a single `NEWLINE` token while advancing `line_num` accurately. |
+| `NEWLINE` | `"\n"` | Statement terminator (emitted only when `bracket_depth == 0`). Consecutive `\n` characters (and blank/comment-only lines) collapse into a single `NEWLINE` token while advancing `line_num` accurately. |
 | `EOF` | `""` | Sentinel token appended at the end of every token stream. |
 
-### 1.2 Comments and Whitespace
+### 1.2 Comments, Whitespace, and Implicit Multiline Continuation
 * **Horizontal Whitespace:** Spaces (`' '`), tabs (`'\t'`), and carriage returns (`'\r'`) are skipped silently.
 * **Line Comments:** Both classic BASIC single-quote comments (`' comment`) and hash comments (`# comment`) are supported and consume characters until the next `\n`.
+* **Implicit Multiline Continuation Inside `()`, `[]`, and `{}`:** `cb::tokenize()` tracks `bracket_depth`, incrementing on `LPAREN` (`(`), `LBRACKET` (`[`), and `LBRACE` (`{`) and decrementing (when `> 0`) on `RPAREN` (`)`), `RBRACKET` (`]`), and `RBRACE` (`}`). While `bracket_depth > 0`, `NEWLINE` tokens are suppressed while `line_num` and `line_start` still advance on every newline. This allows multiline function parameter lists, function/struct constructor call arguments, `list[T]` literals, `dict[K, V]` literals, and parenthesized expressions (including trailing commas and inline comments) to span multiple lines naturally with exact diagnostic line and column coordinates.
 
 ### 1.3 Multi-Word Keyword Coalescing (`match_second_word_for_multi_kw`)
 
