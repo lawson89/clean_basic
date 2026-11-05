@@ -5,6 +5,8 @@
 #include "src/cleanbasic/analyzer.hpp"
 #include "src/cleanbasic/emitter.hpp"
 #include "src/cleanbasic/pipeline.hpp"
+#include "src/cleanbasic/json.hpp"
+#include "src/cleanbasic/lsp.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -889,4 +891,486 @@ end fn
     const int cli_rc = std::system(cli_cmd.c_str());
     CHECK(cli_rc == 0);
     CHECK(std::filesystem::exists(cli_out_path, ec));
+}
+
+TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and JSON-RPC framing", "[json]") {
+    SECTION("Round-trip parsing and compact serialization of nested objects, arrays, numbers, bools, and null") {
+        const std::string input = R"({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "negative": -100,
+            "pi": 3.25,
+            "active": true,
+            "disabled": false,
+            "nothing": null,
+            "tags": ["lsp", "cleanbasic"],
+            "nested": {"x": 10, "y": 20}
+        })";
+
+        const auto parsed = cb::parse_json(input);
+        REQUIRE(parsed.ok);
+        REQUIRE(parsed.root != cb::INVALID_ID);
+
+        CHECK(cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "jsonrpc")) == "2.0");
+        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "id")) == 42);
+        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "negative")) == -100);
+        CHECK(cb::json_get_float(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "pi")) == 3.25);
+        CHECK(cb::json_get_bool(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "active")) == true);
+        CHECK(cb::json_get_bool(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "disabled")) == false);
+        CHECK(cb::json_is_null(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "nothing")));
+
+        const cb::JsonId tags_id = cb::json_get_field(parsed.arena, parsed.root, "tags");
+        REQUIRE(tags_id != cb::INVALID_ID);
+        REQUIRE(std::holds_alternative<cb::JsonArray>(parsed.arena.nodes[tags_id]));
+        const auto& tags = std::get<cb::JsonArray>(parsed.arena.nodes[tags_id]).elements;
+        REQUIRE(tags.size() == 2);
+        CHECK(cb::json_get_string(parsed.arena, tags[0]) == "lsp");
+        CHECK(cb::json_get_string(parsed.arena, tags[1]) == "cleanbasic");
+
+        const cb::JsonId nested_id = cb::json_get_field(parsed.arena, parsed.root, "nested");
+        REQUIRE(nested_id != cb::INVALID_ID);
+        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, nested_id, "x")) == 10);
+        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, nested_id, "y")) == 20);
+
+        const std::string serialized = cb::serialize_json(parsed.arena, parsed.root);
+        CHECK(serialized == R"({"jsonrpc":"2.0","id":42,"negative":-100,"pi":3.25,"active":true,"disabled":false,"nothing":null,"tags":["lsp","cleanbasic"],"nested":{"x":10,"y":20}})");
+
+        const auto reparsed = cb::parse_json(serialized);
+        REQUIRE(reparsed.ok);
+        CHECK(cb::serialize_json(reparsed.arena, reparsed.root) == serialized);
+    }
+
+    SECTION("String escape sequences and UTF-8 unicode decoding and re-escaping") {
+        const std::string bs(1, cb::JSON_BACKSLASH);
+        const std::string dq(1, cb::JSON_DQUOTE);
+        const std::string escaped_json =
+            "{" + dq + "msg" + dq + ":" + dq + "quote:" + bs + dq +
+            " slash:" + bs + bs +
+            " fwd:" + bs + "/" +
+            " bs:" + bs + "b" +
+            " ff:" + bs + "f" +
+            " nl:" + bs + "n" +
+            " cr:" + bs + "r" +
+            " tab:" + bs + "t" +
+            " hex:" + bs + "u0041" + bs + "u00e9" + dq + "}";
+        const auto parsed = cb::parse_json(escaped_json);
+        REQUIRE(parsed.ok);
+
+        const auto msg_opt = cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "msg"));
+        REQUIRE(msg_opt.has_value());
+        std::string expected_msg = "quote:" + dq + " slash:" + bs + " fwd:/ bs:\b ff:\f nl:\n cr:\r tab:\t hex:A";
+        expected_msg.push_back(static_cast<char>(0xC3));
+        expected_msg.push_back(static_cast<char>(0xA9));
+        CHECK(msg_opt.value() == expected_msg);
+
+        const std::string reserialized = cb::serialize_json(parsed.arena, parsed.root);
+        const auto roundtrip = cb::parse_json(reserialized);
+        REQUIRE(roundtrip.ok);
+        CHECK(cb::json_get_string(roundtrip.arena, cb::json_get_field(roundtrip.arena, roundtrip.root, "msg")) == expected_msg);
+    }
+
+    SECTION("Ergonomic builder and query functions for constructing LSP payloads") {
+        cb::JsonArena arena;
+        const cb::JsonId root = cb::json_add_object(arena);
+        cb::json_object_set(arena, root, "jsonrpc", cb::json_add_string(arena, "2.0"));
+        cb::json_object_set(arena, root, "id", cb::json_add_int(arena, 1));
+        cb::json_object_set(arena, root, "id", cb::json_add_int(arena, 7)); // overwrite existing key
+
+        const cb::JsonId result_obj = cb::json_add_object(arena);
+        const cb::JsonId items_arr = cb::json_add_array(arena);
+        cb::json_array_push(arena, items_arr, cb::json_add_string(arena, "fn"));
+        cb::json_array_push(arena, items_arr, cb::json_add_bool(arena, true));
+        cb::json_array_push(arena, items_arr, cb::json_add_null(arena));
+        cb::json_array_push(arena, items_arr, cb::json_add_float(arena, 1.5));
+        cb::json_object_set(arena, result_obj, "items", items_arr);
+        cb::json_object_set(arena, root, "result", result_obj);
+
+        CHECK(cb::json_get_int(arena, cb::json_get_field(arena, root, "id")) == 7);
+        CHECK(cb::json_get_field(arena, root, "missing") == cb::JSON_INVALID_ID);
+        CHECK_FALSE(cb::json_get_string(arena, cb::JSON_INVALID_ID).has_value());
+        CHECK_FALSE(cb::json_get_int(arena, cb::json_get_field(arena, root, "jsonrpc")).has_value());
+        CHECK_FALSE(cb::json_get_bool(arena, cb::json_get_field(arena, root, "id")).has_value());
+
+        const std::string out = cb::serialize_json(arena, root);
+        CHECK(out == R"({"jsonrpc":"2.0","id":7,"result":{"items":["fn",true,null,1.5]}})");
+    }
+
+    SECTION("Rejects malformed JSON inputs without throwing exceptions") {
+        const std::string bs(1, cb::JSON_BACKSLASH);
+        const std::string dq(1, cb::JSON_DQUOTE);
+        const std::vector<std::string> bad_inputs = {
+            "",
+            "   ",
+            "{",
+            R"({"a": 1,})",
+            "[1, 2,]",
+            R"({"a" 1})",
+            R"({a: 1})",
+            R"("unterminated)",
+            dq + bs + "xbad" + dq,
+            dq + bs + "u12G4" + dq,
+            "01",
+            "1.",
+            "1e+",
+            "tru",
+            "fals",
+            "nul",
+            R"({"a": 1} trailing)"
+        };
+
+        for (const auto& bad : bad_inputs) {
+            const auto res = cb::parse_json(bad);
+            CHECK_FALSE(res.ok);
+            CHECK_FALSE(res.error.empty());
+        }
+    }
+
+    SECTION("JSON-RPC 2.0 Content-Length framing read and write over streams") {
+        std::stringstream stream;
+        const std::string msg1 = R"({"jsonrpc":"2.0","id":1,"method":"initialize"})";
+        const std::string msg2 = R"({"jsonrpc":"2.0","method":"initialized","params":{}})";
+
+        cb::write_jsonrpc_message(stream, msg1);
+        stream << "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n";
+        cb::write_jsonrpc_message(stream, msg2);
+
+        const auto read1 = cb::read_jsonrpc_message(stream);
+        REQUIRE(read1.has_value());
+        CHECK(read1.value() == msg1);
+
+        const auto read2 = cb::read_jsonrpc_message(stream);
+        REQUIRE(read2.has_value());
+        CHECK(read2.value() == msg2);
+
+        const auto read_eof = cb::read_jsonrpc_message(stream);
+        CHECK_FALSE(read_eof.has_value());
+
+        std::stringstream truncated("Content-Length: 50\r\n\r\n" + std::string(R"({"short":true})"));
+        CHECK_FALSE(cb::read_jsonrpc_message(truncated).has_value());
+
+        std::stringstream missing_len("Custom-Header: 123\r\n\r\n{}");
+        CHECK_FALSE(cb::read_jsonrpc_message(missing_len).has_value());
+    }
+}
+
+TEST_CASE("CleanBasic Language Server Phase 1: Core Loop, In-Memory Overlay & Live Diagnostics", "[lsp]") {
+    SECTION("URI and file path conversion helpers") {
+        CHECK(cb::uri_to_file_path("file:///workspace/project/main.cb") == "/workspace/project/main.cb");
+        CHECK(cb::uri_to_file_path("file://localhost/workspace/main.cb") == "/workspace/main.cb");
+        CHECK(cb::uri_to_file_path("file:///workspace/my%20folder/main.cb") == "/workspace/my folder/main.cb");
+        CHECK(cb::uri_to_file_path("file:///C:/Users/dev/main.cb") == "C:/Users/dev/main.cb");
+        CHECK(cb::file_path_to_uri("/workspace/project/main.cb") == "file:///workspace/project/main.cb");
+        CHECK(cb::file_path_to_uri("relative/main.cb") == "file:///relative/main.cb");
+    }
+
+    SECTION("Full JSON-RPC lifecycle: initialize, didOpen, publishDiagnostics, didChange, didClose, shutdown, exit") {
+        std::stringstream client_to_server;
+        std::stringstream server_to_client;
+
+        // 1. initialize request (id = 1)
+        cb::write_jsonrpc_message(
+            client_to_server,
+            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///workspace"}})"
+        );
+
+        // 2. initialized notification
+        cb::write_jsonrpc_message(
+            client_to_server,
+            R"({"jsonrpc":"2.0","method":"initialized","params":{}})"
+        );
+
+        // 3. textDocument/didOpen with valid CleanBasic code
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/valid.cb"));
+            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
+            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(fn main() as int
+    dim x = 42
+    return x
+end fn
+)"));
+            cb::json_object_set(arena, params, "textDocument", td);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // 4. textDocument/didOpen with invalid CleanBasic code (const reassignment on line 3, 1-based -> line 2, 0-based)
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/broken.cb"));
+            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
+            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(fn main() as int
+    const x = 10
+    x = 20
+    return x
+end fn
+)"));
+            cb::json_object_set(arena, params, "textDocument", td);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // 5. textDocument/didChange fixing broken.cb (changing const to dim)
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/broken.cb"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
+            cb::json_object_set(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::json_add_array(arena);
+            const cb::JsonId change_item = cb::json_add_object(arena);
+            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(fn main() as int
+    dim x = 10
+    x = 20
+    return x
+end fn
+)"));
+            cb::json_array_push(arena, changes, change_item);
+            cb::json_object_set(arena, params, "contentChanges", changes);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // 6. textDocument/didClose on broken.cb
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didClose"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/broken.cb"));
+            cb::json_object_set(arena, params, "textDocument", td);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // 7. shutdown request (id = 2) and exit notification
+        cb::write_jsonrpc_message(
+            client_to_server,
+            R"({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null})"
+        );
+        cb::write_jsonrpc_message(
+            client_to_server,
+            R"({"jsonrpc":"2.0","method":"exit"})"
+        );
+
+        const int exit_code = cb::run_lsp_server(client_to_server, server_to_client);
+        CHECK(exit_code == 0);
+
+        // Verify Message 1: initialize response
+        const auto resp1_raw = cb::read_jsonrpc_message(server_to_client);
+        REQUIRE(resp1_raw.has_value());
+        const auto resp1 = cb::parse_json(resp1_raw.value());
+        REQUIRE(resp1.ok);
+        CHECK(cb::json_get_int(resp1.arena, cb::json_get_field(resp1.arena, resp1.root, "id")) == 1);
+        const cb::JsonId res1_obj = cb::json_get_field(resp1.arena, resp1.root, "result");
+        const cb::JsonId caps_obj = cb::json_get_field(resp1.arena, res1_obj, "capabilities");
+        CHECK(cb::json_get_int(resp1.arena, cb::json_get_field(resp1.arena, caps_obj, "textDocumentSync")) == 1);
+        const cb::JsonId srv_info = cb::json_get_field(resp1.arena, res1_obj, "serverInfo");
+        CHECK(cb::json_get_string(resp1.arena, cb::json_get_field(resp1.arena, srv_info, "name")) == "cleanbasic-lsp");
+
+        // Verify Message 2: publishDiagnostics for valid.cb (empty diagnostics array)
+        const auto diag1_raw = cb::read_jsonrpc_message(server_to_client);
+        REQUIRE(diag1_raw.has_value());
+        const auto diag1 = cb::parse_json(diag1_raw.value());
+        REQUIRE(diag1.ok);
+        CHECK(cb::json_get_string(diag1.arena, cb::json_get_field(diag1.arena, diag1.root, "method")) == "textDocument/publishDiagnostics");
+        const cb::JsonId diag1_params = cb::json_get_field(diag1.arena, diag1.root, "params");
+        CHECK(cb::json_get_string(diag1.arena, cb::json_get_field(diag1.arena, diag1_params, "uri")) == "file:///workspace/valid.cb");
+        const cb::JsonId diag1_arr_id = cb::json_get_field(diag1.arena, diag1_params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag1.arena.nodes[diag1_arr_id]));
+        CHECK(std::get<cb::JsonArray>(diag1.arena.nodes[diag1_arr_id]).elements.empty());
+
+        // Verify Message 3: publishDiagnostics for broken.cb (1 error diagnostic at 0-based line 2, char 4)
+        const auto diag2_raw = cb::read_jsonrpc_message(server_to_client);
+        REQUIRE(diag2_raw.has_value());
+        const auto diag2 = cb::parse_json(diag2_raw.value());
+        REQUIRE(diag2.ok);
+        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, diag2.root, "method")) == "textDocument/publishDiagnostics");
+        const cb::JsonId diag2_params = cb::json_get_field(diag2.arena, diag2.root, "params");
+        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, diag2_params, "uri")) == "file:///workspace/broken.cb");
+        const cb::JsonId diag2_arr_id = cb::json_get_field(diag2.arena, diag2_params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag2.arena.nodes[diag2_arr_id]));
+        const auto& diag2_elems = std::get<cb::JsonArray>(diag2.arena.nodes[diag2_arr_id]).elements;
+        REQUIRE(diag2_elems.size() == 1);
+        const cb::JsonId err_diag = diag2_elems[0];
+        CHECK(cb::json_get_int(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "severity")) == 1);
+        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "source")) == "cleanbasic");
+        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "code")) == "AnalyzerError");
+        const auto err_msg_opt = cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "message"));
+        REQUIRE(err_msg_opt.has_value());
+        CHECK(err_msg_opt.value().find("Cannot reassign const variable 'x'") != std::string::npos);
+
+        const cb::JsonId range_obj = cb::json_get_field(diag2.arena, err_diag, "range");
+        const cb::JsonId start_obj = cb::json_get_field(diag2.arena, range_obj, "start");
+        CHECK(cb::json_get_int(diag2.arena, cb::json_get_field(diag2.arena, start_obj, "line")) == 2);
+        CHECK(cb::json_get_int(diag2.arena, cb::json_get_field(diag2.arena, start_obj, "character")) == 4);
+
+        // Verify Message 4: publishDiagnostics after didChange fixes broken.cb (diagnostics cleared)
+        const auto diag3_raw = cb::read_jsonrpc_message(server_to_client);
+        REQUIRE(diag3_raw.has_value());
+        const auto diag3 = cb::parse_json(diag3_raw.value());
+        REQUIRE(diag3.ok);
+        const cb::JsonId diag3_params = cb::json_get_field(diag3.arena, diag3.root, "params");
+        CHECK(cb::json_get_string(diag3.arena, cb::json_get_field(diag3.arena, diag3_params, "uri")) == "file:///workspace/broken.cb");
+        const cb::JsonId diag3_arr_id = cb::json_get_field(diag3.arena, diag3_params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag3.arena.nodes[diag3_arr_id]));
+        CHECK(std::get<cb::JsonArray>(diag3.arena.nodes[diag3_arr_id]).elements.empty());
+
+        // Verify Message 5: publishDiagnostics after didClose on broken.cb (diagnostics cleared)
+        const auto diag4_raw = cb::read_jsonrpc_message(server_to_client);
+        REQUIRE(diag4_raw.has_value());
+        const auto diag4 = cb::parse_json(diag4_raw.value());
+        REQUIRE(diag4.ok);
+        const cb::JsonId diag4_params = cb::json_get_field(diag4.arena, diag4.root, "params");
+        const cb::JsonId diag4_arr_id = cb::json_get_field(diag4.arena, diag4_params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag4.arena.nodes[diag4_arr_id]));
+        CHECK(std::get<cb::JsonArray>(diag4.arena.nodes[diag4_arr_id]).elements.empty());
+
+        // Verify Message 6: shutdown response
+        const auto shutdown_raw = cb::read_jsonrpc_message(server_to_client);
+        REQUIRE(shutdown_raw.has_value());
+        const auto shutdown_resp = cb::parse_json(shutdown_raw.value());
+        REQUIRE(shutdown_resp.ok);
+        CHECK(cb::json_get_int(shutdown_resp.arena, cb::json_get_field(shutdown_resp.arena, shutdown_resp.root, "id")) == 2);
+        CHECK(cb::json_is_null(shutdown_resp.arena, cb::json_get_field(shutdown_resp.arena, shutdown_resp.root, "result")));
+    }
+
+    SECTION("In-memory document overlay resolves unsaved imported modules across open buffers") {
+        std::stringstream client_to_server;
+        std::stringstream server_to_client;
+
+        // Open an unsaved module in memory (does not exist on disk)
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/math_util.cb"));
+            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
+            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(pub fn double_val(x as int) as int
+    return x * 2
+end fn
+)"));
+            cb::json_object_set(arena, params, "textDocument", td);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // Open main.cb importing math_util.cb and calling math_util.double_val(21)
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/main.cb"));
+            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
+            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(import "math_util.cb"
+fn main() as int
+    return math_util.double_val(21)
+end fn
+)"));
+            cb::json_object_set(arena, params, "textDocument", td);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // Modify math_util.cb in memory to remove 'pub' from double_val, then re-validate main.cb
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/math_util.cb"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
+            cb::json_object_set(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::json_add_array(arena);
+            const cb::JsonId change_item = cb::json_add_object(arena);
+            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(fn double_val(x as int) as int
+    return x * 2
+end fn
+)"));
+            cb::json_array_push(arena, changes, change_item);
+            cb::json_object_set(arena, params, "contentChanges", changes);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/main.cb"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
+            cb::json_object_set(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::json_add_array(arena);
+            const cb::JsonId change_item = cb::json_add_object(arena);
+            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(import "math_util.cb"
+fn main() as int
+    return math_util.double_val(21)
+end fn
+)"));
+            cb::json_array_push(arena, changes, change_item);
+            cb::json_object_set(arena, params, "contentChanges", changes);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // Send exit without shutdown -> should return exit code 1
+        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","method":"exit"})");
+
+        const int exit_code = cb::run_lsp_server(client_to_server, server_to_client);
+        CHECK(exit_code == 1);
+
+        // 1st notification: math_util.cb didOpen -> 0 diagnostics
+        const auto m1 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
+        const cb::JsonId m1_diags = cb::json_get_field(m1.arena, cb::json_get_field(m1.arena, m1.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(m1.arena.nodes[m1_diags]).elements.empty());
+
+        // 2nd notification: main.cb didOpen -> 0 diagnostics (resolved math_util.cb from in-memory buffer!)
+        const auto m2 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
+        const cb::JsonId m2_diags = cb::json_get_field(m2.arena, cb::json_get_field(m2.arena, m2.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(m2.arena.nodes[m2_diags]).elements.empty());
+
+        // 3rd notification: math_util.cb didChange -> 0 diagnostics
+        const auto m3 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
+        const cb::JsonId m3_diags = cb::json_get_field(m3.arena, cb::json_get_field(m3.arena, m3.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(m3.arena.nodes[m3_diags]).elements.empty());
+
+        // 4th notification: main.cb didChange -> reports private function AnalyzerError from updated in-memory math_util.cb!
+        const auto m4 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
+        const cb::JsonId m4_diags = cb::json_get_field(m4.arena, cb::json_get_field(m4.arena, m4.root, "params"), "diagnostics");
+        const auto& m4_elems = std::get<cb::JsonArray>(m4.arena.nodes[m4_diags]).elements;
+        REQUIRE(m4_elems.size() == 1);
+        const auto m4_msg = cb::json_get_string(m4.arena, cb::json_get_field(m4.arena, m4_elems[0], "message"));
+        REQUIRE(m4_msg.has_value());
+        CHECK(m4_msg.value().find("private to module") != std::string::npos);
+    }
 }

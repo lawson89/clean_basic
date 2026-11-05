@@ -1,3 +1,4 @@
+#include "src/cleanbasic/lsp.hpp"
 #include "src/cleanbasic/pipeline.hpp"
 
 #include <iostream>
@@ -10,6 +11,7 @@ namespace cb {
 struct CliArgs {
     bool ok = false;
     bool show_help = false;
+    bool run_lsp = false;
     std::string input_file;
     std::string output_file;
     bool compile_binary = false;
@@ -17,8 +19,10 @@ struct CliArgs {
 
 inline void print_usage(std::string_view prog_name) {
     std::cout << "Usage: " << prog_name << " build <file.cb> [-o output.cpp] [-c]\n"
-              << "       " << prog_name << " <file.cb>\n\n"
+              << "       " << prog_name << " <file.cb>\n"
+              << "       " << prog_name << " lsp\n\n"
               << "Options:\n"
+              << "  lsp, --lsp           Start the CleanBasic Language Server over stdio\n"
               << "  -o, --output <file>  Output C++ file path (default: build.cpp)\n"
               << "  -c, --compile        Also compile build.cpp into a native binary\n"
               << "  -h, --help           Show this help message\n";
@@ -33,6 +37,12 @@ inline CliArgs parse_cli_args(const std::vector<std::string_view>& raw_args) {
 
     if (raw_args.size() == 1 && (raw_args[0] == "-h" || raw_args[0] == "--help")) {
         args.show_help = true;
+        args.ok = true;
+        return args;
+    }
+
+    if (raw_args.size() == 1 && (raw_args[0] == "lsp" || raw_args[0] == "--lsp")) {
+        args.run_lsp = true;
         args.ok = true;
         return args;
     }
@@ -86,6 +96,10 @@ inline int run_cli(std::string_view prog_name, const std::vector<std::string_vie
             return 0;
         }
         return 1;
+    }
+
+    if (args.run_lsp) {
+        return run_lsp_server(std::cin, std::cout);
     }
 
     const BuildFileResult res = build_file(

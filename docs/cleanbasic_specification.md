@@ -1,10 +1,21 @@
 # CleanBasic Language Blueprint & Transpiler Architecture
 
-CleanBasic is a statically typed, procedural systems programming language. It combines the readable, low-friction syntax of Visual Basic with the predictable, zero-garbage-collection performance of C++ or ANSI C. By enforcing flat data structures, eliminating object-oriented inheritance, and using Unified Function Call Syntax (UFCS), it provides scripting-language ergonomics with bare-metal speed.
+CleanBasic is a statically typed, procedural systems programming language. It combines the readable, low-friction syntax of Visual Basic with the predictable, zero-garbage-collection performance of C++ or ANSI C. By enforcing flat data structures, pure value semantics, eliminating object-oriented inheritance, and using Unified Function Call Syntax (UFCS), it provides scripting-language ergonomics with bare-metal speed.
+
+### Transpiler Internals & Architecture Suite
+For deep-dive technical documentation on each compiler stage, consult:
+* [Transpiler Architecture & Arena Design](transpiler_architecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
+* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
+* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `pub` visibility, and C++ identifier mangling.
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `on error` verification.
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cpp_emitter_and_interop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
+* [C++17 Strict Data-Oriented Subset](cpp_subset.md) — Coding standards for the transpiler implementation.
+
+---
 
 ## 1. Core Architecture
 * **Unity Build Backend:** The transpiler converts CleanBasic into a single procedural C++17 `build.cpp` file, eliminating headers and linker hell while enabling maximal GCC/Clang optimization.
-* **Procedural Purity:** CleanBasic strictly bans C++ classes, inheritance, exceptions, and raw pointers. It relies entirely on flat data structures, free functions, and Unified Function Call Syntax (UFCS).
+* **Procedural Purity & Value Semantics:** CleanBasic strictly bans C++ classes, inheritance, exceptions, and raw user pointers. All structs and containers use stack-first value semantics, free functions, explicit `byref` mutation, and Unified Function Call Syntax (UFCS).
 * **English-Over-Symbols:** C-style logical operators (`&&`, `||`, `!`) are forbidden at the lexer level and replaced with `and`, `or`, and `not`.
 
 ## 2. The CleanBasic EBNF Grammar
@@ -76,14 +87,10 @@ PostfixExpr     ::= PrimaryExpr
                     | "[" Expr "]"
                     | "(" [CallArgList] ")" )*
 
-PrimaryExpr     ::= Allocation | Literal | QualifiedIdent | "(" Expr ")"
-Allocation      ::= "new" Type [ "(" [InitFieldList] ")" ]
+PrimaryExpr     ::= Literal | QualifiedIdent | "(" Expr ")"
 
 CallArgList     ::= CallArg ("," CallArg)* [","]
 CallArg         ::= [Identifier "="] Expr
-
-InitFieldList   ::= InitField ("," InitField)* [","]
-InitField       ::= [Identifier "="] Expr
 
 Literal         ::= NumberLiteral | StringLiteral
                   | "true" | "false" | "null"
@@ -92,8 +99,7 @@ ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
 DictLiteral     ::= "{" [DictEntry ("," DictEntry)* [","]] "}"
 DictEntry       ::= Expr ":" Expr
 
-Type            ::= ["shared"] BaseType
-BaseType        ::= "int" | "float" | "str" | "bool"
+Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err"
                   | "list" "[" Type "]"
                   | "dict" "[" Type "," Type "]"
                   | QualifiedIdent
@@ -133,9 +139,10 @@ fn calculate_max_health() as int
     return 100
 end fn
 ```
-### 2. Memory, Mutability, and UFCS
 
-CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Named arguments and struct fields strictly use `=` (`Type(field=val)`).
+### 2. Pure Value Semantics, Mutability, and UFCS
+
+CleanBasic uses stack-first value semantics (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Named arguments and struct fields strictly use `=` (`Type(field=val)`). For C/C++ FFI handles, the built-in `cptr` type maps directly to `void*`.
 
 **main.cb (The Executable Module)**
 
@@ -143,27 +150,20 @@ CleanBasic assumes pass-by-value (safe clones) by default. Mutability is strictl
 import "player.cb"
 
 fn main() as int
-    ' IMMUTABILITY: Cannot be changed after declaration
-    const max_potion as int = 50 
+    ' IMMUTABILITY: Cannot be changed after declaration (supports optional or inferred type)
+    const max_potion = 50 
     
     ' MUTABILITY & INFERENCE: 'dim' allows reassignment, type is inferred
     dim uses_left = 3 
     uses_left = 2
 
-    ' MEMORY: Stack allocation (flat, fast, zero cleanup needed)
-    dim stack_hero = player.Player(name="Alice", health=10)
-    
-    ' MEMORY: Heap allocation (requires 'shared' and 'new')
-    dim heap_hero as shared player.Player = new player.Player(name="Bob", health=10)
+    ' VALUE SEMANTICS: Stack allocation (flat, fast, zero cleanup needed)
+    dim hero = player.Player(name="Alice", health=10)
 
     ' UFCS (Unified Function Call Syntax): 
-    ' The compiler translates stack_hero.heal() into heal(stack_hero, max_potion)
-    ' Because heal() asks for 'byref', the original stack_hero is mutated.
-    stack_hero.heal(max_potion)
-    
-    ' Because heap_hero is 'shared' (a pointer), passing it to a 'byref' function
-    ' automatically dereferences it under the hood. No C-style '*' or '&' needed.
-    heap_hero.heal(max_potion)
+    ' The compiler translates hero.heal(max_potion) into heal(hero, max_potion)
+    ' Because heal() asks for 'byref', the original hero is mutated in place.
+    hero.heal(max_potion)
     return 0
 end fn
 ```
@@ -224,7 +224,7 @@ end fn
 
 ### 4. Control Flow, Ranges, and Built-in Containers
 
-CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and `select case` pattern blocks.
+CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and integral/boolean `select case` blocks lowered directly to native C++ `switch` statements.
 
 ```vb
 fn demo_containers() as int

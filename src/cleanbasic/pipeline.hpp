@@ -9,13 +9,23 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace cb {
+
+struct CheckSourceResult {
+    bool ok = false;
+    AstArena arena;
+    Program program;
+    GlobalSymbolTable symbols;
+    DiagnosticError error;
+};
 
 struct TranspileResult {
     bool ok = false;
@@ -33,6 +43,7 @@ struct BuildFileResult {
 
 struct ModuleLoaderState {
     std::string root_base_dir = ".";
+    std::unordered_map<std::string, std::string> open_buffers;
     std::vector<std::string> loading_stack;
     std::vector<std::string> loading_path_stack;
     std::unordered_set<std::string> loaded_modules;
@@ -56,6 +67,33 @@ inline std::string parent_dir_of(std::string_view file_path) {
         return std::string(file_path.substr(0, slash_idx));
     }
     return ".";
+}
+
+inline std::optional<std::string> find_in_memory_source(
+    const std::unordered_map<std::string, std::string>& open_buffers,
+    std::string_view candidate_path
+) {
+    if (open_buffers.empty()) {
+        return std::nullopt;
+    }
+    const std::string exact_key(candidate_path);
+    const auto exact_it = open_buffers.find(exact_key);
+    if (exact_it != open_buffers.end()) {
+        return exact_it->second;
+    }
+    const std::string norm_candidate = normalize_rel_path(candidate_path);
+    if (!norm_candidate.empty()) {
+        const auto norm_it = open_buffers.find(norm_candidate);
+        if (norm_it != open_buffers.end()) {
+            return norm_it->second;
+        }
+    }
+    for (const auto& kv : open_buffers) {
+        if (!norm_candidate.empty() && normalize_rel_path(kv.first) == norm_candidate) {
+            return kv.second;
+        }
+    }
+    return std::nullopt;
 }
 
 inline void load_module_declarations_recursive(
@@ -85,18 +123,29 @@ inline void load_module_declarations_recursive(
                 std::string target_module_id = resolve_module_id(current_module_id, imp.target);
 
                 std::string candidate_path = current_dir + "/" + imp.target;
-                std::ifstream mod_in(candidate_path);
-                if (!mod_in.is_open()) {
-                    candidate_path = loader.root_base_dir + "/" + imp.target;
+                std::optional<std::string> mem_source = find_in_memory_source(loader.open_buffers, candidate_path);
+                std::ifstream mod_in;
+                if (!mem_source.has_value()) {
                     mod_in.open(candidate_path);
-                    if (mod_in.is_open()) {
+                }
+
+                if (!mem_source.has_value() && !mod_in.is_open()) {
+                    candidate_path = loader.root_base_dir + "/" + imp.target;
+                    mem_source = find_in_memory_source(loader.open_buffers, candidate_path);
+                    if (!mem_source.has_value()) {
+                        mod_in.open(candidate_path);
+                    }
+                    if (mem_source.has_value() || mod_in.is_open()) {
                         target_module_id = resolve_module_id("", imp.target);
                     }
                 }
-                if (!mod_in.is_open()) {
+                if (!mem_source.has_value() && !mod_in.is_open()) {
                     candidate_path = imp.target;
-                    mod_in.open(candidate_path);
-                    if (mod_in.is_open()) {
+                    mem_source = find_in_memory_source(loader.open_buffers, candidate_path);
+                    if (!mem_source.has_value()) {
+                        mod_in.open(candidate_path);
+                    }
+                    if (mem_source.has_value() || mod_in.is_open()) {
                         target_module_id = resolve_module_id("", imp.target);
                     }
                 }
@@ -104,9 +153,10 @@ inline void load_module_declarations_recursive(
                 imp.resolved_module_id = target_module_id;
                 arena.decls[did].payload = imp;
 
+                const bool has_module_source = mem_source.has_value() || mod_in.is_open();
                 const std::string norm_candidate = normalize_rel_path(candidate_path);
                 if (is_in_stack(loader.loading_stack, target_module_id) ||
-                    (mod_in.is_open() && is_in_stack(loader.loading_path_stack, norm_candidate))) {
+                    (has_module_source && is_in_stack(loader.loading_path_stack, norm_candidate))) {
                     loader.has_error = true;
                     loader.error = make_error(
                         "ImportError",
@@ -118,15 +168,25 @@ inline void load_module_declarations_recursive(
                     if (mod_in.is_open()) {
                         mod_in.close();
                     }
+                    return;
                 }
 
-                if (mod_in.is_open()) {
+                if (has_module_source) {
                     if (loader.loaded_modules.find(target_module_id) == loader.loaded_modules.end()) {
-                        std::ostringstream mod_ss;
-                        mod_ss << mod_in.rdbuf();
-                        mod_in.close();
+                        std::string mod_source;
+                        if (mem_source.has_value()) {
+                            mod_source = mem_source.value();
+                            if (mod_in.is_open()) {
+                                mod_in.close();
+                            }
+                        } else {
+                            std::ostringstream mod_ss;
+                            mod_ss << mod_in.rdbuf();
+                            mod_in.close();
+                            mod_source = mod_ss.str();
+                        }
 
-                        const auto mod_lex = tokenize(mod_ss.str(), candidate_path);
+                        const auto mod_lex = tokenize(mod_source, candidate_path);
                         if (!mod_lex.ok) {
                             loader.has_error = true;
                             loader.error = mod_lex.error;
@@ -160,7 +220,7 @@ inline void load_module_declarations_recursive(
                             return;
                         }
                         loader.loaded_modules.insert(target_module_id);
-                    } else {
+                    } else if (mod_in.is_open()) {
                         mod_in.close();
                     }
                 }
@@ -170,22 +230,24 @@ inline void load_module_declarations_recursive(
     }
 }
 
-inline TranspileResult transpile_source(
+inline CheckSourceResult check_source(
     std::string_view source,
-    std::string_view file_name = "main.cb"
+    std::string_view file_name = "main.cb",
+    const std::unordered_map<std::string, std::string>& open_buffers = {}
 ) {
     const auto lex_res = tokenize(source, file_name);
     if (!lex_res.ok) {
-        return TranspileResult{false, "", {}, lex_res.error};
+        return CheckSourceResult{false, {}, {}, {}, lex_res.error};
     }
 
     auto parse_res = parse_tokens(lex_res.tokens, file_name);
     if (!parse_res.ok) {
-        return TranspileResult{false, "", {}, parse_res.error};
+        return CheckSourceResult{false, {}, {}, {}, parse_res.error};
     }
 
     ModuleLoaderState loader{};
     loader.root_base_dir = parent_dir_of(file_name);
+    loader.open_buffers = open_buffers;
     const std::string norm_root = normalize_rel_path(file_name);
     if (!norm_root.empty()) {
         loader.loading_path_stack.push_back(norm_root);
@@ -199,17 +261,36 @@ inline TranspileResult transpile_source(
         loader
     );
     if (loader.has_error) {
-        return TranspileResult{false, "", {}, loader.error};
+        return CheckSourceResult{false, {}, {}, {}, loader.error};
     }
     parse_res.program.declarations = std::move(loader.merged_decls);
 
     auto ana_res = analyze_program(parse_res.arena, parse_res.program);
     if (!ana_res.ok) {
-        return TranspileResult{false, "", {}, ana_res.error};
+        return CheckSourceResult{false, {}, {}, {}, ana_res.error};
     }
 
-    std::string cpp_code = emit_program(parse_res.arena, ana_res.symbols, parse_res.program);
-    return TranspileResult{true, std::move(cpp_code), std::move(ana_res.symbols), {}};
+    return CheckSourceResult{
+        true,
+        std::move(parse_res.arena),
+        std::move(parse_res.program),
+        std::move(ana_res.symbols),
+        {}
+    };
+}
+
+inline TranspileResult transpile_source(
+    std::string_view source,
+    std::string_view file_name = "main.cb",
+    const std::unordered_map<std::string, std::string>& open_buffers = {}
+) {
+    auto check_res = check_source(source, file_name, open_buffers);
+    if (!check_res.ok) {
+        return TranspileResult{false, "", {}, check_res.error};
+    }
+
+    std::string cpp_code = emit_program(check_res.arena, check_res.symbols, check_res.program);
+    return TranspileResult{true, std::move(cpp_code), std::move(check_res.symbols), {}};
 }
 
 inline BuildFileResult build_file(
