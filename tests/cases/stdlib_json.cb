@@ -1,0 +1,73 @@
+' EXPECT_CPP: #include "
+' EXPECT_CPP: json_bridge.hpp"
+' EXPECT_CPP: cb_std_json__parse(
+' EXPECT_CPP: cb_std_json__stringify(
+' EXPECT_OUT: Built JSON: {"service":"cleanbasic","port":8080,"enabled":true,"items":[10,20],"meta":null}
+' EXPECT_OUT: Parsed service: cleanbasic (port=8080, enabled=true, items=2, first_item=10)
+' EXPECT_OUT: Caught invalid JSON (code=400)
+
+import "std/json"
+
+fn build_payload() as str
+    dim doc = json.new_doc()
+    dim root = doc.new_object()
+    doc.object_set(root, "service", doc.new_str("cleanbasic"))
+    doc.object_set(root, "port", doc.new_int(8080))
+    doc.object_set(root, "enabled", doc.new_bool(true))
+
+    dim items = doc.new_array()
+    doc.array_push(items, doc.new_int(10))
+    doc.array_push(items, doc.new_int(20))
+    doc.object_set(root, "items", items)
+    doc.object_set(root, "meta", doc.new_null())
+
+    doc.set_root(root)
+    return doc.stringify()
+end fn
+
+fn inspect_payload(payload as str) can error
+    dim doc = json.parse(payload)
+    dim root = doc.root()
+
+    dim svc_val = doc.get_field(root, "service")
+    dim svc_name = doc.get_str(svc_val)
+
+    dim port_val = doc.get_field(root, "port")
+    dim port_num = doc.get_int(port_val)
+
+    dim enabled_val = doc.get_field(root, "enabled")
+    dim is_enabled = doc.get_bool(enabled_val)
+
+    dim items_val = doc.get_field(root, "items")
+    dim item_count = doc.array_len(items_val)
+    dim first_item_val = doc.array_at(items_val, 0)
+    dim first_item = doc.get_int(first_item_val)
+
+    dim meta_val = doc.get_field(root, "meta")
+    if doc.is_null(meta_val) and doc.has_field(root, "service")
+        print("Parsed service: " & svc_name & " (port=" & port_num & ", enabled=" & is_enabled & ", items=" & item_count & ", first_item=" & first_item & ")")
+    end if
+end fn
+
+fn test_bad_json()
+    on error e
+        print("Caught invalid JSON (code=" & e.code & ")")
+        return
+    end error
+
+    dim bad = json.parse("{broken_json:")
+    print(bad.stringify())
+end fn
+
+fn main() as int
+    on error e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end error
+
+    dim payload = build_payload()
+    print("Built JSON: " & payload)
+    inspect_payload(payload)
+    test_bad_json()
+    return 0
+end fn

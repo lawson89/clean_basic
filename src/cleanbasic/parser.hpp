@@ -211,29 +211,19 @@ inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state
 
     if (check(tokens, state, "NUMBER")) {
         const Token num_tok = match(tokens, state, "NUMBER");
-        NumberLiteral node{};
-        node.raw = num_tok.value;
-        node.is_float = (num_tok.value.find('.') != std::string::npos);
-        return add_expr(state.arena, num_tok.line, num_tok.col, std::move(node));
+        return add_expr(state.arena, num_tok.line, num_tok.col, NumberLiteral{num_tok.value, num_tok.value.find('.') != std::string::npos});
     }
-
     if (check(tokens, state, "STRING")) {
         const Token str_tok = match(tokens, state, "STRING");
-        StringLiteral node{};
-        node.value = strip_quotes(str_tok.value);
-        return add_expr(state.arena, str_tok.line, str_tok.col, std::move(node));
+        return add_expr(state.arena, str_tok.line, str_tok.col, StringLiteral{strip_quotes(str_tok.value)});
     }
     if (check(tokens, state, "KEYWORD", "true") || check(tokens, state, "KEYWORD", "false")) {
         const Token b_tok = match(tokens, state, "KEYWORD");
-        BoolLiteral node{};
-        node.value = (b_tok.value == "true");
-        return add_expr(state.arena, b_tok.line, b_tok.col, std::move(node));
+        return add_expr(state.arena, b_tok.line, b_tok.col, BoolLiteral{b_tok.value == "true"});
     }
-
     if (check(tokens, state, "KEYWORD", "null")) {
         const Token n_tok = match(tokens, state, "KEYWORD", "null");
-        NullLiteral node{};
-        return add_expr(state.arena, n_tok.line, n_tok.col, std::move(node));
+        return add_expr(state.arena, n_tok.line, n_tok.col, NullLiteral{});
     }
 
     if (check(tokens, state, "LPAREN")) {
@@ -353,46 +343,47 @@ inline ExprId parse_unary(const std::vector<Token>& tokens, ParserState& state) 
     return parse_postfix(tokens, state);
 }
 
-inline ExprId parse_multiplicative(const std::vector<Token>& tokens, ParserState& state) {
-    ExprId left = parse_unary(tokens, state);
-    while (!state.has_error && (check(tokens, state, "OP_ARITH", "*") || check(tokens, state, "OP_ARITH", "/"))) {
-        const Token op_tok = match(tokens, state, "OP_ARITH");
-        const ExprId right = parse_unary(tokens, state);
-        BinaryOp node{};
-        node.op = op_tok.value;
-        node.left = left;
-        node.right = right;
-        left = add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
+template <typename ParseOperandFn>
+inline ExprId parse_binary_op_loop(
+    const std::vector<Token>& tokens,
+    ParserState& state,
+    std::string_view token_kind,
+    std::initializer_list<std::string_view> allowed_ops,
+    ParseOperandFn parse_operand
+) {
+    ExprId left = parse_operand(tokens, state);
+    while (!state.has_error) {
+        bool matched_op = false;
+        if (allowed_ops.size() == 0) {
+            matched_op = check(tokens, state, token_kind);
+        } else {
+            for (const std::string_view op : allowed_ops) {
+                if (check(tokens, state, token_kind, op)) {
+                    matched_op = true;
+                    break;
+                }
+            }
+        }
+        if (!matched_op) {
+            break;
+        }
+        const Token op_tok = match(tokens, state, token_kind);
+        const ExprId right = parse_operand(tokens, state);
+        left = add_expr(state.arena, op_tok.line, op_tok.col, BinaryOp{op_tok.value, left, right});
     }
     return left;
+}
+
+inline ExprId parse_multiplicative(const std::vector<Token>& tokens, ParserState& state) {
+    return parse_binary_op_loop(tokens, state, "OP_ARITH", {"*", "/"}, parse_unary);
 }
 
 inline ExprId parse_additive(const std::vector<Token>& tokens, ParserState& state) {
-    ExprId left = parse_multiplicative(tokens, state);
-    while (!state.has_error && (check(tokens, state, "OP_ARITH", "+") || check(tokens, state, "OP_ARITH", "-") || check(tokens, state, "OP_ARITH", "&"))) {
-        const Token op_tok = match(tokens, state, "OP_ARITH");
-        const ExprId right = parse_multiplicative(tokens, state);
-        BinaryOp node{};
-        node.op = op_tok.value;
-        node.left = left;
-        node.right = right;
-        left = add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
-    }
-    return left;
+    return parse_binary_op_loop(tokens, state, "OP_ARITH", {"+", "-", "&"}, parse_multiplicative);
 }
 
 inline ExprId parse_comparison(const std::vector<Token>& tokens, ParserState& state) {
-    ExprId left = parse_additive(tokens, state);
-    while (!state.has_error && check(tokens, state, "OP_CMP")) {
-        const Token op_tok = match(tokens, state, "OP_CMP");
-        const ExprId right = parse_additive(tokens, state);
-        BinaryOp node{};
-        node.op = op_tok.value;
-        node.left = left;
-        node.right = right;
-        left = add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
-    }
-    return left;
+    return parse_binary_op_loop(tokens, state, "OP_CMP", {}, parse_additive);
 }
 
 inline ExprId parse_not(const std::vector<Token>& tokens, ParserState& state) {
@@ -402,40 +393,17 @@ inline ExprId parse_not(const std::vector<Token>& tokens, ParserState& state) {
     if (check(tokens, state, "KEYWORD", "not")) {
         const Token op_tok = match(tokens, state, "KEYWORD", "not");
         const ExprId operand = parse_not(tokens, state);
-        UnaryOp node{};
-        node.op = "not";
-        node.operand = operand;
-        return add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
+        return add_expr(state.arena, op_tok.line, op_tok.col, UnaryOp{"not", operand});
     }
     return parse_comparison(tokens, state);
 }
 
 inline ExprId parse_and(const std::vector<Token>& tokens, ParserState& state) {
-    ExprId left = parse_not(tokens, state);
-    while (!state.has_error && check(tokens, state, "KEYWORD", "and")) {
-        const Token op_tok = match(tokens, state, "KEYWORD", "and");
-        const ExprId right = parse_not(tokens, state);
-        BinaryOp node{};
-        node.op = "and";
-        node.left = left;
-        node.right = right;
-        left = add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
-    }
-    return left;
+    return parse_binary_op_loop(tokens, state, "KEYWORD", {"and"}, parse_not);
 }
 
 inline ExprId parse_or(const std::vector<Token>& tokens, ParserState& state) {
-    ExprId left = parse_and(tokens, state);
-    while (!state.has_error && check(tokens, state, "KEYWORD", "or")) {
-        const Token op_tok = match(tokens, state, "KEYWORD", "or");
-        const ExprId right = parse_and(tokens, state);
-        BinaryOp node{};
-        node.op = "or";
-        node.left = left;
-        node.right = right;
-        left = add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
-    }
-    return left;
+    return parse_binary_op_loop(tokens, state, "KEYWORD", {"or"}, parse_and);
 }
 
 inline ExprId parse_expr(const std::vector<Token>& tokens, ParserState& state) {
@@ -545,48 +513,52 @@ inline StmtId parse_assignment_or_expr_stmt(const std::vector<Token>& tokens, Pa
     return add_stmt(state.arena, start.line, start.col, std::move(stmt));
 }
 
+inline std::vector<StmtId> parse_stmt_block_until(
+    const std::vector<Token>& tokens,
+    ParserState& state,
+    std::initializer_list<std::string_view> end_keywords,
+    std::string_view unclosed_msg
+) {
+    std::vector<StmtId> body;
+    while (!state.has_error) {
+        bool reached_end = false;
+        for (const std::string_view kw : end_keywords) {
+            if (check(tokens, state, "KEYWORD", kw)) {
+                reached_end = true;
+                break;
+            }
+        }
+        if (reached_end) {
+            break;
+        }
+        if (check(tokens, state, "EOF")) {
+            set_parse_error(state, current(tokens, state), unclosed_msg);
+            break;
+        }
+        body.push_back(parse_statement(tokens, state));
+        skip_newlines(tokens, state);
+    }
+    return body;
+}
+
 inline StmtId parse_if_stmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "if");
     const ExprId condition = parse_expr(tokens, state);
     expect_newline_or_eof(tokens, state);
 
-    std::vector<StmtId> then_body;
-    while (!state.has_error &&
-           !check(tokens, state, "KEYWORD", "else if") &&
-           !check(tokens, state, "KEYWORD", "else") &&
-           !check(tokens, state, "KEYWORD", "end if")) {
-        if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), "Unclosed 'if' statement, expected 'end if'");
-            break;
-        }
-        then_body.push_back(parse_statement(tokens, state));
-        skip_newlines(tokens, state);
-    }
+    std::vector<StmtId> then_body = parse_stmt_block_until(
+        tokens, state, {"else if", "else", "end if"}, "Unclosed 'if' statement, expected 'end if'"
+    );
 
     std::vector<ElseIfBranch> elif_branches;
     while (!state.has_error && check(tokens, state, "KEYWORD", "else if")) {
         const Token elif_tok = match(tokens, state, "KEYWORD", "else if");
         const ExprId elif_cond = parse_expr(tokens, state);
         expect_newline_or_eof(tokens, state);
-
-        std::vector<StmtId> elif_body;
-        while (!state.has_error &&
-               !check(tokens, state, "KEYWORD", "else if") &&
-               !check(tokens, state, "KEYWORD", "else") &&
-               !check(tokens, state, "KEYWORD", "end if")) {
-            if (check(tokens, state, "EOF")) {
-                set_parse_error(state, current(tokens, state), "Unclosed 'else if' block, expected 'end if'");
-                break;
-            }
-            elif_body.push_back(parse_statement(tokens, state));
-            skip_newlines(tokens, state);
-        }
-        ElseIfBranch branch{};
-        branch.line = elif_tok.line;
-        branch.col = elif_tok.col;
-        branch.condition = elif_cond;
-        branch.body = std::move(elif_body);
-        elif_branches.push_back(std::move(branch));
+        std::vector<StmtId> elif_body = parse_stmt_block_until(
+            tokens, state, {"else if", "else", "end if"}, "Unclosed 'else if' block, expected 'end if'"
+        );
+        elif_branches.push_back(ElseIfBranch{elif_tok.line, elif_tok.col, elif_cond, std::move(elif_body)});
     }
 
     bool has_else = false;
@@ -595,27 +567,12 @@ inline StmtId parse_if_stmt(const std::vector<Token>& tokens, ParserState& state
         match(tokens, state, "KEYWORD", "else");
         expect_newline_or_eof(tokens, state);
         has_else = true;
-
-        while (!state.has_error && !check(tokens, state, "KEYWORD", "end if")) {
-            if (check(tokens, state, "EOF")) {
-                set_parse_error(state, current(tokens, state), "Unclosed 'else' block, expected 'end if'");
-                break;
-            }
-            else_body.push_back(parse_statement(tokens, state));
-            skip_newlines(tokens, state);
-        }
+        else_body = parse_stmt_block_until(tokens, state, {"end if"}, "Unclosed 'else' block, expected 'end if'");
     }
 
     match(tokens, state, "KEYWORD", "end if");
     expect_newline_or_eof(tokens, state);
-
-    IfStmt stmt{};
-    stmt.condition = condition;
-    stmt.then_body = std::move(then_body);
-    stmt.elif_branches = std::move(elif_branches);
-    stmt.has_else = has_else;
-    stmt.else_body = std::move(else_body);
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return add_stmt(state.arena, start.line, start.col, IfStmt{condition, std::move(then_body), std::move(elif_branches), has_else, std::move(else_body)});
 }
 
 inline StmtId parse_for_stmt(const std::vector<Token>& tokens, ParserState& state) {
@@ -647,14 +604,7 @@ inline StmtId parse_for_stmt(const std::vector<Token>& tokens, ParserState& stat
             has_step = true;
             step_expr = parse_expr(tokens, state);
         }
-        range_spec.has_range = true;
-        range_spec.line = eq_tok.line;
-        range_spec.col = eq_tok.col;
-        range_spec.start = start_expr;
-        range_spec.end = end_expr;
-        range_spec.has_step = has_step;
-        range_spec.step = step_expr;
-        range_spec.inclusive = true;
+        range_spec = RangeSpec{true, eq_tok.line, eq_tok.col, start_expr, end_expr, has_step, step_expr, true};
     } else {
         match(tokens, state, "KEYWORD", "in");
         has_iterable = true;
@@ -662,27 +612,11 @@ inline StmtId parse_for_stmt(const std::vector<Token>& tokens, ParserState& stat
     }
 
     expect_newline_or_eof(tokens, state);
-
-    std::vector<StmtId> body;
-    while (!state.has_error && !check(tokens, state, "KEYWORD", "end for")) {
-        if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), "Unclosed 'for' loop, expected 'end for'");
-            break;
-        }
-        body.push_back(parse_statement(tokens, state));
-        skip_newlines(tokens, state);
-    }
-
+    std::vector<StmtId> body = parse_stmt_block_until(tokens, state, {"end for"}, "Unclosed 'for' loop, expected 'end for'");
     match(tokens, state, "KEYWORD", "end for");
     expect_newline_or_eof(tokens, state);
 
-    ForStmt stmt{};
-    stmt.loop_vars = std::move(loop_vars);
-    stmt.range_spec = range_spec;
-    stmt.has_iterable = has_iterable;
-    stmt.iterable = iterable;
-    stmt.body = std::move(body);
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return add_stmt(state.arena, start.line, start.col, ForStmt{std::move(loop_vars), range_spec, has_iterable, iterable, std::move(body)});
 }
 
 inline StmtId parse_select_stmt(const std::vector<Token>& tokens, ParserState& state) {
@@ -695,25 +629,10 @@ inline StmtId parse_select_stmt(const std::vector<Token>& tokens, ParserState& s
         const Token case_tok = match(tokens, state, "KEYWORD", "case");
         const ExprId match_expr = parse_expr(tokens, state);
         expect_newline_or_eof(tokens, state);
-
-        std::vector<StmtId> case_body;
-        while (!state.has_error &&
-               !check(tokens, state, "KEYWORD", "case") &&
-               !check(tokens, state, "KEYWORD", "case else") &&
-               !check(tokens, state, "KEYWORD", "end select")) {
-            if (check(tokens, state, "EOF")) {
-                set_parse_error(state, current(tokens, state), "Unclosed 'case' in 'select case', expected 'end select'");
-                break;
-            }
-            case_body.push_back(parse_statement(tokens, state));
-            skip_newlines(tokens, state);
-        }
-        SelectCase sc{};
-        sc.line = case_tok.line;
-        sc.col = case_tok.col;
-        sc.match_expr = match_expr;
-        sc.body = std::move(case_body);
-        cases.push_back(std::move(sc));
+        std::vector<StmtId> case_body = parse_stmt_block_until(
+            tokens, state, {"case", "case else", "end select"}, "Unclosed 'case' in 'select case', expected 'end select'"
+        );
+        cases.push_back(SelectCase{case_tok.line, case_tok.col, match_expr, std::move(case_body)});
     }
 
     bool has_case_else = false;
@@ -722,72 +641,31 @@ inline StmtId parse_select_stmt(const std::vector<Token>& tokens, ParserState& s
         match(tokens, state, "KEYWORD", "case else");
         expect_newline_or_eof(tokens, state);
         has_case_else = true;
-
-        while (!state.has_error && !check(tokens, state, "KEYWORD", "end select")) {
-            if (check(tokens, state, "EOF")) {
-                set_parse_error(state, current(tokens, state), "Unclosed 'case else', expected 'end select'");
-                break;
-            }
-            case_else.push_back(parse_statement(tokens, state));
-            skip_newlines(tokens, state);
-        }
+        case_else = parse_stmt_block_until(tokens, state, {"end select"}, "Unclosed 'case else', expected 'end select'");
     }
 
     match(tokens, state, "KEYWORD", "end select");
     expect_newline_or_eof(tokens, state);
-
-    SelectStmt stmt{};
-    stmt.target = target;
-    stmt.cases = std::move(cases);
-    stmt.has_case_else = has_case_else;
-    stmt.case_else = std::move(case_else);
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return add_stmt(state.arena, start.line, start.col, SelectStmt{target, std::move(cases), has_case_else, std::move(case_else)});
 }
 
 inline StmtId parse_on_error_stmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "on error");
     const Token err_ident = match(tokens, state, "IDENT");
     expect_newline_or_eof(tokens, state);
-
-    std::vector<StmtId> body;
-    while (!state.has_error && !check(tokens, state, "KEYWORD", "end error")) {
-        if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), "Unclosed 'on error' block, expected 'end error'");
-            break;
-        }
-        body.push_back(parse_statement(tokens, state));
-        skip_newlines(tokens, state);
-    }
-
+    std::vector<StmtId> body = parse_stmt_block_until(tokens, state, {"end error"}, "Unclosed 'on error' block, expected 'end error'");
     match(tokens, state, "KEYWORD", "end error");
     expect_newline_or_eof(tokens, state);
-
-    ErrorBlock stmt{};
-    stmt.err_var = err_ident.value;
-    stmt.body = std::move(body);
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return add_stmt(state.arena, start.line, start.col, ErrorBlock{err_ident.value, std::move(body)});
 }
 
 inline StmtId parse_defer_stmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "defer");
     expect_newline_or_eof(tokens, state);
-
-    std::vector<StmtId> body;
-    while (!state.has_error && !check(tokens, state, "KEYWORD", "end defer")) {
-        if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), "Unclosed 'defer' block, expected 'end defer'");
-            break;
-        }
-        body.push_back(parse_statement(tokens, state));
-        skip_newlines(tokens, state);
-    }
-
+    std::vector<StmtId> body = parse_stmt_block_until(tokens, state, {"end defer"}, "Unclosed 'defer' block, expected 'end defer'");
     match(tokens, state, "KEYWORD", "end defer");
     expect_newline_or_eof(tokens, state);
-
-    DeferStmt stmt{};
-    stmt.body = std::move(body);
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return add_stmt(state.arena, start.line, start.col, DeferStmt{std::move(body)});
 }
 
 inline StmtId parse_return_stmt(const std::vector<Token>& tokens, ParserState& state) {
@@ -1031,14 +909,7 @@ inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state
         return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
     }
 
-    while (!state.has_error && !check(tokens, state, "KEYWORD", "end fn")) {
-        if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), "Unclosed 'fn " + name_tok.value + "', expected 'end fn'");
-            break;
-        }
-        body.push_back(parse_statement(tokens, state));
-        skip_newlines(tokens, state);
-    }
+    body = parse_stmt_block_until(tokens, state, {"end fn"}, "Unclosed 'fn " + name_tok.value + "', expected 'end fn'");
 
     const Token end_tok = match(tokens, state, "KEYWORD", "end fn");
     expect_newline_or_eof(tokens, state);

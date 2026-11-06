@@ -149,37 +149,13 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
         }
         // 4. Forbidden C-style logical operators: &&, ||, !(not followed by =)
         if (ch == '&' && i + 1 < n && code[i + 1] == '&') {
-            res.ok = false;
-            res.error = make_error(
-                "LexerError",
-                "C-style operator '&&' is forbidden in CleanBasic; use 'and' instead.",
-                file_str,
-                line_num,
-                col
-            );
-            return res;
+            return LexResult{false, {}, make_error("LexerError", "C-style operator '&&' is forbidden in CleanBasic; use 'and' instead.", file_str, line_num, col)};
         }
         if (ch == '|' && i + 1 < n && code[i + 1] == '|') {
-            res.ok = false;
-            res.error = make_error(
-                "LexerError",
-                "C-style operator '||' is forbidden in CleanBasic; use 'or' instead.",
-                file_str,
-                line_num,
-                col
-            );
-            return res;
+            return LexResult{false, {}, make_error("LexerError", "C-style operator '||' is forbidden in CleanBasic; use 'or' instead.", file_str, line_num, col)};
         }
         if (ch == '!' && !(i + 1 < n && code[i + 1] == '=')) {
-            res.ok = false;
-            res.error = make_error(
-                "LexerError",
-                "C-style operator '!' is forbidden in CleanBasic; use 'not' instead.",
-                file_str,
-                line_num,
-                col
-            );
-            return res;
+            return LexResult{false, {}, make_error("LexerError", "C-style operator '!' is forbidden in CleanBasic; use 'not' instead.", file_str, line_num, col)};
         }
 
         // 5. String literal
@@ -305,79 +281,26 @@ inline LexResult tokenize(std::string_view code, std::string_view file_name = "m
             i += 1;
             continue;
         }
-        if (ch == '=') {
-            res.tokens.push_back(Token{"ASSIGN", "=", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == ':') {
-            res.tokens.push_back(Token{"COLON", ":", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == ',') {
-            res.tokens.push_back(Token{"COMMA", ",", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == '.') {
-            res.tokens.push_back(Token{"DOT", ".", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == '(') {
-            bracket_depth += 1;
-            res.tokens.push_back(Token{"LPAREN", "(", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == ')') {
-            if (bracket_depth > 0) {
-                bracket_depth -= 1;
-            }
-            res.tokens.push_back(Token{"RPAREN", ")", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == '[') {
-            bracket_depth += 1;
-            res.tokens.push_back(Token{"LBRACKET", "[", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == ']') {
-            if (bracket_depth > 0) {
-                bracket_depth -= 1;
-            }
-            res.tokens.push_back(Token{"RBRACKET", "]", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == '{') {
-            bracket_depth += 1;
-            res.tokens.push_back(Token{"LBRACE", "{", line_num, col});
-            i += 1;
-            continue;
-        }
-        if (ch == '}') {
-            if (bracket_depth > 0) {
-                bracket_depth -= 1;
-            }
-            res.tokens.push_back(Token{"RBRACE", "}", line_num, col});
+        std::string punct_kind;
+        if (ch == '=') punct_kind = "ASSIGN";
+        else if (ch == ':') punct_kind = "COLON";
+        else if (ch == ',') punct_kind = "COMMA";
+        else if (ch == '.') punct_kind = "DOT";
+        else if (ch == '(') { bracket_depth += 1; punct_kind = "LPAREN"; }
+        else if (ch == ')') { if (bracket_depth > 0) bracket_depth -= 1; punct_kind = "RPAREN"; }
+        else if (ch == '[') { bracket_depth += 1; punct_kind = "LBRACKET"; }
+        else if (ch == ']') { if (bracket_depth > 0) bracket_depth -= 1; punct_kind = "RBRACKET"; }
+        else if (ch == '{') { bracket_depth += 1; punct_kind = "LBRACE"; }
+        else if (ch == '}') { if (bracket_depth > 0) bracket_depth -= 1; punct_kind = "RBRACE"; }
+
+        if (!punct_kind.empty()) {
+            res.tokens.push_back(Token{std::move(punct_kind), std::string(1, ch), line_num, col});
             i += 1;
             continue;
         }
 
         // 10. Unknown character
-        res.ok = false;
-        res.error = make_error(
-            "LexerError",
-            std::string("Unexpected character '") + ch + "'",
-            file_str,
-            line_num,
-            col
-        );
-        return res;
+        return LexResult{false, {}, make_error("LexerError", std::string("Unexpected character '") + ch + "'", file_str, line_num, col)};
     }
 
     uint32_t eof_col = 1u;

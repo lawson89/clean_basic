@@ -7,6 +7,8 @@
 #include "src/cleanbasic/pipeline.hpp"
 #include "src/cleanbasic/json.hpp"
 #include "src/cleanbasic/lsp.hpp"
+#define CLEANBASIC_CLI_LIB_ONLY
+#include "src/cleanbasic/cli_main.cpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -2239,5 +2241,250 @@ TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are 
         std::error_code ec;
         std::filesystem::remove(tmp_in, ec);
         std::filesystem::remove(tmp_out, ec);
+    }
+}
+
+TEST_CASE("Standard library std/json module: vendor/ + stdlib/ resolution, UFCS queries, error handling, and E2E compilation", "[stdlib][json][e2e]") {
+    SECTION("E2E fixture tests/cases/stdlib_json.cb compiles and runs natively") {
+        cb::test_e2e::run_e2e_fixture("stdlib_json", "tests/cases/stdlib_json.cb");
+    }
+
+    SECTION("import 'std/json' and 'std/json.cb' resolve module ID 'std/json', default alias 'json', and module-relative json_bridge.hpp") {
+        const std::string src = R"(import "std/json"
+
+fn main() as int
+    on error e
+        return 1
+    end error
+    dim doc = json.parse("3.5")
+    dim root = doc.root()
+    dim pi = doc.get_float(root)
+    if pi > 3.0
+        return 0
+    end if
+    return 1
+end fn
+)";
+        const auto res = cb::transpile_source(src, "app_with_std_json.cb");
+        REQUIRE(res.ok);
+        REQUIRE(!res.symbols.headers.empty());
+        CHECK(res.symbols.headers[0].find("stdlib/json/json_bridge.hpp") != std::string::npos);
+        CHECK(res.cpp_code.find("cb_std_json__parse(") != std::string::npos);
+        CHECK(res.cpp_code.find("cb_std_json__get_float(") != std::string::npos);
+    }
+
+    SECTION("LSP go-to-definition and hover resolve std/json symbols into stdlib/json/json.cb") {
+        std::stringstream client_to_server;
+        std::stringstream server_to_client;
+
+        cb::write_jsonrpc_message(
+            client_to_server,
+            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"
+        );
+
+        {
+            cb::JsonArena arena;
+            const cb::JsonId msg = cb::json_add_object(arena);
+            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
+            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::json_add_object(arena);
+            const cb::JsonId td = cb::json_add_object(arena);
+            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/std_json_lsp.cb"));
+            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
+            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
+            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(import "std/json"
+fn run() can error
+    dim doc = json.parse("{}")
+end fn
+)"));
+            cb::json_object_set(arena, params, "textDocument", td);
+            cb::json_object_set(arena, msg, "params", params);
+            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+        }
+
+        // Request definition on 'parse' in 'json.parse("{}")' (line 2, character 20)
+        cb::write_jsonrpc_message(
+            client_to_server,
+            R"({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///virtual_ws/std_json_lsp.cb"},"position":{"line":2,"character":20}}})"
+        );
+        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","id":3,"method":"shutdown"})");
+        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","method":"exit"})");
+
+        const int rc = cb::run_lsp_server(client_to_server, server_to_client);
+        CHECK(rc == 0);
+
+        // Read initialize response & didOpen diagnostics
+        (void)cb::read_jsonrpc_message(server_to_client);
+        const auto diag_msg = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
+        REQUIRE(diag_msg.ok);
+        const cb::JsonId diags = cb::json_get_field(diag_msg.arena, cb::json_get_field(diag_msg.arena, diag_msg.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(diag_msg.arena.nodes[diags]).elements.empty());
+
+        // Read definition response -> points to stdlib/json/json.cb
+        const auto def_msg = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
+        REQUIRE(def_msg.ok);
+        const cb::JsonId def_res = cb::json_get_field(def_msg.arena, def_msg.root, "result");
+        const auto def_uri = cb::json_get_string(def_msg.arena, cb::json_get_field(def_msg.arena, def_res, "uri"));
+        REQUIRE(def_uri.has_value());
+        CHECK(def_uri.value().find("stdlib/json/json.cb") != std::string::npos);
+    }
+}
+
+TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags, and compiler command generation", "[sdk][cross][cli]") {
+    SECTION("resolve_sdk_root_dir locates portable SDK layout via CLEANBASIC_HOME, exe dir, exe parent, and fallback") {
+        const std::string tmp_base = "/tmp/cb_portable_sdk_test";
+        std::error_code ec;
+        std::filesystem::remove_all(tmp_base, ec);
+
+        const std::string sdk_root = tmp_base + "/cleanbasic-sdk";
+        const std::string sdk_bin_dir = sdk_root + "/bin";
+        const std::string sdk_multi_cfg_dir = sdk_root + "/build/Release";
+        const std::string env_sdk = tmp_base + "/custom-env-sdk";
+
+        std::filesystem::create_directories(sdk_root + "/stdlib/json", ec);
+        std::filesystem::create_directories(sdk_root + "/vendor", ec);
+        std::filesystem::create_directories(sdk_bin_dir, ec);
+        std::filesystem::create_directories(sdk_multi_cfg_dir, ec);
+        std::filesystem::create_directories(env_sdk + "/stdlib", ec);
+        std::filesystem::create_directories(env_sdk + "/vendor", ec);
+
+        CHECK(cb::is_valid_sdk_root(sdk_root));
+        CHECK(cb::is_valid_sdk_root(env_sdk));
+        CHECK_FALSE(cb::is_valid_sdk_root(sdk_bin_dir));
+
+        // 1. Executable directly inside SDK root: <sdk>/cleanbasic
+        CHECK(cb::resolve_sdk_root_dir("", sdk_root + "/cleanbasic", "/nonexistent") == sdk_root);
+
+        // 2. Executable inside <sdk>/bin/cleanbasic
+        CHECK(cb::resolve_sdk_root_dir("", sdk_bin_dir + "/cleanbasic.exe", "/nonexistent") == sdk_root);
+
+        // 3. Executable inside <sdk>/build/Release/cleanbasic
+        CHECK(cb::resolve_sdk_root_dir("", sdk_multi_cfg_dir + "/cleanbasic", "/nonexistent") == sdk_root);
+
+        // 4. CLEANBASIC_HOME takes highest priority
+        CHECK(cb::resolve_sdk_root_dir(env_sdk + "/", sdk_root + "/cleanbasic", sdk_root) == env_sdk);
+
+        // 5. Fallback to compile-time root when exe path is outside any SDK layout
+        CHECK(cb::resolve_sdk_root_dir("", "/usr/local/bin/cleanbasic", sdk_root) == sdk_root);
+
+        // 6. Live cleanbasic_root_dir() resolves a valid SDK root containing stdlib/ and vendor/
+        CHECK(cb::is_valid_sdk_root(cb::cleanbasic_root_dir()));
+
+        std::filesystem::remove_all(tmp_base, ec);
+    }
+
+    SECTION("resolve_target_spec maps Linux, Windows, and macOS targets to Zig triples and extensions") {
+        const cb::TargetSpec native_spec = cb::resolve_target_spec("");
+        CHECK(native_spec.ok);
+        CHECK_FALSE(native_spec.is_cross);
+        CHECK(native_spec.canonical_name == "native");
+
+        const cb::TargetSpec linux_spec = cb::resolve_target_spec("linux");
+        CHECK(linux_spec.ok);
+        CHECK(linux_spec.is_cross);
+        CHECK_FALSE(linux_spec.is_windows);
+        CHECK(linux_spec.zig_triple == "x86_64-linux-musl");
+        CHECK(linux_spec.binary_ext == "");
+
+        const cb::TargetSpec linux_arm_spec = cb::resolve_target_spec("linux-arm64");
+        CHECK(linux_arm_spec.ok);
+        CHECK(linux_arm_spec.is_cross);
+        CHECK(linux_arm_spec.zig_triple == "aarch64-linux-musl");
+
+        const cb::TargetSpec win_spec = cb::resolve_target_spec("windows");
+        CHECK(win_spec.ok);
+        CHECK(win_spec.is_cross);
+        CHECK(win_spec.is_windows);
+        CHECK(win_spec.zig_triple == "x86_64-windows-gnu");
+        CHECK(win_spec.binary_ext == ".exe");
+        CHECK(cb::resolve_binary_output_path("dist", "", win_spec) == "dist/app.exe");
+        CHECK(cb::resolve_binary_output_path("dist", "dist/my_game", win_spec) == "dist/my_game.exe");
+        CHECK(cb::resolve_binary_output_path("dist", "dist/my_game.exe", win_spec) == "dist/my_game.exe");
+
+        const cb::TargetSpec win_arm_spec = cb::resolve_target_spec("windows-arm64");
+        CHECK(win_arm_spec.ok);
+        CHECK(win_arm_spec.is_windows);
+        CHECK(win_arm_spec.zig_triple == "aarch64-windows-gnu");
+
+        const cb::TargetSpec mac_spec = cb::resolve_target_spec("macos");
+        CHECK(mac_spec.ok);
+        CHECK(mac_spec.is_cross);
+        CHECK_FALSE(mac_spec.is_windows);
+        CHECK(mac_spec.zig_triple == "x86_64-macos");
+
+        const cb::TargetSpec mac_arm_spec = cb::resolve_target_spec("macos-arm64");
+        CHECK(mac_arm_spec.ok);
+        CHECK(mac_arm_spec.zig_triple == "aarch64-macos");
+
+        const cb::TargetSpec bad_spec = cb::resolve_target_spec("solaris-sparc");
+        CHECK_FALSE(bad_spec.ok);
+        CHECK(bad_spec.error_message.find("Unsupported target") != std::string::npos);
+    }
+
+    SECTION("resolve_compiler_command and build_compile_command generate portable C++17 invocation") {
+        const cb::TargetSpec win_spec = cb::resolve_target_spec("windows");
+        const std::string cross_cc = cb::resolve_compiler_command(win_spec, "");
+        CHECK(cross_cc == "zig c++ -target x86_64-windows-gnu");
+
+        const std::string cmd = cb::build_compile_command(
+            cross_cc,
+            "/opt/cleanbasic-sdk",
+            "projects/demo",
+            "projects/demo/build.cpp",
+            "projects/demo/app.exe",
+            {"-lm"}
+        );
+        CHECK(cmd.find("zig c++ -target x86_64-windows-gnu -O3 -std=c++17 -pthread") != std::string::npos);
+        CHECK(cmd.find(R"(-I"/opt/cleanbasic-sdk/vendor")") != std::string::npos);
+        CHECK(cmd.find(R"(-I"/opt/cleanbasic-sdk/stdlib")") != std::string::npos);
+        CHECK(cmd.find(R"(-I"projects/demo")") != std::string::npos);
+        CHECK(cmd.find(R"("projects/demo/build.cpp" -o "projects/demo/app.exe" -lm)") != std::string::npos);
+    }
+
+    SECTION("parse_cli_args parses --target, --bin, and --cc and build_file compiles with custom options") {
+        const cb::CliArgs args1 = cb::parse_cli_args({"build", "main.cb", "--target", "windows", "-b", "dist/game", "--cc", "zig c++"});
+        CHECK(args1.ok);
+        CHECK(args1.input_file == "main.cb");
+        CHECK(args1.compile_binary);
+        CHECK(args1.target == "windows");
+        CHECK(args1.binary_output == "dist/game");
+        CHECK(args1.compiler == "zig c++");
+
+        const cb::CliArgs args2 = cb::parse_cli_args({"main.cb", "-b", "out_bin"});
+        CHECK(args2.ok);
+        CHECK(args2.compile_binary);
+        CHECK(args2.binary_output == "out_bin");
+
+        const cb::CliArgs bad_args = cb::parse_cli_args({"build", "main.cb", "--target"});
+        CHECK_FALSE(bad_args.ok);
+
+        // Verify build_file rejects unknown target with TargetError
+        const cb::BuildFileResult bad_target_res = cb::build_file(
+            "tests/cases/fibonacci.cb",
+            "build/test_artifacts/bad_target.cpp",
+            true,
+            "",
+            "invalid-os"
+        );
+        CHECK_FALSE(bad_target_res.ok);
+        CHECK(bad_target_res.error.kind == "TargetError");
+
+        // Verify build_file compiles native binary with explicit --bin and --cc g++
+        const std::string out_cpp = "build/test_artifacts/cli_opts_fib.cpp";
+        const std::string out_bin = "build/test_artifacts/cli_opts_fib_bin";
+        const cb::BuildFileResult ok_res = cb::build_file(
+            "tests/cases/fibonacci.cb",
+            out_cpp,
+            true,
+            out_bin,
+            "native",
+            "g++"
+        );
+        INFO("Build diagnostic: " << cb::format_diagnostic(ok_res.error));
+        REQUIRE(ok_res.ok);
+        CHECK(ok_res.output_binary_path == out_bin);
+        CHECK(ok_res.compile_command.find(R"(-I")") != std::string::npos);
+        std::error_code ec;
+        CHECK(std::filesystem::exists(out_bin, ec));
     }
 }

@@ -4,6 +4,7 @@
 #include "src/cleanbasic/ast.hpp"
 #include "src/cleanbasic/diagnostics.hpp"
 
+#include <fstream>
 #include <functional>
 #include <optional>
 #include <string>
@@ -226,6 +227,13 @@ inline std::string resolve_symbol_key(
     return key;
 }
 
+inline TypeId resolve_alias(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
+    TypeId tid
+);
+
 inline TypeId infer_expr_type(
     const AstArena& arena,
     ExprId expr_id,
@@ -233,6 +241,143 @@ inline TypeId infer_expr_type(
     const std::unordered_map<std::string, VarSymbol>& scope,
     std::string_view current_module_id
 );
+
+inline std::optional<TypeSymbol> resolve_type_symbol_by_name(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
+    std::string_view raw_name,
+    bool require_first_hop_pub = false
+) {
+    std::string key = resolve_symbol_key(symbols, current_module_id, raw_name);
+    if (symbols.functions.find(key) != symbols.functions.end()) {
+        return std::nullopt;
+    }
+    std::unordered_set<std::string> seen;
+    std::string active_mod(current_module_id);
+    bool first_hop = true;
+    while (symbols.aliases.find(key) != symbols.aliases.end()) {
+        if (seen.find(key) != seen.end()) {
+            break;
+        }
+        seen.insert(key);
+        const auto& asym = symbols.aliases.at(key);
+        if (first_hop && require_first_hop_pub && !asym.is_pub && asym.module_id != current_module_id) {
+            return std::nullopt;
+        }
+        first_hop = false;
+        active_mod = asym.module_id;
+        if (asym.target_type >= arena.types.size()) {
+            break;
+        }
+        key = resolve_symbol_key(symbols, active_mod, arena.types[asym.target_type].name);
+    }
+    const auto it = symbols.types.find(key);
+    if (it != symbols.types.end()) {
+        if (first_hop && require_first_hop_pub && !it->second.is_pub && it->second.module_id != current_module_id) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<TypeSymbol> resolve_type_symbol(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
+    TypeId tid
+) {
+    if (tid == INVALID_ID || tid >= arena.types.size()) {
+        return std::nullopt;
+    }
+    const TypeId resolved_tid = resolve_alias(arena, symbols, current_module_id, tid);
+    if (resolved_tid == INVALID_ID || resolved_tid >= arena.types.size()) {
+        return std::nullopt;
+    }
+    const std::string& tname = arena.types[resolved_tid].name;
+    const auto direct_it = symbols.types.find(tname);
+    if (direct_it != symbols.types.end()) {
+        return direct_it->second;
+    }
+    const std::string key = resolve_symbol_key(symbols, current_module_id, tname);
+    const auto resolved_it = symbols.types.find(key);
+    if (resolved_it != symbols.types.end()) {
+        return resolved_it->second;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<FnSymbol> resolve_ufcs_fn(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view current_module_id,
+    TypeId recv_tid,
+    std::string_view method_name
+) {
+    // UFCS Step 1: Current module
+    const std::string local_key = symbol_key(current_module_id, method_name);
+    const auto local_it = symbols.functions.find(local_key);
+    if (local_it != symbols.functions.end()) {
+        return local_it->second;
+    }
+
+    // UFCS Step 2: Receiver's defining module
+    const TypeId resolved_recv = resolve_alias(arena, symbols, current_module_id, recv_tid);
+    std::string recv_type_key;
+    if (resolved_recv != INVALID_ID && resolved_recv < arena.types.size()) {
+        recv_type_key = resolve_symbol_key(symbols, current_module_id, arena.types[resolved_recv].name);
+        const auto [recv_mod_id, recv_base] = split_symbol_key(recv_type_key);
+        if (!recv_mod_id.empty()) {
+            const std::string recv_fn_key = symbol_key(recv_mod_id, method_name);
+            const auto recv_fn_it = symbols.functions.find(recv_fn_key);
+            if (recv_fn_it != symbols.functions.end()) {
+                if (recv_fn_it->second.is_pub) {
+                    return recv_fn_it->second;
+                }
+                return std::nullopt;
+            }
+        }
+    }
+
+    // UFCS Step 3: Directly imported modules of current_module_id
+    const auto mod_it = symbols.modules.find(std::string(current_module_id));
+    if (mod_it != symbols.modules.end()) {
+        std::vector<FnSymbol> pub_candidates;
+        std::unordered_set<std::string> seen_keys;
+        for (const auto& [alias_name, imported_mod_id] : mod_it->second) {
+            const std::string cand_key = symbol_key(imported_mod_id, method_name);
+            if (seen_keys.find(cand_key) != seen_keys.end()) {
+                continue;
+            }
+            seen_keys.insert(cand_key);
+            const auto cand_it = symbols.functions.find(cand_key);
+            if (cand_it != symbols.functions.end() && cand_it->second.is_pub) {
+                pub_candidates.push_back(cand_it->second);
+            }
+        }
+        if (pub_candidates.size() == 1) {
+            return pub_candidates[0];
+        }
+        if (pub_candidates.size() > 1 && !recv_type_key.empty()) {
+            std::vector<FnSymbol> type_matched;
+            for (const auto& cand : pub_candidates) {
+                if (!cand.params.empty() && cand.params[0].type_id < arena.types.size()) {
+                    const std::string param_key = resolve_symbol_key(
+                        symbols, cand.module_id, arena.types[cand.params[0].type_id].name
+                    );
+                    if (param_key == recv_type_key) {
+                        type_matched.push_back(cand);
+                    }
+                }
+            }
+            if (type_matched.size() == 1) {
+                return type_matched[0];
+            }
+        }
+    }
+    return std::nullopt;
+}
 
 inline std::optional<FnSymbol> resolve_func_call(
     const AstArena& arena,
@@ -274,69 +419,8 @@ inline std::optional<FnSymbol> resolve_func_call(
                 return std::nullopt;
             }
         }
-
-        // UFCS Step 1: Current module
-        const std::string local_key = symbol_key(current_module_id, access.field_name);
-        const auto local_it = symbols.functions.find(local_key);
-        if (local_it != symbols.functions.end()) {
-            return local_it->second;
-        }
-
-        // UFCS Step 2: Receiver's defining module
         const TypeId recv_tid = infer_expr_type(arena, access.target, symbols, scope, current_module_id);
-        std::string recv_type_key;
-        if (recv_tid < arena.types.size()) {
-            recv_type_key = resolve_symbol_key(symbols, current_module_id, arena.types[recv_tid].name);
-            const auto [recv_mod_id, recv_base] = split_symbol_key(recv_type_key);
-            if (!recv_mod_id.empty()) {
-                const std::string recv_fn_key = symbol_key(recv_mod_id, access.field_name);
-                const auto recv_fn_it = symbols.functions.find(recv_fn_key);
-                if (recv_fn_it != symbols.functions.end()) {
-                    if (recv_fn_it->second.is_pub) {
-                        return recv_fn_it->second;
-                    }
-                    return std::nullopt;
-                }
-            }
-        }
-
-        // UFCS Step 3: Directly imported modules of current_module_id
-        const auto mod_it = symbols.modules.find(std::string(current_module_id));
-        if (mod_it != symbols.modules.end()) {
-            std::vector<FnSymbol> pub_candidates;
-            std::unordered_set<std::string> seen_keys;
-            for (const auto& [alias_name, imported_mod_id] : mod_it->second) {
-                const std::string cand_key = symbol_key(imported_mod_id, access.field_name);
-                if (seen_keys.find(cand_key) != seen_keys.end()) {
-                    continue;
-                }
-                seen_keys.insert(cand_key);
-                const auto cand_it = symbols.functions.find(cand_key);
-                if (cand_it != symbols.functions.end() && cand_it->second.is_pub) {
-                    pub_candidates.push_back(cand_it->second);
-                }
-            }
-            if (pub_candidates.size() == 1) {
-                return pub_candidates[0];
-            }
-            if (pub_candidates.size() > 1 && !recv_type_key.empty()) {
-                std::vector<FnSymbol> type_matched;
-                for (const auto& cand : pub_candidates) {
-                    if (!cand.params.empty() && cand.params[0].type_id < arena.types.size()) {
-                        const std::string param_key = resolve_symbol_key(
-                            symbols, cand.module_id, arena.types[cand.params[0].type_id].name
-                        );
-                        if (param_key == recv_type_key) {
-                            type_matched.push_back(cand);
-                        }
-                    }
-                }
-                if (type_matched.size() == 1) {
-                    return type_matched[0];
-                }
-            }
-        }
-        return std::nullopt;
+        return resolve_ufcs_fn(arena, symbols, current_module_id, recv_tid, access.field_name);
     }
 
     return std::nullopt;
@@ -356,29 +440,8 @@ inline std::optional<TypeSymbol> resolve_struct_constructor(
 
     if (std::holds_alternative<Identifier>(callee_node.payload)) {
         const auto& ident = std::get<Identifier>(callee_node.payload);
-        std::string key = resolve_symbol_key(symbols, current_module_id, ident.name);
-        if (symbols.functions.find(key) != symbols.functions.end()) {
-            return std::nullopt;
-        }
-        std::unordered_set<std::string> seen;
-        std::string active_mod(current_module_id);
-        while (symbols.aliases.find(key) != symbols.aliases.end()) {
-            if (seen.find(key) != seen.end()) {
-                break;
-            }
-            seen.insert(key);
-            const auto& asym = symbols.aliases.at(key);
-            active_mod = asym.module_id;
-            if (asym.target_type >= arena.types.size()) {
-                break;
-            }
-            key = resolve_symbol_key(symbols, active_mod, arena.types[asym.target_type].name);
-        }
-        const auto it = symbols.types.find(key);
-        if (it != symbols.types.end()) {
-            return it->second;
-        }
-        return std::nullopt;
+        const bool require_pub = (ident.name.find('.') != std::string::npos);
+        return resolve_type_symbol_by_name(arena, symbols, current_module_id, ident.name, require_pub);
     }
 
     if (std::holds_alternative<FieldAccess>(callee_node.payload)) {
@@ -390,36 +453,7 @@ inline std::optional<TypeSymbol> resolve_struct_constructor(
             if (!is_module_alias_in_scope(symbols, current_module_id, mod_ident.name, scope, target_mod_id)) {
                 return std::nullopt;
             }
-            std::string key = symbol_key(target_mod_id, access.field_name);
-            if (symbols.functions.find(key) != symbols.functions.end()) {
-                return std::nullopt;
-            }
-            std::unordered_set<std::string> seen;
-            std::string active_mod = target_mod_id;
-            bool first_hop = true;
-            while (symbols.aliases.find(key) != symbols.aliases.end()) {
-                if (seen.find(key) != seen.end()) {
-                    break;
-                }
-                seen.insert(key);
-                const auto& asym = symbols.aliases.at(key);
-                if (first_hop && !asym.is_pub) {
-                    return std::nullopt;
-                }
-                first_hop = false;
-                active_mod = asym.module_id;
-                if (asym.target_type >= arena.types.size()) {
-                    break;
-                }
-                key = resolve_symbol_key(symbols, active_mod, arena.types[asym.target_type].name);
-            }
-            const auto it = symbols.types.find(key);
-            if (it != symbols.types.end()) {
-                if (first_hop && !it->second.is_pub) {
-                    return std::nullopt;
-                }
-                return it->second;
-            }
+            return resolve_type_symbol_by_name(arena, symbols, target_mod_id, access.field_name, true);
         }
         return std::nullopt;
     }
@@ -574,15 +608,11 @@ inline TypeId infer_expr_type(
     if (std::holds_alternative<FieldAccess>(payload)) {
         const auto& faccess = std::get<FieldAccess>(payload);
         const TypeId target_tid = infer_expr_type(arena, faccess.target, symbols, scope, current_module_id);
-        if (target_tid < arena.types.size()) {
-            const std::string& tname = arena.types[target_tid].name;
-            const std::string type_key = resolve_symbol_key(symbols, current_module_id, tname);
-            const auto it = symbols.types.find(type_key);
-            if (it != symbols.types.end()) {
-                const auto fit = it->second.fields.find(faccess.field_name);
-                if (fit != it->second.fields.end()) {
-                    return fit->second;
-                }
+        const auto ts_opt = resolve_type_symbol(arena, symbols, current_module_id, target_tid);
+        if (ts_opt.has_value()) {
+            const auto fit = ts_opt->fields.find(faccess.field_name);
+            if (fit != ts_opt->fields.end()) {
+                return fit->second;
             }
         }
         return symbols.type_auto;
@@ -905,6 +935,19 @@ inline void analyze_block(
     bool inherited_on_error = false
 );
 
+inline void bind_local_var(
+    std::unordered_map<std::string, VarSymbol>& scope,
+    const AnalyzerState& state,
+    const std::string& name,
+    TypeId tid,
+    bool is_byref,
+    bool is_const,
+    uint32_t line,
+    uint32_t col
+) {
+    scope[name] = VarSymbol{name, tid, is_byref, is_const, state.file_name, line, col, line};
+}
+
 inline void analyze_stmt(
     AnalyzerState& state,
     AstArena& arena,
@@ -927,73 +970,28 @@ inline void analyze_stmt(
         if (state.has_error) return;
 
         const TypeId val_type = infer_expr_type(arena, vassign.value, symbols, scope, state.module_id);
-
-        if (vassign.is_dim || vassign.is_const) {
-            if (vassign.has_declared_type) {
-                const TypeId resolved_decl = resolve_alias(arena, symbols, state.module_id, vassign.declared_type);
-                if (vassign.target != INVALID_ID) {
-                    const ExprId tgt_id = vassign.target;
-                    if (tgt_id < arena.exprs.size()) {
-                        const auto& tgt_node = arena.exprs[tgt_id];
-                        if (std::holds_alternative<Identifier>(tgt_node.payload)) {
-                            const auto& ident = std::get<Identifier>(tgt_node.payload);
-                            scope[ident.name] = VarSymbol{
-                                ident.name,
-                                resolved_decl,
-                                false,
-                                vassign.is_const,
-                                state.file_name,
-                                tgt_node.line,
-                                tgt_node.col,
-                                tgt_node.line
-                            };
-                        }
-                    }
+        if (vassign.target < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[vassign.target].payload)) {
+            const auto& tgt_node = arena.exprs[vassign.target];
+            const auto& ident = std::get<Identifier>(tgt_node.payload);
+            if (vassign.is_dim || vassign.is_const) {
+                TypeId var_tid = symbols.type_int;
+                if (vassign.has_declared_type) {
+                    var_tid = resolve_alias(arena, symbols, state.module_id, vassign.declared_type);
+                } else if (val_type != INVALID_ID) {
+                    var_tid = val_type;
                 }
+                bind_local_var(scope, state, ident.name, var_tid, false, vassign.is_const, tgt_node.line, tgt_node.col);
             } else {
-                if (vassign.target != INVALID_ID) {
-                    const ExprId tgt_id = vassign.target;
-                    if (tgt_id < arena.exprs.size()) {
-                        const auto& tgt_node = arena.exprs[tgt_id];
-                        if (std::holds_alternative<Identifier>(tgt_node.payload)) {
-                            const auto& ident = std::get<Identifier>(tgt_node.payload);
-                            TypeId inferred = symbols.type_int;
-                            if (val_type != INVALID_ID) {
-                                inferred = val_type;
-                            }
-                            scope[ident.name] = VarSymbol{
-                                ident.name,
-                                inferred,
-                                false,
-                                vassign.is_const,
-                                state.file_name,
-                                tgt_node.line,
-                                tgt_node.col,
-                                tgt_node.line
-                            };
-                        }
-                    }
+                const auto existing = scope.find(ident.name);
+                if (existing == scope.end()) {
+                    std::string msg = "Undeclared variable '" + ident.name + "'. Use 'dim' or 'const' to declare variables.";
+                    set_analyzer_error(state, tgt_node.line, tgt_node.col, msg);
+                    return;
                 }
-            }
-        } else {
-            if (vassign.target != INVALID_ID) {
-                const ExprId tgt_id = vassign.target;
-                if (tgt_id < arena.exprs.size()) {
-                    const auto& tgt_node = arena.exprs[tgt_id];
-                    if (std::holds_alternative<Identifier>(tgt_node.payload)) {
-                        const auto& ident = std::get<Identifier>(tgt_node.payload);
-                        const auto existing = scope.find(ident.name);
-                        if (existing == scope.end()) {
-                            std::string msg = "Undeclared variable '" + ident.name + "'. Use 'dim' or 'const' to declare variables.";
-                            set_analyzer_error(state, tgt_node.line, tgt_node.col, msg);
-                            return;
-                        }
-                        if (existing->second.is_const) {
-                            std::string msg = "Cannot reassign const variable '" + ident.name + "'.";
-                            set_analyzer_error(state, tgt_node.line, tgt_node.col, msg);
-                            return;
-                        }
-                    }
+                if (existing->second.is_const) {
+                    std::string msg = "Cannot reassign const variable '" + ident.name + "'.";
+                    set_analyzer_error(state, tgt_node.line, tgt_node.col, msg);
+                    return;
                 }
             }
         }
@@ -1013,23 +1011,12 @@ inline void analyze_stmt(
 
     if (std::holds_alternative<ErrorBlock>(payload)) {
         const auto& err_block = std::get<ErrorBlock>(payload);
-        auto err_scope = scope;
         TypeId err_t = symbols.type_err;
         if (err_t == INVALID_ID) {
             err_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "err", {}});
         }
-        const VarSymbol err_var_sym{
-            err_block.err_var,
-            err_t,
-            false,
-            false,
-            state.file_name,
-            stmt_node.line,
-            stmt_node.col,
-            stmt_node.line
-        };
-        err_scope[err_block.err_var] = err_var_sym;
-        scope[err_block.err_var] = err_var_sym;
+        bind_local_var(scope, state, err_block.err_var, err_t, false, false, stmt_node.line, stmt_node.col);
+        auto err_scope = scope;
         analyze_block(state, arena, fn, err_block.body, symbols, err_scope, false);
         if (state.has_error) return;
 
@@ -1073,16 +1060,7 @@ inline void analyze_stmt(
             }
             if (!for_stmt.loop_vars.empty()) {
                 const TypeId int_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}});
-                scope[for_stmt.loop_vars[0]] = VarSymbol{
-                    for_stmt.loop_vars[0],
-                    int_t,
-                    false,
-                    false,
-                    state.file_name,
-                    stmt_node.line,
-                    stmt_node.col,
-                    stmt_node.line
-                };
+                bind_local_var(scope, state, for_stmt.loop_vars[0], int_t, false, false, stmt_node.line, stmt_node.col);
             }
         } else if (for_stmt.has_iterable) {
             validate_expr_calls(state, arena, fn, for_stmt.iterable, symbols, scope, false);
@@ -1090,54 +1068,18 @@ inline void analyze_stmt(
             if (iter_tid < arena.types.size()) {
                 const auto& iter_t = arena.types[iter_tid];
                 if (iter_t.name == "list" && !iter_t.type_args.empty() && !for_stmt.loop_vars.empty()) {
-                    scope[for_stmt.loop_vars[0]] = VarSymbol{
-                        for_stmt.loop_vars[0],
-                        iter_t.type_args[0],
-                        false,
-                        false,
-                        state.file_name,
-                        stmt_node.line,
-                        stmt_node.col,
-                        stmt_node.line
-                    };
+                    bind_local_var(scope, state, for_stmt.loop_vars[0], iter_t.type_args[0], false, false, stmt_node.line, stmt_node.col);
                 } else if (iter_t.name == "dict" && iter_t.type_args.size() == 2) {
                     if (for_stmt.loop_vars.size() >= 1) {
-                        scope[for_stmt.loop_vars[0]] = VarSymbol{
-                            for_stmt.loop_vars[0],
-                            iter_t.type_args[0],
-                            false,
-                            false,
-                            state.file_name,
-                            stmt_node.line,
-                            stmt_node.col,
-                            stmt_node.line
-                        };
+                        bind_local_var(scope, state, for_stmt.loop_vars[0], iter_t.type_args[0], false, false, stmt_node.line, stmt_node.col);
                     }
                     if (for_stmt.loop_vars.size() >= 2) {
-                        scope[for_stmt.loop_vars[1]] = VarSymbol{
-                            for_stmt.loop_vars[1],
-                            iter_t.type_args[1],
-                            false,
-                            false,
-                            state.file_name,
-                            stmt_node.line,
-                            stmt_node.col,
-                            stmt_node.line
-                        };
+                        bind_local_var(scope, state, for_stmt.loop_vars[1], iter_t.type_args[1], false, false, stmt_node.line, stmt_node.col);
                     }
                 } else {
+                    const TypeId auto_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "auto", {}});
                     for (const auto& lv : for_stmt.loop_vars) {
-                        const TypeId auto_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "auto", {}});
-                        scope[lv] = VarSymbol{
-                            lv,
-                            auto_t,
-                            false,
-                            false,
-                            state.file_name,
-                            stmt_node.line,
-                            stmt_node.col,
-                            stmt_node.line
-                        };
+                        bind_local_var(scope, state, lv, auto_t, false, false, stmt_node.line, stmt_node.col);
                     }
                 }
             }
@@ -1238,16 +1180,7 @@ inline void analyze_fn(
     std::unordered_map<std::string, VarSymbol> scope;
     for (const auto& param : fn.params) {
         const TypeId resolved_tid = resolve_alias(arena, symbols, state.module_id, param.type_id);
-        scope[param.name] = VarSymbol{
-            param.name,
-            resolved_tid,
-            param.is_byref,
-            false,
-            state.file_name,
-            param.line,
-            param.col,
-            param.line
-        };
+        bind_local_var(scope, state, param.name, resolved_tid, param.is_byref, false, param.line, param.col);
     }
 
     analyze_block(state, arena, fn, fn.body, symbols, scope, false);
@@ -1279,12 +1212,24 @@ inline AnalysisResult analyze_program(
         if (std::holds_alternative<ImportDecl>(payload)) {
             const auto& imp = std::get<ImportDecl>(payload);
             if (imp.kind == "header") {
+                std::string header_path = imp.target;
+                if (!decl_node.file_name.empty()) {
+                    const std::string mod_dir = parent_dir_of(decl_node.file_name);
+                    if (mod_dir != "." && !header_path.empty() && header_path[0] != '/') {
+                        const std::string rel_candidate = mod_dir + "/" + header_path;
+                        std::ifstream h_in(rel_candidate);
+                        if (h_in.is_open()) {
+                            h_in.close();
+                            header_path = rel_candidate;
+                        }
+                    }
+                }
                 bool found = false;
                 for (const auto& h : result.symbols.headers) {
-                    if (h == imp.target) { found = true; break; }
+                    if (h == header_path) { found = true; break; }
                 }
                 if (!found) {
-                    result.symbols.headers.push_back(imp.target);
+                    result.symbols.headers.push_back(header_path);
                 }
             } else if (imp.kind == "link") {
                 bool found = false;

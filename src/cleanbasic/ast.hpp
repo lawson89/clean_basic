@@ -1,12 +1,25 @@
 #ifndef CLEANBASIC_AST_HPP
 #define CLEANBASIC_AST_HPP
 
+#include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 namespace cb {
 
@@ -432,7 +445,154 @@ inline std::string normalize_rel_path(std::string_view raw_path) {
     return out;
 }
 
+inline std::string parent_dir_of(std::string_view file_path) {
+    const std::string sep_chars = std::string("/") + std::string(1, static_cast<char>(92));
+    const size_t slash_idx = file_path.find_last_of(sep_chars);
+    if (slash_idx != std::string_view::npos) {
+        if (slash_idx == 0) {
+            return "/";
+        }
+        return std::string(file_path.substr(0, slash_idx));
+    }
+    return ".";
+}
+
+inline std::string get_env_var(const std::string& name) {
+    if (std::getenv(name.c_str()) != nullptr) {
+        return std::string(std::getenv(name.c_str()));
+    }
+    return "";
+}
+
+inline std::string detect_executable_path() {
+#if defined(_WIN32)
+    std::array<char, 4096> buf{};
+    const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (len > 0 && len < buf.size()) {
+        std::error_code ec;
+        const std::filesystem::path p(std::string(buf.data(), static_cast<size_t>(len)));
+        return p.generic_string();
+    }
+    return "";
+#elif defined(__APPLE__)
+    std::array<char, 4096> buf{};
+    uint32_t size = static_cast<uint32_t>(buf.size());
+    if (_NSGetExecutablePath(buf.data(), &size) == 0) {
+        std::error_code ec;
+        const std::filesystem::path p = std::filesystem::canonical(std::filesystem::path(buf.data()), ec);
+        if (!ec) {
+            return p.generic_string();
+        }
+        return std::filesystem::path(buf.data()).generic_string();
+    }
+    return "";
+#else
+    std::error_code ec;
+    const std::filesystem::path exe_p = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !exe_p.empty()) {
+        return exe_p.generic_string();
+    }
+    return "";
+#endif
+}
+
+inline bool is_valid_sdk_root(std::string_view candidate_dir) {
+    if (candidate_dir.empty()) {
+        return false;
+    }
+    std::error_code ec1;
+    std::error_code ec2;
+    const std::filesystem::path base{std::string(candidate_dir)};
+    const bool has_stdlib = std::filesystem::is_directory(base / "stdlib", ec1);
+    const bool has_vendor = std::filesystem::is_directory(base / "vendor", ec2);
+    return !ec1 && !ec2 && has_stdlib && has_vendor;
+}
+
+inline std::string strip_trailing_slashes(std::string_view path) {
+    const char bslash = static_cast<char>(92);
+    size_t end = path.size();
+    while (end > 1 && (path[end - 1] == '/' || path[end - 1] == bslash)) {
+        end -= 1;
+    }
+    return std::string(path.substr(0, end));
+}
+
+inline std::string compile_time_root_dir() {
+#ifdef CLEANBASIC_ROOT_DIR
+    return std::string(CLEANBASIC_ROOT_DIR);
+#else
+    return ".";
+#endif
+}
+
+inline std::string resolve_sdk_root_dir(
+    std::string_view env_home,
+    std::string_view exe_path,
+    std::string_view compile_time_root
+) {
+    if (!env_home.empty()) {
+        const std::string clean_env = strip_trailing_slashes(env_home);
+        if (is_valid_sdk_root(clean_env)) {
+            return clean_env;
+        }
+        std::error_code ec;
+        if (std::filesystem::is_directory(std::filesystem::path(clean_env), ec) && !ec) {
+            return clean_env;
+        }
+    }
+
+    if (!exe_path.empty()) {
+        const std::string exe_dir = parent_dir_of(exe_path);
+        if (is_valid_sdk_root(exe_dir)) {
+            return exe_dir;
+        }
+        const std::string exe_parent = parent_dir_of(exe_dir);
+        if (exe_parent != exe_dir && is_valid_sdk_root(exe_parent)) {
+            return exe_parent;
+        }
+        const std::string exe_grandparent = parent_dir_of(exe_parent);
+        if (exe_grandparent != exe_parent && is_valid_sdk_root(exe_grandparent)) {
+            return exe_grandparent;
+        }
+    }
+
+    if (!compile_time_root.empty() && is_valid_sdk_root(compile_time_root)) {
+        return std::string(compile_time_root);
+    }
+
+    if (is_valid_sdk_root(".")) {
+        return ".";
+    }
+
+    if (!compile_time_root.empty()) {
+        return std::string(compile_time_root);
+    }
+    return ".";
+}
+
+inline std::string cleanbasic_root_dir() {
+    return resolve_sdk_root_dir(
+        get_env_var("CLEANBASIC_HOME"),
+        detect_executable_path(),
+        compile_time_root_dir()
+    );
+}
+
+inline bool is_std_import_target(std::string_view import_target) {
+    return import_target.size() >= 5 && import_target.substr(0, 4) == "std/";
+}
+
+inline std::string strip_cb_ext(std::string_view path) {
+    if (path.size() > 3 && path.substr(path.size() - 3) == ".cb") {
+        return std::string(path.substr(0, path.size() - 3));
+    }
+    return std::string(path);
+}
+
 inline std::string resolve_module_id(std::string_view importer_module_id, std::string_view import_target) {
+    if (is_std_import_target(import_target)) {
+        return normalize_rel_path(strip_cb_ext(import_target));
+    }
     std::string importer_dir;
     if (!importer_module_id.empty()) {
         const size_t slash_idx = importer_module_id.find_last_of('/');
@@ -446,11 +606,7 @@ inline std::string resolve_module_id(std::string_view importer_module_id, std::s
     } else {
         combined = std::string(import_target);
     }
-    std::string norm = normalize_rel_path(combined);
-    if (norm.size() > 3 && norm.substr(norm.size() - 3) == ".cb") {
-        norm = norm.substr(0, norm.size() - 3);
-    }
-    return norm;
+    return strip_cb_ext(normalize_rel_path(combined));
 }
 
 inline std::string default_import_alias(std::string_view import_target) {

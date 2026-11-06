@@ -1,3 +1,6 @@
+#ifndef CLEANBASIC_CLI_MAIN_CPP
+#define CLEANBASIC_CLI_MAIN_CPP
+
 #include "src/cleanbasic/lsp.hpp"
 #include "src/cleanbasic/pipeline.hpp"
 
@@ -15,17 +18,24 @@ struct CliArgs {
     std::string input_file;
     std::string output_file;
     bool compile_binary = false;
+    std::string binary_output;
+    std::string target;
+    std::string compiler;
 };
 
 inline void print_usage(std::string_view prog_name) {
-    std::cout << "Usage: " << prog_name << " build <file.cb> [-o output.cpp] [-c]\n"
-              << "       " << prog_name << " <file.cb>\n"
-              << "       " << prog_name << " lsp\n\n"
-              << "Options:\n"
-              << "  lsp, --lsp           Start the CleanBasic Language Server over stdio\n"
-              << "  -o, --output <file>  Output C++ file path (default: build.cpp)\n"
-              << "  -c, --compile        Also compile build.cpp into a native binary\n"
-              << "  -h, --help           Show this help message\n";
+    std::cout << "Usage: " << prog_name << " build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler]" << std::endl
+              << "       " << prog_name << " <file.cb>" << std::endl
+              << "       " << prog_name << " lsp" << std::endl << std::endl
+              << "Options:" << std::endl
+              << "  lsp, --lsp            Start the CleanBasic Language Server over stdio" << std::endl
+              << "  -o, --output <file>   Output C++ file path (default: build.cpp)" << std::endl
+              << "  -c, --compile         Compile generated C++ into a binary executable" << std::endl
+              << "  -b, --bin <file>      Output binary executable path (implies -c)" << std::endl
+              << "  -t, --target <target> Target platform: native, linux, linux-arm64, windows," << std::endl
+              << "                        windows-arm64, macos, macos-arm64 (implies -c, uses zig c++)" << std::endl
+              << "  --cc <compiler>       C++17 compiler command override (e.g., 'g++', 'clang++', 'zig c++')" << std::endl
+              << "  -h, --help            Show this help message" << std::endl;
 }
 
 inline CliArgs parse_cli_args(const std::vector<std::string_view>& raw_args) {
@@ -73,6 +83,32 @@ inline CliArgs parse_cli_args(const std::vector<std::string_view>& raw_args) {
         } else if (arg == "-c" || arg == "--compile") {
             args.compile_binary = true;
             idx += 1;
+        } else if (arg == "-b" || arg == "--bin") {
+            if (idx + 1 < raw_args.size()) {
+                args.binary_output = std::string(raw_args[idx + 1]);
+                args.compile_binary = true;
+                idx += 2;
+            } else {
+                args.ok = false;
+                return args;
+            }
+        } else if (arg == "-t" || arg == "--target") {
+            if (idx + 1 < raw_args.size()) {
+                args.target = std::string(raw_args[idx + 1]);
+                args.compile_binary = true;
+                idx += 2;
+            } else {
+                args.ok = false;
+                return args;
+            }
+        } else if (arg == "--cc") {
+            if (idx + 1 < raw_args.size()) {
+                args.compiler = std::string(raw_args[idx + 1]);
+                idx += 2;
+            } else {
+                args.ok = false;
+                return args;
+            }
         } else if (arg == "-h" || arg == "--help") {
             args.show_help = true;
             args.ok = true;
@@ -105,7 +141,10 @@ inline int run_cli(std::string_view prog_name, const std::vector<std::string_vie
     const BuildFileResult res = build_file(
         args.input_file,
         args.output_file,
-        args.compile_binary
+        args.compile_binary,
+        args.binary_output,
+        args.target,
+        args.compiler
     );
 
     if (!res.ok) {
@@ -123,11 +162,15 @@ inline int run_cli(std::string_view prog_name, const std::vector<std::string_vie
     }
 
     std::cout << "Generated " << res.output_cpp_path << flags_str << std::endl;
+    if (args.compile_binary && !res.output_binary_path.empty()) {
+        std::cout << "Compiled binary " << res.output_binary_path << std::endl;
+    }
     return 0;
 }
 
 }  // namespace cb
 
+#ifndef CLEANBASIC_CLI_LIB_ONLY
 int main(int argc, char** argv) {
     std::string_view prog_name = "cleanbasic";
     if (argc > 0) {
@@ -142,3 +185,6 @@ int main(int argc, char** argv) {
     }
     return cb::run_cli(prog_name, raw_args);
 }
+#endif
+
+#endif  // CLEANBASIC_CLI_MAIN_CPP

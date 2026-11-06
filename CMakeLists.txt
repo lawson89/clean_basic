@@ -29,6 +29,12 @@ target_include_directories(cleanbasic_core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+target_include_directories(cleanbasic_core SYSTEM INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+)
+target_compile_definitions(cleanbasic_core INTERFACE
+    CLEANBASIC_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
 target_compile_options(cleanbasic_core INTERFACE
     -fno-exceptions
     -fno-rtti

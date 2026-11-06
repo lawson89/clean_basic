@@ -232,26 +232,36 @@ The `cleanbasic` command-line executable (`cli_main.cpp`) parses arguments into 
 
 ### Usage Synopsis
 ```bash
-cleanbasic build <file.cb> [-o output.cpp] [-c]
+cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler]
 cleanbasic <file.cb> [-o output.cpp] [-c]
+cleanbasic lsp
 ```
 
 ### Supported CLI Options
 | Flag / Argument | Description | Default Behavior |
 | :--- | :--- | :--- |
-| `build <file.cb>` or `<file.cb>` | Path to the root CleanBasic source file to transpile. | Required (unless `-h`/`--help` is passed). |
+| `build <file.cb>` or `<file.cb>` | Path to the root CleanBasic source file to transpile. | Required (unless `lsp` or `-h`/`--help` is passed). |
+| `lsp, --lsp` | Starts the CleanBasic Language Server over stdio. | Off |
 | `-o, --output <file>` | Output path for the generated Unity C++17 source file. | `<input_parent_dir>/build.cpp` |
-| `-c, --compile` | After generating `build.cpp`, invokes `g++` to compile a native binary. | Off (transpiles C++ source only). |
+| `-c, --compile` | Compiles the generated `build.cpp` into a binary executable. | Off (unless `-b` or `-t` is passed). |
+| `-b, --bin <file>` | Output binary executable path (implies `-c`; appends `.exe` on Windows targets). | `<input_parent_dir>/app` (or `app.exe`). |
+| `-t, --target <target>` | Target platform (`native`, `linux`, `linux-arm64`, `windows`, `windows-arm64`, `macos`, `macos-arm64`). Implies `-c` and uses `zig c++ -target <triple>` when cross-compiling. | `native` |
+| `--cc <compiler>` | Explicit C++17 compiler override (e.g. `g++`, `clang++`, `zig c++`). | `zig c++` (cross) or `$CXX` / `g++` / `clang++` (native). |
 | `-h, --help` | Prints CLI usage instructions and exits with code `0`. | Off |
 
-### Native Compilation Command (`cb::build_file`)
-When `compile_binary` (`-c` / `--compile`) is enabled, `cb::build_file()` collects all deduplicated `import link "<lib>"` declarations from `GlobalSymbolTable::link_libs`, transforms each into `-l<lib>`, and runs:
+### Portable SDK Root Discovery & Compilation Command (`cb::build_file`)
+CleanBasic supports zero-configuration portable SDK zip distributions (`cleanbasic` binary alongside `stdlib/` and `vendor/`). `cb::cleanbasic_root_dir()` dynamically resolves the SDK root in priority order:
+1. `CLEANBASIC_HOME` environment variable (if set).
+2. Relative to the running `cleanbasic` executable (`<exe_dir>`, `<exe_dir>/..`, or `<exe_dir>/../..` containing `stdlib/` and `vendor/`).
+3. Compile-time `CLEANBASIC_ROOT_DIR` or current working directory (`.`) fallback.
+
+When binary compilation (`-c`, `-b`, or `-t`) is enabled, `cb::build_file()` collects all deduplicated `import link "<lib>"` declarations from `GlobalSymbolTable::link_libs`, transforms each into `-l<lib>`, and runs:
 
 ```bash
-g++ -O3 -std=c++17 -pthread <out_cpp> -o <bin_path> [-l<lib1> -l<lib2> ...]
+<compiler> -O3 -std=c++17 -pthread -I"<sdk_root>/vendor" -I"<sdk_root>/stdlib" -I"<input_dir>" "<out_cpp>" -o "<bin_path>" [-l<lib1> -l<lib2> ...]
 ```
-* By default, `<bin_path>` is `<input_parent_dir>/app` (or a custom `binary_output` path when invoked programmatically via `cb::build_file(input, output, true, binary_output)`).
 * On success, the CLI prints:
   ```text
   Generated build.cpp (linker flags: -lsqlite3 -lm)
+  Compiled binary app
   ```

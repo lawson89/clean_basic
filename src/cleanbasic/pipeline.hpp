@@ -34,12 +34,203 @@ struct TranspileResult {
     DiagnosticError error;
 };
 
+struct TargetSpec {
+    bool ok = false;
+    bool is_cross = false;
+    bool is_windows = false;
+    std::string canonical_name;
+    std::string zig_triple;
+    std::string binary_ext;
+    std::string error_message;
+};
+
+struct BuildOptions {
+    std::string output_cpp_path;
+    bool compile_binary = false;
+    std::string binary_output;
+    std::string target;
+    std::string compiler;
+};
+
 struct BuildFileResult {
     bool ok = false;
     std::string output_cpp_path;
+    std::string output_binary_path;
+    std::string compile_command;
     std::vector<std::string> linker_flags;
     DiagnosticError error;
 };
+
+inline bool host_is_windows() {
+#if defined(_WIN32)
+    return true;
+#else
+    return false;
+#endif
+}
+
+inline TargetSpec resolve_target_spec(std::string_view raw_target) {
+    TargetSpec spec{};
+    if (raw_target.empty() || raw_target == "native" || raw_target == "host") {
+        spec.ok = true;
+        spec.is_cross = false;
+        spec.is_windows = host_is_windows();
+        spec.canonical_name = "native";
+        spec.zig_triple = "";
+        if (spec.is_windows) {
+            spec.binary_ext = ".exe";
+        } else {
+            spec.binary_ext = "";
+        }
+        return spec;
+    }
+
+    if (raw_target == "linux" || raw_target == "linux-x86_64" || raw_target == "x86_64-linux" || raw_target == "x86_64-linux-musl") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = false;
+        spec.canonical_name = "linux-x86_64";
+        spec.zig_triple = "x86_64-linux-musl";
+        spec.binary_ext = "";
+        return spec;
+    }
+
+    if (raw_target == "linux-gnu" || raw_target == "linux-x86_64-gnu" || raw_target == "x86_64-linux-gnu") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = false;
+        spec.canonical_name = "linux-x86_64-gnu";
+        spec.zig_triple = "x86_64-linux-gnu";
+        spec.binary_ext = "";
+        return spec;
+    }
+
+    if (raw_target == "linux-arm64" || raw_target == "linux-aarch64" || raw_target == "aarch64-linux" || raw_target == "aarch64-linux-musl") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = false;
+        spec.canonical_name = "linux-arm64";
+        spec.zig_triple = "aarch64-linux-musl";
+        spec.binary_ext = "";
+        return spec;
+    }
+
+    if (raw_target == "windows" || raw_target == "win" || raw_target == "windows-x86_64" ||
+        raw_target == "win64" || raw_target == "x86_64-windows" || raw_target == "x86_64-windows-gnu") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = true;
+        spec.canonical_name = "windows-x86_64";
+        spec.zig_triple = "x86_64-windows-gnu";
+        spec.binary_ext = ".exe";
+        return spec;
+    }
+
+    if (raw_target == "windows-arm64" || raw_target == "windows-aarch64" ||
+        raw_target == "aarch64-windows" || raw_target == "aarch64-windows-gnu") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = true;
+        spec.canonical_name = "windows-arm64";
+        spec.zig_triple = "aarch64-windows-gnu";
+        spec.binary_ext = ".exe";
+        return spec;
+    }
+
+    if (raw_target == "macos" || raw_target == "macos-x86_64" || raw_target == "darwin" ||
+        raw_target == "darwin-x86_64" || raw_target == "x86_64-macos") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = false;
+        spec.canonical_name = "macos-x86_64";
+        spec.zig_triple = "x86_64-macos";
+        spec.binary_ext = "";
+        return spec;
+    }
+
+    if (raw_target == "macos-arm64" || raw_target == "macos-aarch64" || raw_target == "darwin-arm64" ||
+        raw_target == "aarch64-macos") {
+        spec.ok = true;
+        spec.is_cross = true;
+        spec.is_windows = false;
+        spec.canonical_name = "macos-arm64";
+        spec.zig_triple = "aarch64-macos";
+        spec.binary_ext = "";
+        return spec;
+    }
+
+    spec.ok = false;
+    spec.error_message = "Unsupported target '" + std::string(raw_target) +
+        "'. Supported targets: native, linux (linux-x86_64), linux-arm64, windows (windows-x86_64), windows-arm64, macos (macos-x86_64), macos-arm64.";
+    return spec;
+}
+
+inline std::string resolve_binary_output_path(
+    std::string_view parent_dir,
+    std::string_view explicit_binary_output,
+    const TargetSpec& target_spec
+) {
+    std::string bin_path;
+    if (!explicit_binary_output.empty()) {
+        bin_path = std::string(explicit_binary_output);
+    } else {
+        bin_path = std::string(parent_dir) + "/app";
+    }
+    if (target_spec.is_windows) {
+        const bool has_exe_ext = bin_path.size() >= 4 &&
+            (bin_path.substr(bin_path.size() - 4) == ".exe" || bin_path.substr(bin_path.size() - 4) == ".EXE");
+        if (!has_exe_ext) {
+            bin_path += ".exe";
+        }
+    }
+    return bin_path;
+}
+
+inline std::string resolve_compiler_command(
+    const TargetSpec& target_spec,
+    std::string_view explicit_compiler
+) {
+    if (!explicit_compiler.empty()) {
+        if (target_spec.is_cross && explicit_compiler == "zig c++") {
+            return "zig c++ -target " + target_spec.zig_triple;
+        }
+        return std::string(explicit_compiler);
+    }
+    if (target_spec.is_cross) {
+        return "zig c++ -target " + target_spec.zig_triple;
+    }
+    const std::string env_cxx = get_env_var("CXX");
+    if (!env_cxx.empty()) {
+        return env_cxx;
+    }
+#if defined(__APPLE__)
+    return "clang++";
+#else
+    return "g++";
+#endif
+}
+
+inline std::string build_compile_command(
+    std::string_view compiler_cmd,
+    std::string_view cb_root,
+    std::string_view input_parent_dir,
+    std::string_view out_cpp_path,
+    std::string_view bin_path,
+    const std::vector<std::string>& linker_flags
+) {
+    const std::string q(1, '"');
+    std::string cmd = std::string(compiler_cmd) +
+        " -O3 -std=c++17 -pthread" +
+        " -I" + q + std::string(cb_root) + "/vendor" + q +
+        " -I" + q + std::string(cb_root) + "/stdlib" + q +
+        " -I" + q + std::string(input_parent_dir) + q +
+        " " + q + std::string(out_cpp_path) + q +
+        " -o " + q + std::string(bin_path) + q;
+    for (const auto& flag : linker_flags) {
+        cmd += " " + flag;
+    }
+    return cmd;
+}
 
 struct ModuleLoaderState {
     std::string root_base_dir = ".";
@@ -61,12 +252,25 @@ inline bool is_in_stack(const std::vector<std::string>& stack, std::string_view 
     return false;
 }
 
-inline std::string parent_dir_of(std::string_view file_path) {
-    const size_t slash_idx = file_path.find_last_of('/');
-    if (slash_idx != std::string_view::npos) {
-        return std::string(file_path.substr(0, slash_idx));
+inline std::vector<std::string> build_module_candidate_paths(
+    std::string_view current_dir,
+    std::string_view root_base_dir,
+    std::string_view imp_target
+) {
+    std::vector<std::string> candidates;
+    if (is_std_import_target(imp_target)) {
+        const std::string std_sub = strip_cb_ext(imp_target.substr(4));
+        const std::string cb_root = cleanbasic_root_dir();
+        candidates.push_back(cb_root + "/stdlib/" + std_sub + "/" + std_sub + ".cb");
+        candidates.push_back(cb_root + "/stdlib/" + std_sub + ".cb");
+        candidates.push_back("stdlib/" + std_sub + "/" + std_sub + ".cb");
+        candidates.push_back("stdlib/" + std_sub + ".cb");
+    } else {
+        candidates.push_back(std::string(current_dir) + "/" + std::string(imp_target));
+        candidates.push_back(std::string(root_base_dir) + "/" + std::string(imp_target));
+        candidates.push_back(std::string(imp_target));
     }
-    return ".";
+    return candidates;
 }
 
 inline std::optional<std::string> find_in_memory_source(
@@ -118,35 +322,30 @@ inline void load_module_declarations_recursive(
 
         if (std::holds_alternative<ImportDecl>(arena.decls[did].payload)) {
             auto imp = std::get<ImportDecl>(arena.decls[did].payload);
-            if (imp.kind == "module" && imp.target.size() > 3 &&
-                imp.target.substr(imp.target.size() - 3) == ".cb") {
+            const bool is_cb_file = imp.target.size() > 3 && imp.target.substr(imp.target.size() - 3) == ".cb";
+            const bool is_std_mod = is_std_import_target(imp.target);
+            if (imp.kind == "module" && (is_cb_file || is_std_mod)) {
                 std::string target_module_id = resolve_module_id(current_module_id, imp.target);
-
-                std::string candidate_path = current_dir + "/" + imp.target;
-                std::optional<std::string> mem_source = find_in_memory_source(loader.open_buffers, candidate_path);
+                const std::vector<std::string> candidates = build_module_candidate_paths(
+                    current_dir,
+                    loader.root_base_dir,
+                    imp.target
+                );
+                std::string candidate_path = candidates.front();
+                std::optional<std::string> mem_source;
                 std::ifstream mod_in;
-                if (!mem_source.has_value()) {
-                    mod_in.open(candidate_path);
-                }
 
-                if (!mem_source.has_value() && !mod_in.is_open()) {
-                    candidate_path = loader.root_base_dir + "/" + imp.target;
+                for (size_t c_idx = 0; c_idx < candidates.size(); ++c_idx) {
+                    candidate_path = candidates[c_idx];
                     mem_source = find_in_memory_source(loader.open_buffers, candidate_path);
                     if (!mem_source.has_value()) {
                         mod_in.open(candidate_path);
                     }
                     if (mem_source.has_value() || mod_in.is_open()) {
-                        target_module_id = resolve_module_id("", imp.target);
-                    }
-                }
-                if (!mem_source.has_value() && !mod_in.is_open()) {
-                    candidate_path = imp.target;
-                    mem_source = find_in_memory_source(loader.open_buffers, candidate_path);
-                    if (!mem_source.has_value()) {
-                        mod_in.open(candidate_path);
-                    }
-                    if (mem_source.has_value() || mod_in.is_open()) {
-                        target_module_id = resolve_module_id("", imp.target);
+                        if (!is_std_mod && c_idx > 0) {
+                            target_module_id = resolve_module_id("", imp.target);
+                        }
+                        break;
                     }
                 }
 
@@ -293,12 +492,18 @@ inline TranspileResult transpile_source(
     return TranspileResult{true, std::move(cpp_code), std::move(check_res.symbols), {}};
 }
 
-inline BuildFileResult build_file(
+inline BuildFileResult build_file_with_options(
     const std::string& input_path,
-    const std::string& output_path = "",
-    bool compile_binary = false,
-    const std::string& binary_output = ""
+    const BuildOptions& options
 ) {
+    const TargetSpec target_spec = resolve_target_spec(options.target);
+    if (!target_spec.ok) {
+        BuildFileResult res{};
+        res.ok = false;
+        res.error = make_error("TargetError", target_spec.error_message, input_path, 1, 1);
+        return res;
+    }
+
     std::ifstream in_file(input_path);
     if (!in_file.is_open()) {
         BuildFileResult res{};
@@ -312,11 +517,7 @@ inline BuildFileResult build_file(
     in_file.close();
     const std::string source = sstr.str();
 
-    const size_t slash_pos = input_path.find_last_of('/');
-    std::string parent_dir = ".";
-    if (slash_pos != std::string::npos) {
-        parent_dir = input_path.substr(0, slash_pos);
-    }
+    const std::string parent_dir = parent_dir_of(input_path);
 
     const TranspileResult trans_res = transpile_source(source, input_path);
     if (!trans_res.ok) {
@@ -327,8 +528,8 @@ inline BuildFileResult build_file(
     }
 
     std::string out_cpp = parent_dir + "/build.cpp";
-    if (!output_path.empty()) {
-        out_cpp = output_path;
+    if (!options.output_cpp_path.empty()) {
+        out_cpp = options.output_cpp_path;
     }
     std::ofstream out_file(out_cpp);
     if (!out_file.is_open()) {
@@ -346,22 +547,35 @@ inline BuildFileResult build_file(
         linker_flags.push_back("-l" + lib);
     }
 
-    if (compile_binary) {
-        std::string bin_path = parent_dir + "/app";
-        if (!binary_output.empty()) {
-            bin_path = binary_output;
-        }
-        std::string cmd = "g++ -O3 -std=c++17 -pthread " + out_cpp + " -o " + bin_path;
-        for (const auto& flag : linker_flags) {
-            cmd += " " + flag;
-        }
-        const int ret = std::system(cmd.c_str());
+    std::string bin_path;
+    std::string compile_cmd;
+    if (options.compile_binary) {
+        bin_path = resolve_binary_output_path(parent_dir, options.binary_output, target_spec);
+        const std::string cb_root = cleanbasic_root_dir();
+        const std::string compiler_cmd = resolve_compiler_command(target_spec, options.compiler);
+        compile_cmd = build_compile_command(
+            compiler_cmd,
+            cb_root,
+            parent_dir,
+            out_cpp,
+            bin_path,
+            linker_flags
+        );
+        const int ret = std::system(compile_cmd.c_str());
         if (ret != 0) {
             BuildFileResult res{};
             res.ok = false;
             res.output_cpp_path = out_cpp;
+            res.output_binary_path = bin_path;
+            res.compile_command = compile_cmd;
             res.linker_flags = linker_flags;
-            res.error = make_error("CompilationError", "g++ compilation failed with code " + std::to_string(ret), out_cpp, 1, 1);
+            res.error = make_error(
+                "CompilationError",
+                "C++ compilation failed with code " + std::to_string(ret) + " (command: " + compiler_cmd + ")",
+                out_cpp,
+                1,
+                1
+            );
             return res;
         }
     }
@@ -369,8 +583,27 @@ inline BuildFileResult build_file(
     BuildFileResult res{};
     res.ok = true;
     res.output_cpp_path = out_cpp;
+    res.output_binary_path = bin_path;
+    res.compile_command = compile_cmd;
     res.linker_flags = std::move(linker_flags);
     return res;
+}
+
+inline BuildFileResult build_file(
+    const std::string& input_path,
+    const std::string& output_path = "",
+    bool compile_binary = false,
+    const std::string& binary_output = "",
+    const std::string& target = "",
+    const std::string& compiler = ""
+) {
+    BuildOptions opts{};
+    opts.output_cpp_path = output_path;
+    opts.compile_binary = compile_binary;
+    opts.binary_output = binary_output;
+    opts.target = target;
+    opts.compiler = compiler;
+    return build_file_with_options(input_path, opts);
 }
 
 }  // namespace cb
