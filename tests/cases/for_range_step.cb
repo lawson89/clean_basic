@@ -1,10 +1,10 @@
 ' EXPECT_CPP: for (int i = 0; i <= 10; i += 2) {
 ' EXPECT_CPP: for (auto& x : nums) {
 ' FORBID_CPP: throw
-' EXPECT_OUT: inclusive_evens: 30
-' EXPECT_OUT: items_sum: 60
+' EXPECT_OUT: inclusiveEvens: 30
+' EXPECT_OUT: itemsSum: 60
 
-fn sum_evens() as int
+fn sumEvens() as int
     dim total = 0
     for i = 0 to 10 step 2
         total = total + i
@@ -12,7 +12,7 @@ fn sum_evens() as int
     return total
 end fn
 
-fn sum_items() as int
+fn sumItems() as int
     dim nums as list[int] = [10, 20, 30]
     dim sum = 0
     for x in nums
@@ -22,6 +22,6 @@ fn sum_items() as int
 end fn
 
 fn main()
-    print("inclusive_evens: ", sum_evens())
-    print("items_sum: " & sum_items())
+    print("inclusiveEvens: ", sumEvens())
+    print("itemsSum: " & sumItems())
 end fn

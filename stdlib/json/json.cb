@@ -3,138 +3,138 @@
 
 import header "json_bridge.hpp"
 
-pub extern type cb_json_doc
-pub extern type cb_json_val
+pub extern type CbJsonDoc
+pub extern type CbJsonVal
 
-pub alias JsonDoc = cb_json_doc
-pub alias JsonVal = cb_json_val
+pub alias JsonDoc = CbJsonDoc
+pub alias JsonVal = CbJsonVal
 
-extern fn cb_json_new_doc() as cb_json_doc
-extern fn cb_json_parse(text as str) as cb_json_doc can error
-extern fn cb_json_root(byref doc as cb_json_doc) as cb_json_val
-extern fn cb_json_set_root(byref doc as cb_json_doc, val as cb_json_val)
-extern fn cb_json_stringify(byref doc as cb_json_doc) as str
-extern fn cb_json_stringify_val(byref doc as cb_json_doc, val as cb_json_val) as str
+extern fn cbJsonNewDoc() as CbJsonDoc
+extern fn cbJsonParse(text as str) as CbJsonDoc can error
+extern fn cbJsonRoot(byref doc as CbJsonDoc) as CbJsonVal
+extern fn cbJsonSetRoot(byref doc as CbJsonDoc, val as CbJsonVal)
+extern fn cbJsonStringify(byref doc as CbJsonDoc) as str
+extern fn cbJsonStringifyVal(byref doc as CbJsonDoc, val as CbJsonVal) as str
 
-extern fn cb_json_new_object(byref doc as cb_json_doc) as cb_json_val
-extern fn cb_json_new_array(byref doc as cb_json_doc) as cb_json_val
-extern fn cb_json_new_str(byref doc as cb_json_doc, val as str) as cb_json_val
-extern fn cb_json_new_int(byref doc as cb_json_doc, val as int) as cb_json_val
-extern fn cb_json_new_float(byref doc as cb_json_doc, val as float) as cb_json_val
-extern fn cb_json_new_bool(byref doc as cb_json_doc, val as bool) as cb_json_val
-extern fn cb_json_new_null(byref doc as cb_json_doc) as cb_json_val
-extern fn cb_json_object_set(byref doc as cb_json_doc, obj as cb_json_val, key as str, val as cb_json_val)
-extern fn cb_json_array_push(byref doc as cb_json_doc, arr as cb_json_val, elem as cb_json_val)
+extern fn cbJsonNewObject(byref doc as CbJsonDoc) as CbJsonVal
+extern fn cbJsonNewArray(byref doc as CbJsonDoc) as CbJsonVal
+extern fn cbJsonNewStr(byref doc as CbJsonDoc, val as str) as CbJsonVal
+extern fn cbJsonNewInt(byref doc as CbJsonDoc, val as int) as CbJsonVal
+extern fn cbJsonNewFloat(byref doc as CbJsonDoc, val as float) as CbJsonVal
+extern fn cbJsonNewBool(byref doc as CbJsonDoc, val as bool) as CbJsonVal
+extern fn cbJsonNewNull(byref doc as CbJsonDoc) as CbJsonVal
+extern fn cbJsonObjectSet(byref doc as CbJsonDoc, obj as CbJsonVal, key as str, val as CbJsonVal)
+extern fn cbJsonArrayPush(byref doc as CbJsonDoc, arr as CbJsonVal, elem as CbJsonVal)
 
-extern fn cb_json_has_field(byref doc as cb_json_doc, obj as cb_json_val, key as str) as bool
-extern fn cb_json_get_field(byref doc as cb_json_doc, obj as cb_json_val, key as str) as cb_json_val can error
-extern fn cb_json_get_str(byref doc as cb_json_doc, val as cb_json_val) as str can error
-extern fn cb_json_get_int(byref doc as cb_json_doc, val as cb_json_val) as int can error
-extern fn cb_json_get_float(byref doc as cb_json_doc, val as cb_json_val) as float can error
-extern fn cb_json_get_bool(byref doc as cb_json_doc, val as cb_json_val) as bool can error
-extern fn cb_json_is_null(byref doc as cb_json_doc, val as cb_json_val) as bool
-extern fn cb_json_array_len(byref doc as cb_json_doc, arr as cb_json_val) as int
-extern fn cb_json_array_at(byref doc as cb_json_doc, arr as cb_json_val, index as int) as cb_json_val can error
+extern fn cbJsonHasField(byref doc as CbJsonDoc, obj as CbJsonVal, key as str) as bool
+extern fn cbJsonGetField(byref doc as CbJsonDoc, obj as CbJsonVal, key as str) as CbJsonVal can error
+extern fn cbJsonGetStr(byref doc as CbJsonDoc, val as CbJsonVal) as str can error
+extern fn cbJsonGetInt(byref doc as CbJsonDoc, val as CbJsonVal) as int can error
+extern fn cbJsonGetFloat(byref doc as CbJsonDoc, val as CbJsonVal) as float can error
+extern fn cbJsonGetBool(byref doc as CbJsonDoc, val as CbJsonVal) as bool can error
+extern fn cbJsonIsNull(byref doc as CbJsonDoc, val as CbJsonVal) as bool
+extern fn cbJsonArrayLen(byref doc as CbJsonDoc, arr as CbJsonVal) as int
+extern fn cbJsonArrayAt(byref doc as CbJsonDoc, arr as CbJsonVal, index as int) as CbJsonVal can error
 
-pub fn new_doc() as JsonDoc
-    return cb_json_new_doc()
+pub fn newDoc() as JsonDoc
+    return cbJsonNewDoc()
 end fn
 
 pub fn parse(text as str) as JsonDoc can error
-    dim res = cb_json_parse(text)
+    dim res = cbJsonParse(text)
     return res
 end fn
 
 pub fn root(byref doc as JsonDoc) as JsonVal
-    return cb_json_root(doc)
+    return cbJsonRoot(doc)
 end fn
 
-pub fn set_root(byref doc as JsonDoc, val as JsonVal)
-    cb_json_set_root(doc, val)
+pub fn setRoot(byref doc as JsonDoc, val as JsonVal)
+    cbJsonSetRoot(doc, val)
 end fn
 
 pub fn stringify(byref doc as JsonDoc) as str
-    return cb_json_stringify(doc)
+    return cbJsonStringify(doc)
 end fn
 
-pub fn stringify_val(byref doc as JsonDoc, val as JsonVal) as str
-    return cb_json_stringify_val(doc, val)
+pub fn stringifyVal(byref doc as JsonDoc, val as JsonVal) as str
+    return cbJsonStringifyVal(doc, val)
 end fn
 
-pub fn new_object(byref doc as JsonDoc) as JsonVal
-    return cb_json_new_object(doc)
+pub fn newObject(byref doc as JsonDoc) as JsonVal
+    return cbJsonNewObject(doc)
 end fn
 
-pub fn new_array(byref doc as JsonDoc) as JsonVal
-    return cb_json_new_array(doc)
+pub fn newArray(byref doc as JsonDoc) as JsonVal
+    return cbJsonNewArray(doc)
 end fn
 
-pub fn new_str(byref doc as JsonDoc, val as str) as JsonVal
-    return cb_json_new_str(doc, val)
+pub fn newStr(byref doc as JsonDoc, val as str) as JsonVal
+    return cbJsonNewStr(doc, val)
 end fn
 
-pub fn new_int(byref doc as JsonDoc, val as int) as JsonVal
-    return cb_json_new_int(doc, val)
+pub fn newInt(byref doc as JsonDoc, val as int) as JsonVal
+    return cbJsonNewInt(doc, val)
 end fn
 
-pub fn new_float(byref doc as JsonDoc, val as float) as JsonVal
-    return cb_json_new_float(doc, val)
+pub fn newFloat(byref doc as JsonDoc, val as float) as JsonVal
+    return cbJsonNewFloat(doc, val)
 end fn
 
-pub fn new_bool(byref doc as JsonDoc, val as bool) as JsonVal
-    return cb_json_new_bool(doc, val)
+pub fn newBool(byref doc as JsonDoc, val as bool) as JsonVal
+    return cbJsonNewBool(doc, val)
 end fn
 
-pub fn new_null(byref doc as JsonDoc) as JsonVal
-    return cb_json_new_null(doc)
+pub fn newNull(byref doc as JsonDoc) as JsonVal
+    return cbJsonNewNull(doc)
 end fn
 
-pub fn object_set(byref doc as JsonDoc, obj as JsonVal, key as str, val as JsonVal)
-    cb_json_object_set(doc, obj, key, val)
+pub fn objectSet(byref doc as JsonDoc, obj as JsonVal, key as str, val as JsonVal)
+    cbJsonObjectSet(doc, obj, key, val)
 end fn
 
-pub fn array_push(byref doc as JsonDoc, arr as JsonVal, elem as JsonVal)
-    cb_json_array_push(doc, arr, elem)
+pub fn arrayPush(byref doc as JsonDoc, arr as JsonVal, elem as JsonVal)
+    cbJsonArrayPush(doc, arr, elem)
 end fn
 
-pub fn has_field(byref doc as JsonDoc, obj as JsonVal, key as str) as bool
-    return cb_json_has_field(doc, obj, key)
+pub fn hasField(byref doc as JsonDoc, obj as JsonVal, key as str) as bool
+    return cbJsonHasField(doc, obj, key)
 end fn
 
-pub fn get_field(byref doc as JsonDoc, obj as JsonVal, key as str) as JsonVal can error
-    dim res = cb_json_get_field(doc, obj, key)
+pub fn getField(byref doc as JsonDoc, obj as JsonVal, key as str) as JsonVal can error
+    dim res = cbJsonGetField(doc, obj, key)
     return res
 end fn
 
-pub fn get_str(byref doc as JsonDoc, val as JsonVal) as str can error
-    dim res = cb_json_get_str(doc, val)
+pub fn getStr(byref doc as JsonDoc, val as JsonVal) as str can error
+    dim res = cbJsonGetStr(doc, val)
     return res
 end fn
 
-pub fn get_int(byref doc as JsonDoc, val as JsonVal) as int can error
-    dim res = cb_json_get_int(doc, val)
+pub fn getInt(byref doc as JsonDoc, val as JsonVal) as int can error
+    dim res = cbJsonGetInt(doc, val)
     return res
 end fn
 
-pub fn get_float(byref doc as JsonDoc, val as JsonVal) as float can error
-    dim res = cb_json_get_float(doc, val)
+pub fn getFloat(byref doc as JsonDoc, val as JsonVal) as float can error
+    dim res = cbJsonGetFloat(doc, val)
     return res
 end fn
 
-pub fn get_bool(byref doc as JsonDoc, val as JsonVal) as bool can error
-    dim res = cb_json_get_bool(doc, val)
+pub fn getBool(byref doc as JsonDoc, val as JsonVal) as bool can error
+    dim res = cbJsonGetBool(doc, val)
     return res
 end fn
 
-pub fn is_null(byref doc as JsonDoc, val as JsonVal) as bool
-    return cb_json_is_null(doc, val)
+pub fn isNull(byref doc as JsonDoc, val as JsonVal) as bool
+    return cbJsonIsNull(doc, val)
 end fn
 
-pub fn array_len(byref doc as JsonDoc, arr as JsonVal) as int
-    return cb_json_array_len(doc, arr)
+pub fn arrayLen(byref doc as JsonDoc, arr as JsonVal) as int
+    return cbJsonArrayLen(doc, arr)
 end fn
 
-pub fn array_at(byref doc as JsonDoc, arr as JsonVal, index as int) as JsonVal can error
-    dim res = cb_json_array_at(doc, arr, index)
+pub fn arrayAt(byref doc as JsonDoc, arr as JsonVal, index as int) as JsonVal can error
+    dim res = cbJsonArrayAt(doc, arr, index)
     return res
 end fn

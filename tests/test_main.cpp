@@ -22,15 +22,15 @@
 #include <variant>
 #include <vector>
 
-namespace cb::test_e2e {
+namespace cb::testE2E {
 
 struct FixtureExpectations {
-    std::vector<std::string> expect_cpp;
-    std::vector<std::string> forbid_cpp;
-    std::vector<std::string> expect_out;
+    std::vector<std::string> expectCpp;
+    std::vector<std::string> forbidCpp;
+    std::vector<std::string> expectOut;
 };
 
-inline std::string read_file_text(const std::string& path) {
+inline std::string readFileText(const std::string& path) {
     std::ifstream in(path);
     if (!in.is_open()) {
         return "";
@@ -40,7 +40,7 @@ inline std::string read_file_text(const std::string& path) {
     return ss.str();
 }
 
-inline std::vector<std::string> split_lines_normalized(const std::string& text) {
+inline std::vector<std::string> splitLinesNormalized(const std::string& text) {
     std::vector<std::string> lines;
     std::istringstream stream(text);
     std::string line;
@@ -53,85 +53,85 @@ inline std::vector<std::string> split_lines_normalized(const std::string& text) 
     return lines;
 }
 
-inline FixtureExpectations parse_fixture_expectations(const std::string& cb_path) {
+inline FixtureExpectations parseFixtureExpectations(const std::string& cbPath) {
     FixtureExpectations exp{};
-    const std::string content = read_file_text(cb_path);
-    const std::vector<std::string> lines = split_lines_normalized(content);
+    const std::string content = readFileText(cbPath);
+    const std::vector<std::string> lines = splitLinesNormalized(content);
 
-    const std::string cpp_prefix = "' EXPECT_CPP: ";
-    const std::string forbid_prefix = "' FORBID_CPP: ";
-    const std::string out_prefix = "' EXPECT_OUT: ";
+    const std::string cppPrefix = "' EXPECT_CPP: ";
+    const std::string forbidPrefix = "' FORBID_CPP: ";
+    const std::string outPrefix = "' EXPECT_OUT: ";
 
-    for (const auto& raw_line : lines) {
-        size_t first_non_space = 0;
-        while (first_non_space < raw_line.size() &&
-               (raw_line[first_non_space] == ' ' || raw_line[first_non_space] == '\t')) {
-            first_non_space += 1;
+    for (const auto& rawLine : lines) {
+        size_t firstNonSpace = 0;
+        while (firstNonSpace < rawLine.size() &&
+               (rawLine[firstNonSpace] == ' ' || rawLine[firstNonSpace] == '\t')) {
+            firstNonSpace += 1;
         }
-        const std::string line = raw_line.substr(first_non_space);
+        const std::string line = rawLine.substr(firstNonSpace);
 
-        if (line.rfind(cpp_prefix, 0) == 0) {
-            exp.expect_cpp.push_back(line.substr(cpp_prefix.size()));
-        } else if (line.rfind(forbid_prefix, 0) == 0) {
-            exp.forbid_cpp.push_back(line.substr(forbid_prefix.size()));
-        } else if (line.rfind(out_prefix, 0) == 0) {
-            exp.expect_out.push_back(line.substr(out_prefix.size()));
+        if (line.rfind(cppPrefix, 0) == 0) {
+            exp.expectCpp.push_back(line.substr(cppPrefix.size()));
+        } else if (line.rfind(forbidPrefix, 0) == 0) {
+            exp.forbidCpp.push_back(line.substr(forbidPrefix.size()));
+        } else if (line.rfind(outPrefix, 0) == 0) {
+            exp.expectOut.push_back(line.substr(outPrefix.size()));
         }
     }
 
     return exp;
 }
 
-inline void run_e2e_fixture(const std::string& case_name, const std::string& cb_path) {
-    const std::string artifact_dir = "build/test_artifacts/" + case_name;
+inline void runE2EFixture(const std::string& caseName, const std::string& cbPath) {
+    const std::string artifactDir = "build/testArtifacts/" + caseName;
     std::error_code ec;
-    std::filesystem::create_directories(artifact_dir, ec);
+    std::filesystem::create_directories(artifactDir, ec);
     REQUIRE(!ec);
 
-    const FixtureExpectations exp = parse_fixture_expectations(cb_path);
-    REQUIRE(!exp.expect_cpp.empty());
-    REQUIRE(!exp.expect_out.empty());
+    const FixtureExpectations exp = parseFixtureExpectations(cbPath);
+    REQUIRE(!exp.expectCpp.empty());
+    REQUIRE(!exp.expectOut.empty());
 
-    const std::string out_cpp_path = artifact_dir + "/build.cpp";
-    const std::string bin_path = artifact_dir + "/app";
-    const std::string stdout_path = artifact_dir + "/stdout.txt";
+    const std::string outCppPath = artifactDir + "/build.cpp";
+    const std::string binPath = artifactDir + "/app";
+    const std::string stdoutPath = artifactDir + "/stdout.txt";
 
-    const cb::BuildFileResult build_res = cb::build_file(cb_path, out_cpp_path, true, bin_path);
-    INFO("Build diagnostic: " << cb::format_diagnostic(build_res.error));
-    REQUIRE(build_res.ok);
-    CHECK(std::filesystem::exists(out_cpp_path, ec));
-    CHECK(std::filesystem::exists(bin_path, ec));
+    const cb::BuildFileResult buildRes = cb::buildFile(cbPath, outCppPath, true, binPath);
+    INFO("Build diagnostic: " << cb::formatDiagnostic(buildRes.error));
+    REQUIRE(buildRes.ok);
+    CHECK(std::filesystem::exists(outCppPath, ec));
+    CHECK(std::filesystem::exists(binPath, ec));
 
-    const std::string cpp_content = read_file_text(out_cpp_path);
-    REQUIRE(!cpp_content.empty());
+    const std::string cppContent = readFileText(outCppPath);
+    REQUIRE(!cppContent.empty());
 
-    for (const auto& expected_snippet : exp.expect_cpp) {
-        INFO("Expected C++ snippet missing in " << out_cpp_path << ": " << expected_snippet);
-        CHECK(cpp_content.find(expected_snippet) != std::string::npos);
+    for (const auto& expectedSnippet : exp.expectCpp) {
+        INFO("Expected C++ snippet missing in " << outCppPath << ": " << expectedSnippet);
+        CHECK(cppContent.find(expectedSnippet) != std::string::npos);
     }
 
-    for (const auto& forbidden_snippet : exp.forbid_cpp) {
-        INFO("Forbidden C++ snippet present in " << out_cpp_path << ": " << forbidden_snippet);
-        CHECK(cpp_content.find(forbidden_snippet) == std::string::npos);
+    for (const auto& forbiddenSnippet : exp.forbidCpp) {
+        INFO("Forbidden C++ snippet present in " << outCppPath << ": " << forbiddenSnippet);
+        CHECK(cppContent.find(forbiddenSnippet) == std::string::npos);
     }
 
-    const std::string run_cmd = "./" + bin_path + " > " + stdout_path + " 2>&1";
-    const int exit_code = std::system(run_cmd.c_str());
-    REQUIRE(exit_code == 0);
-    CHECK(std::filesystem::exists(stdout_path, ec));
+    const std::string runCmd = "./" + binPath + " > " + stdoutPath + " 2>&1";
+    const int exitCode = std::system(runCmd.c_str());
+    REQUIRE(exitCode == 0);
+    CHECK(std::filesystem::exists(stdoutPath, ec));
 
-    const std::string stdout_content = read_file_text(stdout_path);
-    const std::vector<std::string> actual_lines = split_lines_normalized(stdout_content);
-    CHECK(actual_lines == exp.expect_out);
+    const std::string stdoutContent = readFileText(stdoutPath);
+    const std::vector<std::string> actualLines = splitLinesNormalized(stdoutContent);
+    CHECK(actualLines == exp.expectOut);
 }
 
-}  // namespace cb::test_e2e
+}  // namespace cb::testE2E
 
 TEST_CASE("Lexer tokenizes multi-word keywords and rejects C-style operators", "[lexer]") {
     const std::string code = R"(
 ' VB style comment
 import "player.cb" as player
-import header "sqlite_wrapper.hpp"
+import header "sqliteWrapper.hpp"
 import link "sqlite3"
 dim x as int = 1
 const y = "hello" & " world"
@@ -152,18 +152,18 @@ defer
 end defer
 )";
 
-    const auto lex_res = cb::tokenize(code, "lex_test.cb");
-    REQUIRE(lex_res.ok);
+    const auto lexRes = cb::tokenize(code, "lexTest.cb");
+    REQUIRE(lexRes.ok);
 
-    std::vector<std::string> kw_values;
-    for (const auto& tok : lex_res.tokens) {
+    std::vector<std::string> kwValues;
+    for (const auto& tok : lexRes.tokens) {
         if (tok.kind == "KEYWORD") {
-            kw_values.push_back(tok.value);
+            kwValues.push_back(tok.value);
         }
     }
 
-    auto has_kw = [&](std::string_view expected) {
-        for (const auto& val : kw_values) {
+    auto hasKw = [&](std::string_view expected) {
+        for (const auto& val : kwValues) {
             if (val == expected) {
                 return true;
             }
@@ -171,37 +171,37 @@ end defer
         return false;
     };
 
-    CHECK(has_kw("import"));
-    CHECK(has_kw("as"));
-    CHECK(has_kw("dim"));
-    CHECK(has_kw("const"));
-    CHECK(has_kw("import header"));
-    CHECK(has_kw("import link"));
-    CHECK(has_kw("select case"));
-    CHECK(has_kw("case"));
-    CHECK(has_kw("case else"));
-    CHECK(has_kw("end select"));
-    CHECK(has_kw("and"));
-    CHECK(has_kw("or"));
-    CHECK(has_kw("not"));
-    CHECK(has_kw("else if"));
-    CHECK(has_kw("end if"));
-    CHECK(has_kw("can error"));
-    CHECK(has_kw("on error"));
-    CHECK(has_kw("end error"));
-    CHECK(has_kw("for"));
-    CHECK(has_kw("to"));
-    CHECK(has_kw("step"));
-    CHECK(has_kw("end for"));
-    CHECK(has_kw("defer"));
-    CHECK(has_kw("end defer"));
+    CHECK(hasKw("import"));
+    CHECK(hasKw("as"));
+    CHECK(hasKw("dim"));
+    CHECK(hasKw("const"));
+    CHECK(hasKw("import header"));
+    CHECK(hasKw("import link"));
+    CHECK(hasKw("select case"));
+    CHECK(hasKw("case"));
+    CHECK(hasKw("case else"));
+    CHECK(hasKw("end select"));
+    CHECK(hasKw("and"));
+    CHECK(hasKw("or"));
+    CHECK(hasKw("not"));
+    CHECK(hasKw("else if"));
+    CHECK(hasKw("end if"));
+    CHECK(hasKw("can error"));
+    CHECK(hasKw("on error"));
+    CHECK(hasKw("end error"));
+    CHECK(hasKw("for"));
+    CHECK(hasKw("to"));
+    CHECK(hasKw("step"));
+    CHECK(hasKw("end for"));
+    CHECK(hasKw("defer"));
+    CHECK(hasKw("end defer"));
 
     SECTION("Rejects forbidden C-style logical operators") {
         const std::vector<std::string> forbidden = {"a && b", "a || b", "!flag"};
-        for (const auto& bad_op : forbidden) {
-            const auto bad_lex = cb::tokenize(bad_op, "bad_op.cb");
-            CHECK_FALSE(bad_lex.ok);
-            CHECK(bad_lex.error.kind == "LexerError");
+        for (const auto& badOp : forbidden) {
+            const auto badLex = cb::tokenize(badOp, "badOp.cb");
+            CHECK_FALSE(badLex.ok);
+            CHECK(badLex.error.kind == "LexerError");
         }
     }
 }
@@ -224,24 +224,24 @@ fn compute(byref items as list[int], tag as str) as int
 end fn
 )";
 
-    const auto lex_res = cb::tokenize(code, "test.cb");
-    REQUIRE(lex_res.ok);
+    const auto lexRes = cb::tokenize(code, "test.cb");
+    REQUIRE(lexRes.ok);
 
-    const auto parse_res = cb::parse_tokens(lex_res.tokens, "test.cb");
-    REQUIRE(parse_res.ok);
+    const auto parseRes = cb::parseTokens(lexRes.tokens, "test.cb");
+    REQUIRE(parseRes.ok);
 
-    REQUIRE(parse_res.program.declarations.size() == 2);
-    const cb::DeclId fn_decl_id = parse_res.program.declarations[1];
-    REQUIRE(fn_decl_id < parse_res.arena.decls.size());
-    const auto& decl_node = parse_res.arena.decls[fn_decl_id];
-    REQUIRE(std::holds_alternative<cb::FnDecl>(decl_node.payload));
-    const auto& fn_decl = std::get<cb::FnDecl>(decl_node.payload);
-    CHECK(fn_decl.name == "compute");
-    REQUIRE(fn_decl.params.size() == 2);
-    CHECK(fn_decl.params[0].is_byref);
+    REQUIRE(parseRes.program.declarations.size() == 2);
+    const cb::DeclId fnDeclId = parseRes.program.declarations[1];
+    REQUIRE(fnDeclId < parseRes.arena.decls.size());
+    const auto& declNode = parseRes.arena.decls[fnDeclId];
+    REQUIRE(std::holds_alternative<cb::FnDecl>(declNode.payload));
+    const auto& fnDecl = std::get<cb::FnDecl>(declNode.payload);
+    CHECK(fnDecl.name == "compute");
+    REQUIRE(fnDecl.params.size() == 2);
+    CHECK(fnDecl.params[0].isByref);
 
     SECTION("Parses classic BASIC 'for i = start to end' with inclusive RangeSpec") {
-        const std::string for_to_code = R"(fn loop_test() as int
+        const std::string forToCode = R"(fn loopTest() as int
     dim s = 0
     for i = 1 to 5 step 2
         s = s + i
@@ -249,21 +249,21 @@ end fn
     return s
 end fn
 )";
-        const auto lex_ft = cb::tokenize(for_to_code, "for_to.cb");
-        REQUIRE(lex_ft.ok);
-        const auto parse_ft = cb::parse_tokens(lex_ft.tokens, "for_to.cb");
-        REQUIRE(parse_ft.ok);
-        REQUIRE(parse_ft.program.declarations.size() == 1);
-        const auto& fn_ft = std::get<cb::FnDecl>(parse_ft.arena.decls[parse_ft.program.declarations[0]].payload);
-        REQUIRE(fn_ft.body.size() >= 2);
-        const auto& for_stmt = std::get<cb::ForStmt>(parse_ft.arena.stmts[fn_ft.body[1]].payload);
-        CHECK(for_stmt.range_spec.has_range);
-        CHECK(for_stmt.range_spec.inclusive);
-        CHECK(for_stmt.range_spec.has_step);
+        const auto lexFt = cb::tokenize(forToCode, "forTo.cb");
+        REQUIRE(lexFt.ok);
+        const auto parseFt = cb::parseTokens(lexFt.tokens, "forTo.cb");
+        REQUIRE(parseFt.ok);
+        REQUIRE(parseFt.program.declarations.size() == 1);
+        const auto& fnFt = std::get<cb::FnDecl>(parseFt.arena.decls[parseFt.program.declarations[0]].payload);
+        REQUIRE(fnFt.body.size() >= 2);
+        const auto& forStmt = std::get<cb::ForStmt>(parseFt.arena.stmts[fnFt.body[1]].payload);
+        CHECK(forStmt.rangeSpec.hasRange);
+        CHECK(forStmt.rangeSpec.inclusive);
+        CHECK(forStmt.rangeSpec.hasStep);
     }
 
     SECTION("Parses 'can error' on value-returning and void functions") {
-        const std::string can_err_code = R"(
+        const std::string canErrCode = R"(
 fn connect(ip as str) as int can error
     return 1
 end fn
@@ -274,47 +274,47 @@ fn validate(port as int) can error
     end if
 end fn
 )";
-        const auto lex_ce = cb::tokenize(can_err_code, "can_err.cb");
-        REQUIRE(lex_ce.ok);
-        const auto parse_ce = cb::parse_tokens(lex_ce.tokens, "can_err.cb");
-        REQUIRE(parse_ce.ok);
-        REQUIRE(parse_ce.program.declarations.size() == 2);
-        const auto& fn0 = std::get<cb::FnDecl>(parse_ce.arena.decls[parse_ce.program.declarations[0]].payload);
-        const auto& fn1 = std::get<cb::FnDecl>(parse_ce.arena.decls[parse_ce.program.declarations[1]].payload);
-        CHECK(fn0.is_fallible);
-        CHECK(fn0.return_type != cb::INVALID_ID);
-        CHECK(fn1.is_fallible);
-        CHECK(fn1.return_type != cb::INVALID_ID);
-        CHECK(parse_ce.arena.types[fn1.return_type].name == "void");
-        CHECK(parse_ce.arena.types[fn1.return_type].name == "void");
+        const auto lexCe = cb::tokenize(canErrCode, "canErr.cb");
+        REQUIRE(lexCe.ok);
+        const auto parseCe = cb::parseTokens(lexCe.tokens, "canErr.cb");
+        REQUIRE(parseCe.ok);
+        REQUIRE(parseCe.program.declarations.size() == 2);
+        const auto& fn0 = std::get<cb::FnDecl>(parseCe.arena.decls[parseCe.program.declarations[0]].payload);
+        const auto& fn1 = std::get<cb::FnDecl>(parseCe.arena.decls[parseCe.program.declarations[1]].payload);
+        CHECK(fn0.isFallible);
+        CHECK(fn0.returnType != cb::INVALID_ID);
+        CHECK(fn1.isFallible);
+        CHECK(fn1.returnType != cb::INVALID_ID);
+        CHECK(parseCe.arena.types[fn1.returnType].name == "void");
+        CHECK(parseCe.arena.types[fn1.returnType].name == "void");
     }
 
     SECTION("Rejects ':' in named arguments for function calls and struct initialization") {
-        const std::string bad_call_colon = R"(
+        const std::string badCallColon = R"(
 fn main()
     foo(code: 408)
 end fn
 )";
-        const auto lex_c1 = cb::tokenize(bad_call_colon, "bad_call_colon.cb");
-        REQUIRE(lex_c1.ok);
-        const auto parse_c1 = cb::parse_tokens(lex_c1.tokens, "bad_call_colon.cb");
-        CHECK_FALSE(parse_c1.ok);
-        CHECK(parse_c1.error.kind == "ParseError");
+        const auto lexC1 = cb::tokenize(badCallColon, "badCallColon.cb");
+        REQUIRE(lexC1.ok);
+        const auto parseC1 = cb::parseTokens(lexC1.tokens, "badCallColon.cb");
+        CHECK_FALSE(parseC1.ok);
+        CHECK(parseC1.error.kind == "ParseError");
 
-        const std::string bad_struct_colon = R"(
+        const std::string badStructColon = R"(
 fn main()
     dim p = new Point(x: 10, y: 20)
 end fn
 )";
-        const auto lex_c2 = cb::tokenize(bad_struct_colon, "bad_struct_colon.cb");
-        REQUIRE(lex_c2.ok);
-        const auto parse_c2 = cb::parse_tokens(lex_c2.tokens, "bad_struct_colon.cb");
-        CHECK_FALSE(parse_c2.ok);
-        CHECK(parse_c2.error.kind == "ParseError");
+        const auto lexC2 = cb::tokenize(badStructColon, "badStructColon.cb");
+        REQUIRE(lexC2.ok);
+        const auto parseC2 = cb::parseTokens(lexC2.tokens, "badStructColon.cb");
+        CHECK_FALSE(parseC2.ok);
+        CHECK(parseC2.error.kind == "ParseError");
     }
 
     SECTION("Rejects removed redundant syntax ('for i in a..b', 'Type{...}', 'new Type{...}', and trailing 'as byref')") {
-        const std::vector<std::string> removed_syntaxes = {
+        const std::vector<std::string> removedSyntaxes = {
             R"(fn main()
     for i in 0..10
     end for
@@ -332,82 +332,82 @@ end fn
 end fn
 )"
         };
-        for (const auto& snippet : removed_syntaxes) {
-            const auto lex_rem = cb::tokenize(snippet, "removed.cb");
-            REQUIRE(lex_rem.ok);
-            const auto parse_rem = cb::parse_tokens(lex_rem.tokens, "removed.cb");
-            CHECK_FALSE(parse_rem.ok);
-            CHECK(parse_rem.error.kind == "ParseError");
+        for (const auto& snippet : removedSyntaxes) {
+            const auto lexRem = cb::tokenize(snippet, "removed.cb");
+            REQUIRE(lexRem.ok);
+            const auto parseRem = cb::parseTokens(lexRem.tokens, "removed.cb");
+            CHECK_FALSE(parseRem.ok);
+            CHECK(parseRem.error.kind == "ParseError");
         }
     }
 
     SECTION("Rejects legacy trailing 'on error' syntax on variable declarations, assignments, and calls") {
-        const std::string bad_trailing_dim = R"(fn main()
+        const std::string badTrailingDim = R"(fn main()
     dim x = foo() on error e
         return
     end error
 end fn
 )";
-        const auto lex_td = cb::tokenize(bad_trailing_dim, "bad_trailing_dim.cb");
-        REQUIRE(lex_td.ok);
-        const auto parse_td = cb::parse_tokens(lex_td.tokens, "bad_trailing_dim.cb");
-        CHECK_FALSE(parse_td.ok);
-        CHECK(parse_td.error.kind == "ParseError");
+        const auto lexTd = cb::tokenize(badTrailingDim, "badTrailingDim.cb");
+        REQUIRE(lexTd.ok);
+        const auto parseTd = cb::parseTokens(lexTd.tokens, "badTrailingDim.cb");
+        CHECK_FALSE(parseTd.ok);
+        CHECK(parseTd.error.kind == "ParseError");
 
-        const std::string bad_trailing_call = R"(fn main()
+        const std::string badTrailingCall = R"(fn main()
     foo() on error e
         return
     end error
 end fn
 )";
-        const auto lex_tc = cb::tokenize(bad_trailing_call, "bad_trailing_call.cb");
-        REQUIRE(lex_tc.ok);
-        const auto parse_tc = cb::parse_tokens(lex_tc.tokens, "bad_trailing_call.cb");
-        CHECK_FALSE(parse_tc.ok);
-        CHECK(parse_tc.error.kind == "ParseError");
+        const auto lexTc = cb::tokenize(badTrailingCall, "badTrailingCall.cb");
+        REQUIRE(lexTc.ok);
+        const auto parseTc = cb::parseTokens(lexTc.tokens, "badTrailingCall.cb");
+        CHECK_FALSE(parseTc.ok);
+        CHECK(parseTc.error.kind == "ParseError");
     }
 
     SECTION("Reports ParseError on unclosed control flow block") {
-        const std::string bad_code = R"(fn broken()
+        const std::string badCode = R"(fn broken()
     if true
         dim x = 1
 end fn
 )";
-        const auto bad_lex = cb::tokenize(bad_code, "bad.cb");
-        REQUIRE(bad_lex.ok);
-        const auto bad_parse = cb::parse_tokens(bad_lex.tokens, "bad.cb");
-        CHECK_FALSE(bad_parse.ok);
-        CHECK(bad_parse.error.kind == "ParseError");
+        const auto badLex = cb::tokenize(badCode, "bad.cb");
+        REQUIRE(badLex.ok);
+        const auto badParse = cb::parseTokens(badLex.tokens, "bad.cb");
+        CHECK_FALSE(badParse.ok);
+        CHECK(badParse.error.kind == "ParseError");
     }
 
 }
 
 TEST_CASE("Analyzer validates fallible calls, const immutability, and implicit bubbling", "[analyzer]") {
     SECTION("Rejects unhandled fallible call in infallible function") {
-        const std::string bad_fallible = R"(
+        const std::string badFallible = R"(
 fn risky() as int can error
     return 1
 end fn
 
-fn caller_without_err()
+fn callerWithoutErr()
     dim x = risky()
 end fn
 )";
 
-        const auto lex_bad = cb::tokenize(bad_fallible, "bad_fallible.cb");
-        REQUIRE(lex_bad.ok);
-        auto parse_bad = cb::parse_tokens(lex_bad.tokens, "bad_fallible.cb");
-        REQUIRE(parse_bad.ok);
-        const auto ana_bad = cb::analyze_program(parse_bad.arena, parse_bad.program);
-        CHECK_FALSE(ana_bad.ok);
-        CHECK(ana_bad.error.kind == "AnalyzerError");
-        CHECK(ana_bad.error.message.find(
+        const auto lexBad = cb::tokenize(badFallible, "badFallible.cb");
+        REQUIRE(lexBad.ok);
+        auto parseBad = cb::parseTokens(lexBad.tokens, "badFallible.cb");
+        REQUIRE(parseBad.ok);
+        const auto anaBad = cb::analyzeProgram(parseBad.arena, parseBad.program);
+        CHECK_FALSE(anaBad.ok);
+        CHECK(anaBad.error.kind == "AnalyzerError");
+        CHECK(anaBad.error.message.find(
             "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
         ) != std::string::npos);
     }
 
     SECTION("Rejects unhandled fallible call in expression statement") {
-        const std::string bad_expr_stmt = R"(
+        const std::string badExprStmt = R"(
 fn fail() as int can error
     error("failed", code=500)
     return 0
@@ -417,7 +417,7 @@ fn call()
     fail()
 end fn
 )";
-        const auto res = cb::transpile_source(bad_expr_stmt, "bad_expr_stmt.cb");
+        const auto res = cb::transpileSource(badExprStmt, "badExprStmt.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
         CHECK(res.error.message.find(
@@ -426,7 +426,7 @@ end fn
     }
 
     SECTION("Rejects fallible call occurring before 'on error' block is registered in scope") {
-        const std::string bad_order = R"(
+        const std::string badOrder = R"(
 fn risky() as int can error
     return 1
 end fn
@@ -439,7 +439,7 @@ fn main()
     dim second = risky()
 end fn
 )";
-        const auto res = cb::transpile_source(bad_order, "bad_order.cb");
+        const auto res = cb::transpileSource(badOrder, "badOrder.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
         CHECK(res.error.message.find(
@@ -448,7 +448,7 @@ end fn
     }
 
     SECTION("Rejects 'on error' block that does not terminate with return, error(...), or break") {
-        const std::string bad_no_exit = R"(
+        const std::string badNoExit = R"(
 fn risky() as int can error
     return 1
 end fn
@@ -460,7 +460,7 @@ fn main()
     dim val = risky()
 end fn
 )";
-        const auto res = cb::transpile_source(bad_no_exit, "bad_no_exit.cb");
+        const auto res = cb::transpileSource(badNoExit, "badNoExit.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
         CHECK(res.error.message.find(
@@ -469,31 +469,31 @@ end fn
     }
 
     SECTION("Rejects calling error(...) inside an infallible function or with invalid named args") {
-        const std::string bad_error_in_infallible = R"(
-fn not_fallible() as int
+        const std::string badErrorInInfallible = R"(
+fn notFallible() as int
     error("boom", code=1)
     return 0
 end fn
 )";
-        const auto res_inf = cb::transpile_source(bad_error_in_infallible, "bad_error_inf.cb");
-        CHECK_FALSE(res_inf.ok);
-        CHECK(res_inf.error.kind == "AnalyzerError");
-        CHECK(res_inf.error.message.find("Cannot call 'error(...)' inside infallible function") != std::string::npos);
+        const auto resInf = cb::transpileSource(badErrorInInfallible, "badErrorInf.cb");
+        CHECK_FALSE(resInf.ok);
+        CHECK(resInf.error.kind == "AnalyzerError");
+        CHECK(resInf.error.message.find("Cannot call 'error(...)' inside infallible function") != std::string::npos);
 
-        const std::string bad_error_kwarg = R"(
-fn fallible_fn() as int can error
+        const std::string badErrorKwarg = R"(
+fn fallibleFn() as int can error
     error("boom", status=500)
     return 0
 end fn
 )";
-        const auto res_kw = cb::transpile_source(bad_error_kwarg, "bad_error_kw.cb");
-        CHECK_FALSE(res_kw.ok);
-        CHECK(res_kw.error.kind == "AnalyzerError");
-        CHECK(res_kw.error.message.find("Unknown named argument 'status'") != std::string::npos);
+        const auto resKw = cb::transpileSource(badErrorKwarg, "badErrorKw.cb");
+        CHECK_FALSE(resKw.ok);
+        CHECK(resKw.error.kind == "AnalyzerError");
+        CHECK(resKw.error.message.find("Unknown named argument 'status'") != std::string::npos);
     }
 
     SECTION("Rejects unhandled fallible call inside variadic print arguments") {
-        const std::string bad_print_arg = R"(
+        const std::string badPrintArg = R"(
 fn risky() as int can error
     return 7
 end fn
@@ -502,27 +502,27 @@ fn main()
     print("value=", risky())
 end fn
 )";
-        const auto res = cb::transpile_source(bad_print_arg, "bad_print_arg.cb");
+        const auto res = cb::transpileSource(badPrintArg, "badPrintArg.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
 
     }
 
     SECTION("Rejects const variable reassignment") {
-        const std::string bad_const = R"(
+        const std::string badConst = R"(
 fn main()
     const limit as int = 10
     limit = 20
 end fn
 )";
-        const auto res_bad_const = cb::transpile_source(bad_const, "bad_const.cb");
-        CHECK_FALSE(res_bad_const.ok);
-        CHECK(res_bad_const.error.kind == "AnalyzerError");
-        CHECK(res_bad_const.error.message.find("Cannot reassign const variable") != std::string::npos);
+        const auto resBadConst = cb::transpileSource(badConst, "badConst.cb");
+        CHECK_FALSE(resBadConst.ok);
+        CHECK(resBadConst.error.kind == "AnalyzerError");
+        CHECK(resBadConst.error.message.find("Cannot reassign const variable") != std::string::npos);
     }
 
-    SECTION("Annotates implicit_bubble on fallible calls inside fallible functions") {
-        const std::string good_code = R"(
+    SECTION("Annotates implicitBubble on fallible calls inside fallible functions") {
+        const std::string goodCode = R"(
 fn risky() as int can error
     return 1
 end fn
@@ -541,31 +541,31 @@ fn main()
 end fn
 )";
 
-        const auto lex_good = cb::tokenize(good_code, "good.cb");
-        REQUIRE(lex_good.ok);
-        auto parse_good = cb::parse_tokens(lex_good.tokens, "good.cb");
-        REQUIRE(parse_good.ok);
-        const auto ana_good = cb::analyze_program(parse_good.arena, parse_good.program);
-        REQUIRE(ana_good.ok);
+        const auto lexGood = cb::tokenize(goodCode, "good.cb");
+        REQUIRE(lexGood.ok);
+        auto parseGood = cb::parseTokens(lexGood.tokens, "good.cb");
+        REQUIRE(parseGood.ok);
+        const auto anaGood = cb::analyzeProgram(parseGood.arena, parseGood.program);
+        REQUIRE(anaGood.ok);
 
-        const auto it_risky = ana_good.symbols.functions.find("risky");
-        REQUIRE(it_risky != ana_good.symbols.functions.end());
-        CHECK(it_risky->second.is_fallible);
+        const auto itRisky = anaGood.symbols.functions.find("risky");
+        REQUIRE(itRisky != anaGood.symbols.functions.end());
+        CHECK(itRisky->second.isFallible);
 
-        const auto it_middle = ana_good.symbols.functions.find("middle");
-        REQUIRE(it_middle != ana_good.symbols.functions.end());
-        CHECK(it_middle->second.is_fallible);
+        const auto itMiddle = anaGood.symbols.functions.find("middle");
+        REQUIRE(itMiddle != anaGood.symbols.functions.end());
+        CHECK(itMiddle->second.isFallible);
 
-        const auto it_main = ana_good.symbols.functions.find("main");
-        REQUIRE(it_main != ana_good.symbols.functions.end());
-        CHECK_FALSE(it_main->second.is_fallible);
+        const auto itMain = anaGood.symbols.functions.find("main");
+        REQUIRE(itMain != anaGood.symbols.functions.end());
+        CHECK_FALSE(itMain->second.isFallible);
 
-        const cb::DeclId middle_decl_id = parse_good.program.declarations[1];
-        const auto& middle_fn = std::get<cb::FnDecl>(parse_good.arena.decls[middle_decl_id].payload);
-        REQUIRE(!middle_fn.body.empty());
-        const cb::StmtId val_stmt_id = middle_fn.body[0];
-        const auto& val_assign = std::get<cb::VarAssignment>(parse_good.arena.stmts[val_stmt_id].payload);
-        CHECK(val_assign.implicit_bubble);
+        const cb::DeclId middleDeclId = parseGood.program.declarations[1];
+        const auto& middleFn = std::get<cb::FnDecl>(parseGood.arena.decls[middleDeclId].payload);
+        REQUIRE(!middleFn.body.empty());
+        const cb::StmtId valStmtId = middleFn.body[0];
+        const auto& valAssign = std::get<cb::VarAssignment>(parseGood.arena.stmts[valStmtId].payload);
+        CHECK(valAssign.implicitBubble);
     }
 }
 
@@ -575,8 +575,8 @@ pub extern type SQL_DB
 pub extern fn connect(path as str) as SQL_DB can error
 pub extern fn SQL_close(db as SQL_DB)
 
-fn process_data() as int can error
-    ' Implicit bubble (needs if (cb_has_error(_err1)) return ...)
+fn processData() as int can error
+    ' Implicit bubble (needs if (cbHasError(_err1)) return ...)
     dim db = connect("data.db")
     
     defer
@@ -593,31 +593,31 @@ fn main()
         return
     end error
 
-    dim records = process_data()
+    dim records = processData()
 end fn
 )";
 
-    const auto res = cb::transpile_source(code, "section5.cb");
+    const auto res = cb::transpileSource(code, "section5.cb");
     REQUIRE(res.ok);
 
-    const std::string& cpp = res.cpp_code;
-    CHECK(cpp.find("struct cb_error {") != std::string::npos);
-    CHECK(cpp.find("template <typename F> struct _DeferTask { F f; ~_DeferTask() { f(); } };") != std::string::npos);
-    CHECK(cpp.find("template <typename F> _DeferTask<F> _defer(F f) { return {f}; }") != std::string::npos);
-    CHECK(cpp.find("std::tuple<int, cb_error> process_data()") != std::string::npos);
+    const std::string& cpp = res.cppCode;
+    CHECK(cpp.find("struct CbError {") != std::string::npos);
+    CHECK(cpp.find("template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };") != std::string::npos);
+    CHECK(cpp.find("template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }") != std::string::npos);
+    CHECK(cpp.find("std::tuple<int, CbError> processData()") != std::string::npos);
     CHECK(cpp.find(R"raw(auto [_val1, _err1] = connect(std::string("data.db"));)raw") != std::string::npos);
-    CHECK(cpp.find("if (cb_has_error(_err1)) return { {}, _err1 };") != std::string::npos);
+    CHECK(cpp.find("if (cbHasError(_err1)) return { {}, _err1 };") != std::string::npos);
     CHECK(cpp.find("auto db = _val1;") != std::string::npos);
-    CHECK(cpp.find("auto _defer_1 = _defer([&]() {") != std::string::npos);
+    CHECK(cpp.find("auto _defer_1 = cbDefer([&]() {") != std::string::npos);
     CHECK(cpp.find("SQL_close(db);") != std::string::npos);
-    CHECK(cpp.find(R"raw(return { 100, cb_error{"", 0} };)raw") != std::string::npos);
-    CHECK(cpp.find("auto [_val2, _err2] = process_data();") != std::string::npos);
-    CHECK(cpp.find("if (cb_has_error(_err2)) {") != std::string::npos);
-    CHECK(cpp.find("cb_error e = _err2;") != std::string::npos);
+    CHECK(cpp.find(R"raw(return { 100, CbError{"", 0} };)raw") != std::string::npos);
+    CHECK(cpp.find("auto [_val2, _err2] = processData();") != std::string::npos);
+    CHECK(cpp.find("if (cbHasError(_err2)) {") != std::string::npos);
+    CHECK(cpp.find("CbError e = _err2;") != std::string::npos);
     CHECK(cpp.find("auto records = _val2;") != std::string::npos);
 
-    SECTION("Emits variadic print, cb_to_str auto-coercion on &, and inclusive for..to loop") {
-        const std::string ergonomic_code = R"(
+    SECTION("Emits variadic print, cbToStr auto-coercion on &, and inclusive for..to loop") {
+        const std::string ergonomicCode = R"(
 fn main()
     dim score = 95
     dim ok = true
@@ -629,17 +629,17 @@ fn main()
     print()
 end fn
 )";
-        const auto erg_res = cb::transpile_source(ergonomic_code, "ergonomic.cb");
-        REQUIRE(erg_res.ok);
-        CHECK(erg_res.cpp_code.find("for (int i = 0; i <= 3; i += 1) {") != std::string::npos);
-        CHECK(erg_res.cpp_code.find(R"raw((std::cout << std::string("i=") << i << std::string(" ok=") << cb_to_str(ok) << std::endl);)raw") != std::string::npos);
-        CHECK(erg_res.cpp_code.find(R"raw((std::string("Score: ") + cb_to_str(score)))raw") != std::string::npos);
-        CHECK(erg_res.cpp_code.find(R"raw((cb_to_str(score) + std::string(" points")))raw") != std::string::npos);
-        CHECK(erg_res.cpp_code.find("(std::cout << std::endl);") != std::string::npos);
+        const auto ergRes = cb::transpileSource(ergonomicCode, "ergonomic.cb");
+        REQUIRE(ergRes.ok);
+        CHECK(ergRes.cppCode.find("for (int i = 0; i <= 3; i += 1) {") != std::string::npos);
+        CHECK(ergRes.cppCode.find(R"raw((std::cout << std::string("i=") << i << std::string(" ok=") << cbToStr(ok) << std::endl);)raw") != std::string::npos);
+        CHECK(ergRes.cppCode.find(R"raw((std::string("Score: ") + cbToStr(score)))raw") != std::string::npos);
+        CHECK(ergRes.cppCode.find(R"raw((cbToStr(score) + std::string(" points")))raw") != std::string::npos);
+        CHECK(ergRes.cppCode.find("(std::cout << std::endl);") != std::string::npos);
     }
 
     SECTION("Deduplicates canonical TypeNodes in AstArena and emits from const AstArena&") {
-        const std::string immut_code = R"(
+        const std::string immutCode = R"(
 pub type Box
     val as int
 end type
@@ -655,51 +655,51 @@ fn compute() as int
     return b1.val + b2.val + c
 end fn
 )";
-        const auto lex_im = cb::tokenize(immut_code, "immut.cb");
-        REQUIRE(lex_im.ok);
-        auto parse_im = cb::parse_tokens(lex_im.tokens, "immut.cb");
-        REQUIRE(parse_im.ok);
-        const auto ana_im = cb::analyze_program(parse_im.arena, parse_im.program);
-        REQUIRE(ana_im.ok);
+        const auto lexIm = cb::tokenize(immutCode, "immut.cb");
+        REQUIRE(lexIm.ok);
+        auto parseIm = cb::parseTokens(lexIm.tokens, "immut.cb");
+        REQUIRE(parseIm.ok);
+        const auto anaIm = cb::analyzeProgram(parseIm.arena, parseIm.program);
+        REQUIRE(anaIm.ok);
 
-        const size_t types_after_analysis = parse_im.arena.types.size();
-        CHECK(cb::find_type(parse_im.arena, "int") == ana_im.symbols.type_int);
-        CHECK(cb::find_type(parse_im.arena, "str") == ana_im.symbols.type_str);
+        const size_t typesAfterAnalysis = parseIm.arena.types.size();
+        CHECK(cb::findType(parseIm.arena, "int") == anaIm.symbols.typeInt);
+        CHECK(cb::findType(parseIm.arena, "str") == anaIm.symbols.typeStr);
 
-        size_t int_count = 0;
-        for (const auto& tnode : parse_im.arena.types) {
-            if (tnode.name == "int" && tnode.type_args.empty()) {
-                int_count += 1;
+        size_t intCount = 0;
+        for (const auto& tnode : parseIm.arena.types) {
+            if (tnode.name == "int" && tnode.typeArgs.empty()) {
+                intCount += 1;
             }
         }
-        CHECK(int_count == 1);
+        CHECK(intCount == 1);
 
-        const cb::AstArena& const_arena = parse_im.arena;
-        const std::string emitted = cb::emit_program(const_arena, ana_im.symbols, parse_im.program);
-        CHECK(const_arena.types.size() == types_after_analysis);
+        const cb::AstArena& constArena = parseIm.arena;
+        const std::string emitted = cb::emitProgram(constArena, anaIm.symbols, parseIm.program);
+        CHECK(constArena.types.size() == typesAfterAnalysis);
         CHECK(emitted.find("struct Box {") != std::string::npos);
         CHECK(emitted.find("int compute()") != std::string::npos);
     }
 }
 
 TEST_CASE("End-to-end fixture: multi-file modules, mutability, and UFCS", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("modules_ufcs", "tests/cases/modules_ufcs/main.cb");
+    cb::testE2E::runE2EFixture("modules_ufcs", "tests/cases/modules_ufcs/main.cb");
 }
 
 TEST_CASE("End-to-end fixture: nested folder modules, name collision mangling, and relative imports", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("nested_modules", "tests/cases/nested_modules/main.cb");
+    cb::testE2E::runE2EFixture("nested_modules", "tests/cases/nested_modules/main.cb");
 }
 
 TEST_CASE("Module scoping, pub visibility, duplicate aliases, diamond deduplication, and circular imports", "[modules]") {
-    const std::string base_dir = "build/test_artifacts/module_edge_cases";
+    const std::string baseDir = "build/testArtifacts/moduleEdgeCases";
     std::error_code ec;
-    std::filesystem::remove_all(base_dir, ec);
-    std::filesystem::create_directories(base_dir + "/sub", ec);
+    std::filesystem::remove_all(baseDir, ec);
+    std::filesystem::create_directories(baseDir + "/sub", ec);
     REQUIRE(!ec);
 
     SECTION("Rejects circular imports with clear diagnostic") {
         {
-            std::ofstream fa(base_dir + "/a.cb");
+            std::ofstream fa(baseDir + "/a.cb");
             fa << R"(import "sub/b.cb"
 pub fn fa() as int
     return 1
@@ -707,14 +707,14 @@ end fn
 )";
         }
         {
-            std::ofstream fb(base_dir + "/sub/b.cb");
+            std::ofstream fb(baseDir + "/sub/b.cb");
             fb << R"(import "../a.cb"
 pub fn fb() as int
     return 2
 end fn
 )";
         }
-        const auto res = cb::build_file(base_dir + "/a.cb", base_dir + "/out.cpp", false);
+        const auto res = cb::buildFile(baseDir + "/a.cb", baseDir + "/out.cpp", false);
         REQUIRE_FALSE(res.ok);
         CHECK(res.error.kind == "ImportError");
         CHECK(res.error.message.find("Circular module import detected") != std::string::npos);
@@ -722,55 +722,55 @@ end fn
 
     SECTION("Deduplicates diamond imports and preserves topological order") {
         {
-            std::ofstream fcommon(base_dir + "/sub/common.cb");
+            std::ofstream fcommon(baseDir + "/sub/common.cb");
             fcommon << R"(pub type SharedCfg
     scale as int
 end type
 )";
         }
         {
-            std::ofstream fleft(base_dir + "/left.cb");
+            std::ofstream fleft(baseDir + "/left.cb");
             fleft << R"(import "sub/common.cb"
-pub fn make_cfg(s as int) as common.SharedCfg
+pub fn makeCfg(s as int) as common.SharedCfg
     return common.SharedCfg(scale=s)
 end fn
 )";
         }
         {
-            std::ofstream fmain(base_dir + "/diamond_main.cb");
+            std::ofstream fmain(baseDir + "/diamondMain.cb");
             fmain << R"(import "sub/common.cb"
 import "left.cb"
 fn main()
-    dim c = left.make_cfg(7)
+    dim c = left.makeCfg(7)
     print(c.scale)
 end fn
 )";
         }
-        const auto res = cb::build_file(base_dir + "/diamond_main.cb", base_dir + "/diamond_out.cpp", false);
+        const auto res = cb::buildFile(baseDir + "/diamondMain.cb", baseDir + "/diamondOut.cpp", false);
         REQUIRE(res.ok);
-        const std::string cpp = cb::test_e2e::read_file_text(base_dir + "/diamond_out.cpp");
-        const size_t first_pos = cpp.find("struct cb_sub_common__SharedCfg {");
-        REQUIRE(first_pos != std::string::npos);
-        CHECK(cpp.find("struct cb_sub_common__SharedCfg {", first_pos + 1) == std::string::npos);
+        const std::string cpp = cb::testE2E::readFileText(baseDir + "/diamondOut.cpp");
+        const size_t firstPos = cpp.find("struct cb_sub_common__SharedCfg {");
+        REQUIRE(firstPos != std::string::npos);
+        CHECK(cpp.find("struct cb_sub_common__SharedCfg {", firstPos + 1) == std::string::npos);
     }
 
     SECTION("Rejects duplicate module import aliases in the same file") {
         {
-            std::ofstream f1(base_dir + "/mod.cb");
+            std::ofstream f1(baseDir + "/mod.cb");
             f1 << R"(pub fn f() as int
     return 1
 end fn
 )";
         }
         {
-            std::ofstream f2(base_dir + "/sub/mod.cb");
+            std::ofstream f2(baseDir + "/sub/mod.cb");
             f2 << R"(pub fn f() as int
     return 2
 end fn
 )";
         }
         {
-            std::ofstream fmain(base_dir + "/dup_alias.cb");
+            std::ofstream fmain(baseDir + "/dupAlias.cb");
             fmain << R"(import "mod.cb"
 import "sub/mod.cb"
 fn main()
@@ -778,7 +778,7 @@ fn main()
 end fn
 )";
         }
-        const auto res = cb::build_file(base_dir + "/dup_alias.cb", base_dir + "/dup_out.cpp", false);
+        const auto res = cb::buildFile(baseDir + "/dupAlias.cb", baseDir + "/dupOut.cpp", false);
         REQUIRE_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
         CHECK(res.error.message.find("Duplicate module import alias 'mod'") != std::string::npos);
@@ -786,113 +786,113 @@ end fn
 
     SECTION("Enforces private by default (non-pub functions and types are rejected across modules)") {
         {
-            std::ofstream flib(base_dir + "/secret.cb");
+            std::ofstream flib(baseDir + "/secret.cb");
             flib << R"(type HiddenType
     v as int
 end type
 
-fn hidden_fn() as int
+fn hiddenFn() as int
     return 42
 end fn
 
-pub fn public_fn() as int
-    return hidden_fn()
+pub fn publicFn() as int
+    return hiddenFn()
 end fn
 )";
         }
         {
-            std::ofstream fcall(base_dir + "/call_priv.cb");
+            std::ofstream fcall(baseDir + "/callPriv.cb");
             fcall << R"(import "secret.cb"
 fn main()
-    dim x = secret.hidden_fn()
+    dim x = secret.hiddenFn()
 end fn
 )";
         }
-        const auto res_fn = cb::build_file(base_dir + "/call_priv.cb", base_dir + "/priv_fn.cpp", false);
-        REQUIRE_FALSE(res_fn.ok);
-        CHECK(res_fn.error.message.find("is private to module 'secret'") != std::string::npos);
+        const auto resFn = cb::buildFile(baseDir + "/callPriv.cb", baseDir + "/privFn.cpp", false);
+        REQUIRE_FALSE(resFn.ok);
+        CHECK(resFn.error.message.find("is private to module 'secret'") != std::string::npos);
 
         {
-            std::ofstream ftype(base_dir + "/construct_priv.cb");
+            std::ofstream ftype(baseDir + "/constructPriv.cb");
             ftype << R"(import "secret.cb"
 fn main()
     dim h = secret.HiddenType(v=1)
 end fn
 )";
         }
-        const auto res_type = cb::build_file(base_dir + "/construct_priv.cb", base_dir + "/priv_type.cpp", false);
-        REQUIRE_FALSE(res_type.ok);
-        CHECK(res_type.error.message.find("is private to module 'secret'") != std::string::npos);
+        const auto resType = cb::buildFile(baseDir + "/constructPriv.cb", baseDir + "/privType.cpp", false);
+        REQUIRE_FALSE(resType.ok);
+        CHECK(resType.error.message.find("is private to module 'secret'") != std::string::npos);
     }
 }
 
 TEST_CASE("End-to-end fixture: network error bubbling and defer cleanup", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("network_error_bubbling_defer", "tests/cases/network_error_bubbling_defer.cb");
+    cb::testE2E::runE2EFixture("networkErrorBubblingDefer", "tests/cases/network_error_bubbling_defer.cb");
 }
 
 TEST_CASE("End-to-end fixture: STL containers and select case", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("containers_and_select_case", "tests/cases/containers_and_select_case.cb");
+    cb::testE2E::runE2EFixture("containersAndSelectCase", "tests/cases/containers_and_select_case.cb");
 }
 
 TEST_CASE("End-to-end fixture: struct initialization and field access", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("struct_and_field_access", "tests/cases/struct_and_field_access.cb");
+    cb::testE2E::runE2EFixture("structAndFieldAccess", "tests/cases/struct_and_field_access.cb");
 }
 
 TEST_CASE("End-to-end fixture: for range loop with step", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("for_range_step", "tests/cases/for_range_step.cb");
+    cb::testE2E::runE2EFixture("forRangeStep", "tests/cases/for_range_step.cb");
 }
 
 TEST_CASE("End-to-end fixture: cptr interop", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("cptr_interop", "tests/cases/cptr_interop.cb");
+    cb::testE2E::runE2EFixture("cptrInterop", "tests/cases/cptr_interop.cb");
 }
 
 
 TEST_CASE("End-to-end fixture: fibonacci sequence", "[e2e]") {
-    cb::test_e2e::run_e2e_fixture("fibonacci", "tests/cases/fibonacci.cb");
+    cb::testE2E::runE2EFixture("fibonacci", "tests/cases/fibonacci.cb");
 }
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
-    const std::string artifact_dir = "build/test_artifacts/cli_build";
+    const std::string artifactDir = "build/testArtifacts/cliBuild";
     std::error_code ec;
-    std::filesystem::create_directories(artifact_dir, ec);
+    std::filesystem::create_directories(artifactDir, ec);
     REQUIRE(!ec);
 
-    const std::string test_cb_path = artifact_dir + "/sample_cli.cb";
-    const std::string test_out_path = artifact_dir + "/build.cpp";
-    const std::string cli_out_path = artifact_dir + "/cli_exec_build.cpp";
+    const std::string testCbPath = artifactDir + "/sampleCli.cb";
+    const std::string testOutPath = artifactDir + "/build.cpp";
+    const std::string cliOutPath = artifactDir + "/cliExecBuild.cpp";
 
-    std::ofstream out_cb(test_cb_path);
-    out_cb << R"(import link "m"
+    std::ofstream outCb(testCbPath);
+    outCb << R"(import link "m"
 
 fn main()
     dim x = 42
     print("Answer: " & str(x))
 end fn
 )";
-    out_cb.close();
+    outCb.close();
 
-    const auto build_res = cb::build_file(test_cb_path, test_out_path, false);
-    REQUIRE(build_res.ok);
+    const auto buildRes = cb::buildFile(testCbPath, testOutPath, false);
+    REQUIRE(buildRes.ok);
 
-    const std::string content = cb::test_e2e::read_file_text(test_out_path);
+    const std::string content = cb::testE2E::readFileText(testOutPath);
     CHECK(content.find("// CleanBasic Linker Flags: -lm") != std::string::npos);
     CHECK(content.find("int main()") != std::string::npos);
 
-    std::string cb_bin_path = "./build/cleanbasic";
-    std::ifstream cb_bin_root("build/cleanbasic");
-    if (!cb_bin_root.good()) {
-        std::ifstream cb_bin_local("./cleanbasic");
-        if (cb_bin_local.good()) {
-            cb_bin_path = "./cleanbasic";
+    std::string cbBinPath = "./build/cleanbasic";
+    std::ifstream cbBinRoot("build/cleanbasic");
+    if (!cbBinRoot.good()) {
+        std::ifstream cbBinLocal("./cleanbasic");
+        if (cbBinLocal.good()) {
+            cbBinPath = "./cleanbasic";
         }
     }
 
-    std::ifstream cb_bin_check(cb_bin_path);
-    REQUIRE(cb_bin_check.good());
+    std::ifstream cbBinCheck(cbBinPath);
+    REQUIRE(cbBinCheck.good());
 
-    const std::string cli_cmd = cb_bin_path + " build " + test_cb_path + " -o " + cli_out_path + " > /dev/null 2>&1";
-    const int cli_rc = std::system(cli_cmd.c_str());
-    CHECK(cli_rc == 0);
-    CHECK(std::filesystem::exists(cli_out_path, ec));
+    const std::string cliCmd = cbBinPath + " build " + testCbPath + " -o " + cliOutPath + " > /dev/null 2>&1";
+    const int cliRc = std::system(cliCmd.c_str());
+    CHECK(cliRc == 0);
+    CHECK(std::filesystem::exists(cliOutPath, ec));
 }
 
 TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and JSON-RPC framing", "[json]") {
@@ -909,43 +909,43 @@ TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and J
             "nested": {"x": 10, "y": 20}
         })";
 
-        const auto parsed = cb::parse_json(input);
+        const auto parsed = cb::parseJson(input);
         REQUIRE(parsed.ok);
         REQUIRE(parsed.root != cb::INVALID_ID);
 
-        CHECK(cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "jsonrpc")) == "2.0");
-        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "id")) == 42);
-        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "negative")) == -100);
-        CHECK(cb::json_get_float(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "pi")) == 3.25);
-        CHECK(cb::json_get_bool(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "active")) == true);
-        CHECK(cb::json_get_bool(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "disabled")) == false);
-        CHECK(cb::json_is_null(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "nothing")));
+        CHECK(cb::jsonGetString(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "jsonrpc")) == "2.0");
+        CHECK(cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "id")) == 42);
+        CHECK(cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "negative")) == -100);
+        CHECK(cb::jsonGetFloat(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "pi")) == 3.25);
+        CHECK(cb::jsonGetBool(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "active")) == true);
+        CHECK(cb::jsonGetBool(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "disabled")) == false);
+        CHECK(cb::jsonIsNull(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "nothing")));
 
-        const cb::JsonId tags_id = cb::json_get_field(parsed.arena, parsed.root, "tags");
-        REQUIRE(tags_id != cb::INVALID_ID);
-        REQUIRE(std::holds_alternative<cb::JsonArray>(parsed.arena.nodes[tags_id]));
-        const auto& tags = std::get<cb::JsonArray>(parsed.arena.nodes[tags_id]).elements;
+        const cb::JsonId tagsId = cb::jsonGetField(parsed.arena, parsed.root, "tags");
+        REQUIRE(tagsId != cb::INVALID_ID);
+        REQUIRE(std::holds_alternative<cb::JsonArray>(parsed.arena.nodes[tagsId]));
+        const auto& tags = std::get<cb::JsonArray>(parsed.arena.nodes[tagsId]).elements;
         REQUIRE(tags.size() == 2);
-        CHECK(cb::json_get_string(parsed.arena, tags[0]) == "lsp");
-        CHECK(cb::json_get_string(parsed.arena, tags[1]) == "cleanbasic");
+        CHECK(cb::jsonGetString(parsed.arena, tags[0]) == "lsp");
+        CHECK(cb::jsonGetString(parsed.arena, tags[1]) == "cleanbasic");
 
-        const cb::JsonId nested_id = cb::json_get_field(parsed.arena, parsed.root, "nested");
-        REQUIRE(nested_id != cb::INVALID_ID);
-        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, nested_id, "x")) == 10);
-        CHECK(cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, nested_id, "y")) == 20);
+        const cb::JsonId nestedId = cb::jsonGetField(parsed.arena, parsed.root, "nested");
+        REQUIRE(nestedId != cb::INVALID_ID);
+        CHECK(cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, nestedId, "x")) == 10);
+        CHECK(cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, nestedId, "y")) == 20);
 
-        const std::string serialized = cb::serialize_json(parsed.arena, parsed.root);
+        const std::string serialized = cb::serializeJson(parsed.arena, parsed.root);
         CHECK(serialized == R"({"jsonrpc":"2.0","id":42,"negative":-100,"pi":3.25,"active":true,"disabled":false,"nothing":null,"tags":["lsp","cleanbasic"],"nested":{"x":10,"y":20}})");
 
-        const auto reparsed = cb::parse_json(serialized);
+        const auto reparsed = cb::parseJson(serialized);
         REQUIRE(reparsed.ok);
-        CHECK(cb::serialize_json(reparsed.arena, reparsed.root) == serialized);
+        CHECK(cb::serializeJson(reparsed.arena, reparsed.root) == serialized);
     }
 
     SECTION("String escape sequences and UTF-8 unicode decoding and re-escaping") {
         const std::string bs(1, cb::JSON_BACKSLASH);
         const std::string dq(1, cb::JSON_DQUOTE);
-        const std::string escaped_json =
+        const std::string escapedJson =
             "{" + dq + "msg" + dq + ":" + dq + "quote:" + bs + dq +
             " slash:" + bs + bs +
             " fwd:" + bs + "/" +
@@ -955,52 +955,52 @@ TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and J
             " cr:" + bs + "r" +
             " tab:" + bs + "t" +
             " hex:" + bs + "u0041" + bs + "u00e9" + dq + "}";
-        const auto parsed = cb::parse_json(escaped_json);
+        const auto parsed = cb::parseJson(escapedJson);
         REQUIRE(parsed.ok);
 
-        const auto msg_opt = cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "msg"));
-        REQUIRE(msg_opt.has_value());
-        std::string expected_msg = "quote:" + dq + " slash:" + bs + " fwd:/ bs:\b ff:\f nl:\n cr:\r tab:\t hex:A";
-        expected_msg.push_back(static_cast<char>(0xC3));
-        expected_msg.push_back(static_cast<char>(0xA9));
-        CHECK(msg_opt.value() == expected_msg);
+        const auto msgOpt = cb::jsonGetString(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "msg"));
+        REQUIRE(msgOpt.has_value());
+        std::string expectedMsg = "quote:" + dq + " slash:" + bs + " fwd:/ bs:\b ff:\f nl:\n cr:\r tab:\t hex:A";
+        expectedMsg.push_back(static_cast<char>(0xC3));
+        expectedMsg.push_back(static_cast<char>(0xA9));
+        CHECK(msgOpt.value() == expectedMsg);
 
-        const std::string reserialized = cb::serialize_json(parsed.arena, parsed.root);
-        const auto roundtrip = cb::parse_json(reserialized);
+        const std::string reserialized = cb::serializeJson(parsed.arena, parsed.root);
+        const auto roundtrip = cb::parseJson(reserialized);
         REQUIRE(roundtrip.ok);
-        CHECK(cb::json_get_string(roundtrip.arena, cb::json_get_field(roundtrip.arena, roundtrip.root, "msg")) == expected_msg);
+        CHECK(cb::jsonGetString(roundtrip.arena, cb::jsonGetField(roundtrip.arena, roundtrip.root, "msg")) == expectedMsg);
     }
 
     SECTION("Ergonomic builder and query functions for constructing LSP payloads") {
         cb::JsonArena arena;
-        const cb::JsonId root = cb::json_add_object(arena);
-        cb::json_object_set(arena, root, "jsonrpc", cb::json_add_string(arena, "2.0"));
-        cb::json_object_set(arena, root, "id", cb::json_add_int(arena, 1));
-        cb::json_object_set(arena, root, "id", cb::json_add_int(arena, 7)); // overwrite existing key
+        const cb::JsonId root = cb::jsonAddObject(arena);
+        cb::jsonObjectSet(arena, root, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+        cb::jsonObjectSet(arena, root, "id", cb::jsonAddInt(arena, 1));
+        cb::jsonObjectSet(arena, root, "id", cb::jsonAddInt(arena, 7)); // overwrite existing key
 
-        const cb::JsonId result_obj = cb::json_add_object(arena);
-        const cb::JsonId items_arr = cb::json_add_array(arena);
-        cb::json_array_push(arena, items_arr, cb::json_add_string(arena, "fn"));
-        cb::json_array_push(arena, items_arr, cb::json_add_bool(arena, true));
-        cb::json_array_push(arena, items_arr, cb::json_add_null(arena));
-        cb::json_array_push(arena, items_arr, cb::json_add_float(arena, 1.5));
-        cb::json_object_set(arena, result_obj, "items", items_arr);
-        cb::json_object_set(arena, root, "result", result_obj);
+        const cb::JsonId resultObj = cb::jsonAddObject(arena);
+        const cb::JsonId itemsArr = cb::jsonAddArray(arena);
+        cb::jsonArrayPush(arena, itemsArr, cb::jsonAddString(arena, "fn"));
+        cb::jsonArrayPush(arena, itemsArr, cb::jsonAddBool(arena, true));
+        cb::jsonArrayPush(arena, itemsArr, cb::jsonAddNull(arena));
+        cb::jsonArrayPush(arena, itemsArr, cb::jsonAddFloat(arena, 1.5));
+        cb::jsonObjectSet(arena, resultObj, "items", itemsArr);
+        cb::jsonObjectSet(arena, root, "result", resultObj);
 
-        CHECK(cb::json_get_int(arena, cb::json_get_field(arena, root, "id")) == 7);
-        CHECK(cb::json_get_field(arena, root, "missing") == cb::JSON_INVALID_ID);
-        CHECK_FALSE(cb::json_get_string(arena, cb::JSON_INVALID_ID).has_value());
-        CHECK_FALSE(cb::json_get_int(arena, cb::json_get_field(arena, root, "jsonrpc")).has_value());
-        CHECK_FALSE(cb::json_get_bool(arena, cb::json_get_field(arena, root, "id")).has_value());
+        CHECK(cb::jsonGetInt(arena, cb::jsonGetField(arena, root, "id")) == 7);
+        CHECK(cb::jsonGetField(arena, root, "missing") == cb::JSON_INVALID_ID);
+        CHECK_FALSE(cb::jsonGetString(arena, cb::JSON_INVALID_ID).has_value());
+        CHECK_FALSE(cb::jsonGetInt(arena, cb::jsonGetField(arena, root, "jsonrpc")).has_value());
+        CHECK_FALSE(cb::jsonGetBool(arena, cb::jsonGetField(arena, root, "id")).has_value());
 
-        const std::string out = cb::serialize_json(arena, root);
+        const std::string out = cb::serializeJson(arena, root);
         CHECK(out == R"({"jsonrpc":"2.0","id":7,"result":{"items":["fn",true,null,1.5]}})");
     }
 
     SECTION("Rejects malformed JSON inputs without throwing exceptions") {
         const std::string bs(1, cb::JSON_BACKSLASH);
         const std::string dq(1, cb::JSON_DQUOTE);
-        const std::vector<std::string> bad_inputs = {
+        const std::vector<std::string> badInputs = {
             "",
             "   ",
             "{",
@@ -1020,8 +1020,8 @@ TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and J
             R"({"a": 1} trailing)"
         };
 
-        for (const auto& bad : bad_inputs) {
-            const auto res = cb::parse_json(bad);
+        for (const auto& bad : badInputs) {
+            const auto res = cb::parseJson(bad);
             CHECK_FALSE(res.ok);
             CHECK_FALSE(res.error.empty());
         }
@@ -1032,348 +1032,348 @@ TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and J
         const std::string msg1 = R"({"jsonrpc":"2.0","id":1,"method":"initialize"})";
         const std::string msg2 = R"({"jsonrpc":"2.0","method":"initialized","params":{}})";
 
-        cb::write_jsonrpc_message(stream, msg1);
+        cb::writeJsonrpcMessage(stream, msg1);
         stream << "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n";
-        cb::write_jsonrpc_message(stream, msg2);
+        cb::writeJsonrpcMessage(stream, msg2);
 
-        const auto read1 = cb::read_jsonrpc_message(stream);
+        const auto read1 = cb::readJsonrpcMessage(stream);
         REQUIRE(read1.has_value());
         CHECK(read1.value() == msg1);
 
-        const auto read2 = cb::read_jsonrpc_message(stream);
+        const auto read2 = cb::readJsonrpcMessage(stream);
         REQUIRE(read2.has_value());
         CHECK(read2.value() == msg2);
 
-        const auto read_eof = cb::read_jsonrpc_message(stream);
-        CHECK_FALSE(read_eof.has_value());
+        const auto readEof = cb::readJsonrpcMessage(stream);
+        CHECK_FALSE(readEof.has_value());
 
         std::stringstream truncated("Content-Length: 50\r\n\r\n" + std::string(R"({"short":true})"));
-        CHECK_FALSE(cb::read_jsonrpc_message(truncated).has_value());
+        CHECK_FALSE(cb::readJsonrpcMessage(truncated).has_value());
 
-        std::stringstream missing_len("Custom-Header: 123\r\n\r\n{}");
-        CHECK_FALSE(cb::read_jsonrpc_message(missing_len).has_value());
+        std::stringstream missingLen("Custom-Header: 123\r\n\r\n{}");
+        CHECK_FALSE(cb::readJsonrpcMessage(missingLen).has_value());
     }
 }
 
 TEST_CASE("CleanBasic Language Server Phase 1: Core Loop, In-Memory Overlay & Live Diagnostics", "[lsp]") {
     SECTION("URI and file path conversion helpers") {
-        CHECK(cb::uri_to_file_path("file:///workspace/project/main.cb") == "/workspace/project/main.cb");
-        CHECK(cb::uri_to_file_path("file://localhost/workspace/main.cb") == "/workspace/main.cb");
-        CHECK(cb::uri_to_file_path("file:///workspace/my%20folder/main.cb") == "/workspace/my folder/main.cb");
-        CHECK(cb::uri_to_file_path("file:///C:/Users/dev/main.cb") == "C:/Users/dev/main.cb");
-        CHECK(cb::file_path_to_uri("/workspace/project/main.cb") == "file:///workspace/project/main.cb");
-        CHECK(cb::file_path_to_uri("relative/main.cb") == "file:///relative/main.cb");
+        CHECK(cb::uriToFilePath("file:///workspace/project/main.cb") == "/workspace/project/main.cb");
+        CHECK(cb::uriToFilePath("file://localhost/workspace/main.cb") == "/workspace/main.cb");
+        CHECK(cb::uriToFilePath("file:///workspace/my%20folder/main.cb") == "/workspace/my folder/main.cb");
+        CHECK(cb::uriToFilePath("file:///C:/Users/dev/main.cb") == "C:/Users/dev/main.cb");
+        CHECK(cb::filePathToUri("/workspace/project/main.cb") == "file:///workspace/project/main.cb");
+        CHECK(cb::filePathToUri("relative/main.cb") == "file:///relative/main.cb");
     }
 
     SECTION("Full JSON-RPC lifecycle: initialize, didOpen, publishDiagnostics, didChange, didClose, shutdown, exit") {
-        std::stringstream client_to_server;
-        std::stringstream server_to_client;
+        std::stringstream clientToServer;
+        std::stringstream serverToClient;
 
         // 1. initialize request (id = 1)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///workspace"}})"
         );
 
         // 2. initialized notification
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","method":"initialized","params":{}})"
         );
 
         // 3. textDocument/didOpen with valid CleanBasic code
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/valid.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(fn main() as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///workspace/valid.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(fn main() as int
     dim x = 42
     return x
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 4. textDocument/didOpen with invalid CleanBasic code (const reassignment on line 3, 1-based -> line 2, 0-based)
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/broken.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(fn main() as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///workspace/broken.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(fn main() as int
     const x = 10
     x = 20
     return x
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 5. textDocument/didChange fixing broken.cb (changing const to dim)
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/broken.cb"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
-            cb::json_object_set(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::json_add_array(arena);
-            const cb::JsonId change_item = cb::json_add_object(arena);
-            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(fn main() as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///workspace/broken.cb"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 2));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::jsonAddArray(arena);
+            const cb::JsonId changeItem = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, R"(fn main() as int
     dim x = 10
     x = 20
     return x
 end fn
 )"));
-            cb::json_array_push(arena, changes, change_item);
-            cb::json_object_set(arena, params, "contentChanges", changes);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonArrayPush(arena, changes, changeItem);
+            cb::jsonObjectSet(arena, params, "contentChanges", changes);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 6. textDocument/didClose on broken.cb
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didClose"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///workspace/broken.cb"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didClose"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///workspace/broken.cb"));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 7. shutdown request (id = 2) and exit notification
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null})"
         );
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","method":"exit"})"
         );
 
-        const int exit_code = cb::run_lsp_server(client_to_server, server_to_client);
-        CHECK(exit_code == 0);
+        const int exitCode = cb::runLspServer(clientToServer, serverToClient);
+        CHECK(exitCode == 0);
 
         // Verify Message 1: initialize response
-        const auto resp1_raw = cb::read_jsonrpc_message(server_to_client);
-        REQUIRE(resp1_raw.has_value());
-        const auto resp1 = cb::parse_json(resp1_raw.value());
+        const auto resp1Raw = cb::readJsonrpcMessage(serverToClient);
+        REQUIRE(resp1Raw.has_value());
+        const auto resp1 = cb::parseJson(resp1Raw.value());
         REQUIRE(resp1.ok);
-        CHECK(cb::json_get_int(resp1.arena, cb::json_get_field(resp1.arena, resp1.root, "id")) == 1);
-        const cb::JsonId res1_obj = cb::json_get_field(resp1.arena, resp1.root, "result");
-        const cb::JsonId caps_obj = cb::json_get_field(resp1.arena, res1_obj, "capabilities");
-        CHECK(cb::json_get_int(resp1.arena, cb::json_get_field(resp1.arena, caps_obj, "textDocumentSync")) == 1);
-        const cb::JsonId srv_info = cb::json_get_field(resp1.arena, res1_obj, "serverInfo");
-        CHECK(cb::json_get_string(resp1.arena, cb::json_get_field(resp1.arena, srv_info, "name")) == "cleanbasic-lsp");
+        CHECK(cb::jsonGetInt(resp1.arena, cb::jsonGetField(resp1.arena, resp1.root, "id")) == 1);
+        const cb::JsonId res1Obj = cb::jsonGetField(resp1.arena, resp1.root, "result");
+        const cb::JsonId capsObj = cb::jsonGetField(resp1.arena, res1Obj, "capabilities");
+        CHECK(cb::jsonGetInt(resp1.arena, cb::jsonGetField(resp1.arena, capsObj, "textDocumentSync")) == 1);
+        const cb::JsonId srvInfo = cb::jsonGetField(resp1.arena, res1Obj, "serverInfo");
+        CHECK(cb::jsonGetString(resp1.arena, cb::jsonGetField(resp1.arena, srvInfo, "name")) == "cleanbasic-lsp");
 
         // Verify Message 2: publishDiagnostics for valid.cb (empty diagnostics array)
-        const auto diag1_raw = cb::read_jsonrpc_message(server_to_client);
-        REQUIRE(diag1_raw.has_value());
-        const auto diag1 = cb::parse_json(diag1_raw.value());
+        const auto diag1Raw = cb::readJsonrpcMessage(serverToClient);
+        REQUIRE(diag1Raw.has_value());
+        const auto diag1 = cb::parseJson(diag1Raw.value());
         REQUIRE(diag1.ok);
-        CHECK(cb::json_get_string(diag1.arena, cb::json_get_field(diag1.arena, diag1.root, "method")) == "textDocument/publishDiagnostics");
-        const cb::JsonId diag1_params = cb::json_get_field(diag1.arena, diag1.root, "params");
-        CHECK(cb::json_get_string(diag1.arena, cb::json_get_field(diag1.arena, diag1_params, "uri")) == "file:///workspace/valid.cb");
-        const cb::JsonId diag1_arr_id = cb::json_get_field(diag1.arena, diag1_params, "diagnostics");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(diag1.arena.nodes[diag1_arr_id]));
-        CHECK(std::get<cb::JsonArray>(diag1.arena.nodes[diag1_arr_id]).elements.empty());
+        CHECK(cb::jsonGetString(diag1.arena, cb::jsonGetField(diag1.arena, diag1.root, "method")) == "textDocument/publishDiagnostics");
+        const cb::JsonId diag1Params = cb::jsonGetField(diag1.arena, diag1.root, "params");
+        CHECK(cb::jsonGetString(diag1.arena, cb::jsonGetField(diag1.arena, diag1Params, "uri")) == "file:///workspace/valid.cb");
+        const cb::JsonId diag1ArrId = cb::jsonGetField(diag1.arena, diag1Params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag1.arena.nodes[diag1ArrId]));
+        CHECK(std::get<cb::JsonArray>(diag1.arena.nodes[diag1ArrId]).elements.empty());
 
         // Verify Message 3: publishDiagnostics for broken.cb (1 error diagnostic at 0-based line 2, char 4)
-        const auto diag2_raw = cb::read_jsonrpc_message(server_to_client);
-        REQUIRE(diag2_raw.has_value());
-        const auto diag2 = cb::parse_json(diag2_raw.value());
+        const auto diag2Raw = cb::readJsonrpcMessage(serverToClient);
+        REQUIRE(diag2Raw.has_value());
+        const auto diag2 = cb::parseJson(diag2Raw.value());
         REQUIRE(diag2.ok);
-        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, diag2.root, "method")) == "textDocument/publishDiagnostics");
-        const cb::JsonId diag2_params = cb::json_get_field(diag2.arena, diag2.root, "params");
-        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, diag2_params, "uri")) == "file:///workspace/broken.cb");
-        const cb::JsonId diag2_arr_id = cb::json_get_field(diag2.arena, diag2_params, "diagnostics");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(diag2.arena.nodes[diag2_arr_id]));
-        const auto& diag2_elems = std::get<cb::JsonArray>(diag2.arena.nodes[diag2_arr_id]).elements;
-        REQUIRE(diag2_elems.size() == 1);
-        const cb::JsonId err_diag = diag2_elems[0];
-        CHECK(cb::json_get_int(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "severity")) == 1);
-        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "source")) == "cleanbasic");
-        CHECK(cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "code")) == "AnalyzerError");
-        const auto err_msg_opt = cb::json_get_string(diag2.arena, cb::json_get_field(diag2.arena, err_diag, "message"));
-        REQUIRE(err_msg_opt.has_value());
-        CHECK(err_msg_opt.value().find("Cannot reassign const variable 'x'") != std::string::npos);
+        CHECK(cb::jsonGetString(diag2.arena, cb::jsonGetField(diag2.arena, diag2.root, "method")) == "textDocument/publishDiagnostics");
+        const cb::JsonId diag2Params = cb::jsonGetField(diag2.arena, diag2.root, "params");
+        CHECK(cb::jsonGetString(diag2.arena, cb::jsonGetField(diag2.arena, diag2Params, "uri")) == "file:///workspace/broken.cb");
+        const cb::JsonId diag2ArrId = cb::jsonGetField(diag2.arena, diag2Params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag2.arena.nodes[diag2ArrId]));
+        const auto& diag2Elems = std::get<cb::JsonArray>(diag2.arena.nodes[diag2ArrId]).elements;
+        REQUIRE(diag2Elems.size() == 1);
+        const cb::JsonId errDiag = diag2Elems[0];
+        CHECK(cb::jsonGetInt(diag2.arena, cb::jsonGetField(diag2.arena, errDiag, "severity")) == 1);
+        CHECK(cb::jsonGetString(diag2.arena, cb::jsonGetField(diag2.arena, errDiag, "source")) == "cleanbasic");
+        CHECK(cb::jsonGetString(diag2.arena, cb::jsonGetField(diag2.arena, errDiag, "code")) == "AnalyzerError");
+        const auto errMsgOpt = cb::jsonGetString(diag2.arena, cb::jsonGetField(diag2.arena, errDiag, "message"));
+        REQUIRE(errMsgOpt.has_value());
+        CHECK(errMsgOpt.value().find("Cannot reassign const variable 'x'") != std::string::npos);
 
-        const cb::JsonId range_obj = cb::json_get_field(diag2.arena, err_diag, "range");
-        const cb::JsonId start_obj = cb::json_get_field(diag2.arena, range_obj, "start");
-        CHECK(cb::json_get_int(diag2.arena, cb::json_get_field(diag2.arena, start_obj, "line")) == 2);
-        CHECK(cb::json_get_int(diag2.arena, cb::json_get_field(diag2.arena, start_obj, "character")) == 4);
+        const cb::JsonId rangeObj = cb::jsonGetField(diag2.arena, errDiag, "range");
+        const cb::JsonId startObj = cb::jsonGetField(diag2.arena, rangeObj, "start");
+        CHECK(cb::jsonGetInt(diag2.arena, cb::jsonGetField(diag2.arena, startObj, "line")) == 2);
+        CHECK(cb::jsonGetInt(diag2.arena, cb::jsonGetField(diag2.arena, startObj, "character")) == 4);
 
         // Verify Message 4: publishDiagnostics after didChange fixes broken.cb (diagnostics cleared)
-        const auto diag3_raw = cb::read_jsonrpc_message(server_to_client);
-        REQUIRE(diag3_raw.has_value());
-        const auto diag3 = cb::parse_json(diag3_raw.value());
+        const auto diag3Raw = cb::readJsonrpcMessage(serverToClient);
+        REQUIRE(diag3Raw.has_value());
+        const auto diag3 = cb::parseJson(diag3Raw.value());
         REQUIRE(diag3.ok);
-        const cb::JsonId diag3_params = cb::json_get_field(diag3.arena, diag3.root, "params");
-        CHECK(cb::json_get_string(diag3.arena, cb::json_get_field(diag3.arena, diag3_params, "uri")) == "file:///workspace/broken.cb");
-        const cb::JsonId diag3_arr_id = cb::json_get_field(diag3.arena, diag3_params, "diagnostics");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(diag3.arena.nodes[diag3_arr_id]));
-        CHECK(std::get<cb::JsonArray>(diag3.arena.nodes[diag3_arr_id]).elements.empty());
+        const cb::JsonId diag3Params = cb::jsonGetField(diag3.arena, diag3.root, "params");
+        CHECK(cb::jsonGetString(diag3.arena, cb::jsonGetField(diag3.arena, diag3Params, "uri")) == "file:///workspace/broken.cb");
+        const cb::JsonId diag3ArrId = cb::jsonGetField(diag3.arena, diag3Params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag3.arena.nodes[diag3ArrId]));
+        CHECK(std::get<cb::JsonArray>(diag3.arena.nodes[diag3ArrId]).elements.empty());
 
         // Verify Message 5: publishDiagnostics after didClose on broken.cb (diagnostics cleared)
-        const auto diag4_raw = cb::read_jsonrpc_message(server_to_client);
-        REQUIRE(diag4_raw.has_value());
-        const auto diag4 = cb::parse_json(diag4_raw.value());
+        const auto diag4Raw = cb::readJsonrpcMessage(serverToClient);
+        REQUIRE(diag4Raw.has_value());
+        const auto diag4 = cb::parseJson(diag4Raw.value());
         REQUIRE(diag4.ok);
-        const cb::JsonId diag4_params = cb::json_get_field(diag4.arena, diag4.root, "params");
-        const cb::JsonId diag4_arr_id = cb::json_get_field(diag4.arena, diag4_params, "diagnostics");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(diag4.arena.nodes[diag4_arr_id]));
-        CHECK(std::get<cb::JsonArray>(diag4.arena.nodes[diag4_arr_id]).elements.empty());
+        const cb::JsonId diag4Params = cb::jsonGetField(diag4.arena, diag4.root, "params");
+        const cb::JsonId diag4ArrId = cb::jsonGetField(diag4.arena, diag4Params, "diagnostics");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(diag4.arena.nodes[diag4ArrId]));
+        CHECK(std::get<cb::JsonArray>(diag4.arena.nodes[diag4ArrId]).elements.empty());
 
         // Verify Message 6: shutdown response
-        const auto shutdown_raw = cb::read_jsonrpc_message(server_to_client);
-        REQUIRE(shutdown_raw.has_value());
-        const auto shutdown_resp = cb::parse_json(shutdown_raw.value());
-        REQUIRE(shutdown_resp.ok);
-        CHECK(cb::json_get_int(shutdown_resp.arena, cb::json_get_field(shutdown_resp.arena, shutdown_resp.root, "id")) == 2);
-        CHECK(cb::json_is_null(shutdown_resp.arena, cb::json_get_field(shutdown_resp.arena, shutdown_resp.root, "result")));
+        const auto shutdownRaw = cb::readJsonrpcMessage(serverToClient);
+        REQUIRE(shutdownRaw.has_value());
+        const auto shutdownResp = cb::parseJson(shutdownRaw.value());
+        REQUIRE(shutdownResp.ok);
+        CHECK(cb::jsonGetInt(shutdownResp.arena, cb::jsonGetField(shutdownResp.arena, shutdownResp.root, "id")) == 2);
+        CHECK(cb::jsonIsNull(shutdownResp.arena, cb::jsonGetField(shutdownResp.arena, shutdownResp.root, "result")));
     }
 
     SECTION("In-memory document overlay resolves unsaved imported modules across open buffers") {
-        std::stringstream client_to_server;
-        std::stringstream server_to_client;
+        std::stringstream clientToServer;
+        std::stringstream serverToClient;
 
         // Open an unsaved module in memory (does not exist on disk)
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/math_util.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(pub fn double_val(x as int) as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///virtualWs/mathUtil.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(pub fn doubleVal(x as int) as int
     return x * 2
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
-        // Open main.cb importing math_util.cb and calling math_util.double_val(21)
+        // Open main.cb importing mathUtil.cb and calling mathUtil.doubleVal(21)
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/main.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(import "math_util.cb"
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///virtualWs/main.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(import "mathUtil.cb"
 fn main() as int
-    return math_util.double_val(21)
+    return mathUtil.doubleVal(21)
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
-        // Modify math_util.cb in memory to remove 'pub' from double_val, then re-validate main.cb
+        // Modify mathUtil.cb in memory to remove 'pub' from doubleVal, then re-validate main.cb
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/math_util.cb"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
-            cb::json_object_set(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::json_add_array(arena);
-            const cb::JsonId change_item = cb::json_add_object(arena);
-            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(fn double_val(x as int) as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///virtualWs/mathUtil.cb"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 2));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::jsonAddArray(arena);
+            const cb::JsonId changeItem = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, R"(fn doubleVal(x as int) as int
     return x * 2
 end fn
 )"));
-            cb::json_array_push(arena, changes, change_item);
-            cb::json_object_set(arena, params, "contentChanges", changes);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonArrayPush(arena, changes, changeItem);
+            cb::jsonObjectSet(arena, params, "contentChanges", changes);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/main.cb"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
-            cb::json_object_set(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::json_add_array(arena);
-            const cb::JsonId change_item = cb::json_add_object(arena);
-            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(import "math_util.cb"
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///virtualWs/main.cb"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 2));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::jsonAddArray(arena);
+            const cb::JsonId changeItem = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, R"(import "mathUtil.cb"
 fn main() as int
-    return math_util.double_val(21)
+    return mathUtil.doubleVal(21)
 end fn
 )"));
-            cb::json_array_push(arena, changes, change_item);
-            cb::json_object_set(arena, params, "contentChanges", changes);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonArrayPush(arena, changes, changeItem);
+            cb::jsonObjectSet(arena, params, "contentChanges", changes);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // Send exit without shutdown -> should return exit code 1
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","method":"exit"})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        const int exit_code = cb::run_lsp_server(client_to_server, server_to_client);
-        CHECK(exit_code == 1);
+        const int exitCode = cb::runLspServer(clientToServer, serverToClient);
+        CHECK(exitCode == 1);
 
-        // 1st notification: math_util.cb didOpen -> 0 diagnostics
-        const auto m1 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        const cb::JsonId m1_diags = cb::json_get_field(m1.arena, cb::json_get_field(m1.arena, m1.root, "params"), "diagnostics");
-        CHECK(std::get<cb::JsonArray>(m1.arena.nodes[m1_diags]).elements.empty());
+        // 1st notification: mathUtil.cb didOpen -> 0 diagnostics
+        const auto m1 = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        const cb::JsonId m1Diags = cb::jsonGetField(m1.arena, cb::jsonGetField(m1.arena, m1.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(m1.arena.nodes[m1Diags]).elements.empty());
 
-        // 2nd notification: main.cb didOpen -> 0 diagnostics (resolved math_util.cb from in-memory buffer!)
-        const auto m2 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        const cb::JsonId m2_diags = cb::json_get_field(m2.arena, cb::json_get_field(m2.arena, m2.root, "params"), "diagnostics");
-        CHECK(std::get<cb::JsonArray>(m2.arena.nodes[m2_diags]).elements.empty());
+        // 2nd notification: main.cb didOpen -> 0 diagnostics (resolved mathUtil.cb from in-memory buffer!)
+        const auto m2 = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        const cb::JsonId m2Diags = cb::jsonGetField(m2.arena, cb::jsonGetField(m2.arena, m2.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(m2.arena.nodes[m2Diags]).elements.empty());
 
-        // 3rd notification: math_util.cb didChange -> 0 diagnostics
-        const auto m3 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        const cb::JsonId m3_diags = cb::json_get_field(m3.arena, cb::json_get_field(m3.arena, m3.root, "params"), "diagnostics");
-        CHECK(std::get<cb::JsonArray>(m3.arena.nodes[m3_diags]).elements.empty());
+        // 3rd notification: mathUtil.cb didChange -> 0 diagnostics
+        const auto m3 = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        const cb::JsonId m3Diags = cb::jsonGetField(m3.arena, cb::jsonGetField(m3.arena, m3.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(m3.arena.nodes[m3Diags]).elements.empty());
 
-        // 4th notification: main.cb didChange -> reports private function AnalyzerError from updated in-memory math_util.cb!
-        const auto m4 = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        const cb::JsonId m4_diags = cb::json_get_field(m4.arena, cb::json_get_field(m4.arena, m4.root, "params"), "diagnostics");
-        const auto& m4_elems = std::get<cb::JsonArray>(m4.arena.nodes[m4_diags]).elements;
-        REQUIRE(m4_elems.size() == 1);
-        const auto m4_msg = cb::json_get_string(m4.arena, cb::json_get_field(m4.arena, m4_elems[0], "message"));
-        REQUIRE(m4_msg.has_value());
-        CHECK(m4_msg.value().find("private to module") != std::string::npos);
+        // 4th notification: main.cb didChange -> reports private function AnalyzerError from updated in-memory mathUtil.cb!
+        const auto m4 = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        const cb::JsonId m4Diags = cb::jsonGetField(m4.arena, cb::jsonGetField(m4.arena, m4.root, "params"), "diagnostics");
+        const auto& m4Elems = std::get<cb::JsonArray>(m4.arena.nodes[m4Diags]).elements;
+        REQUIRE(m4Elems.size() == 1);
+        const auto m4Msg = cb::jsonGetString(m4.arena, cb::jsonGetField(m4.arena, m4Elems[0], "message"));
+        REQUIRE(m4Msg.has_value());
+        CHECK(m4Msg.value().find("private to module") != std::string::npos);
     }
 }
 
@@ -1385,7 +1385,7 @@ TEST_CASE("Implicit multiline continuation inside (), [], and {} and trailing pa
     retries as int
 end type
 
-fn make_config(
+fn makeConfig(
     host as str,
     port as int, # inline hash comment
     retries as int, ' trailing comma + single-quote comment
@@ -1398,7 +1398,7 @@ fn make_config(
 end fn
 
 fn main() as int
-    dim cfg = make_config(
+    dim cfg = makeConfig(
         "localhost",
         8080,
         3,
@@ -1428,9 +1428,9 @@ fn main() as int
     return 1
 end fn
 )";
-        const auto res = cb::transpile_source(src, "multiline.cb");
+        const auto res = cb::transpileSource(src, "multiline.cb");
         REQUIRE(res.ok);
-        CHECK(res.cpp_code.find("Config make_config(std::string host, int port, int retries)") != std::string::npos);
+        CHECK(res.cppCode.find("Config makeConfig(std::string host, int port, int retries)") != std::string::npos);
     }
 
     SECTION("Line and column numbers remain exact inside and after multiline bracketed blocks") {
@@ -1442,27 +1442,27 @@ end fn
         a,
         b,
     ]
-    undeclared_var = items[0]
+    undeclaredVar = items[0]
     return 0
 end fn
 )";
-        const auto check_res = cb::check_source(src, "diag_multiline.cb");
-        REQUIRE_FALSE(check_res.ok);
-        CHECK(check_res.error.kind == "AnalyzerError");
-        CHECK(check_res.error.line == 9);
-        CHECK(check_res.error.col == 5);
-        CHECK(check_res.error.message.find("Undeclared variable 'undeclared_var'") != std::string::npos);
+        const auto checkRes = cb::checkSource(src, "diagMultiline.cb");
+        REQUIRE_FALSE(checkRes.ok);
+        CHECK(checkRes.error.kind == "AnalyzerError");
+        CHECK(checkRes.error.line == 9);
+        CHECK(checkRes.error.col == 5);
+        CHECK(checkRes.error.message.find("Undeclared variable 'undeclaredVar'") != std::string::npos);
     }
 }
 
 TEST_CASE("CleanBasic Language Server Phase 2: documentSymbol, hover, definition & snapshot fallback", "[lsp]") {
     SECTION("End-to-end documentSymbol, hover, definition (same-file, cross-module, struct fields), and snapshot resilience") {
-        std::stringstream client_to_server;
-        std::stringstream server_to_client;
+        std::stringstream clientToServer;
+        std::stringstream serverToClient;
 
         // 1. initialize (id = 1)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
         );
 
@@ -1478,15 +1478,15 @@ TEST_CASE("CleanBasic Language Server Phase 2: documentSymbol, hover, definition
         // Line 9: end fn
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///ws/player.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(pub alias Score = int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/player.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(pub alias Score = int
 pub type Player
     name as str
     health as int
@@ -1496,351 +1496,351 @@ pub fn heal(byref p as Player, amount as int) as int can error
     return p.health
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 3. didOpen main.cb
         // Line 1 (0-based 0): import "player.cb"
-        // Line 2 (0-based 1): fn local_boost(base as int) as int
+        // Line 2 (0-based 1): fn localBoost(base as int) as int
         // Line 3 (0-based 2):     return base + 10
         // Line 4 (0-based 3): end fn
         // Line 5 (0-based 4): fn main() as int can error
-        // Line 6 (0-based 5):     const max_potion = 50
+        // Line 6 (0-based 5):     const maxPotion = 50
         // Line 7 (0-based 6):     dim hero = player.Player(name="Alice", health=100)
-        // Line 8 (0-based 7):     dim boosted = local_boost(max_potion)
-        // Line 9 (0-based 8):     dim new_hp = hero.heal(boosted)
-        // Line 10 (0-based 9):    print(hero.health, new_hp)
+        // Line 8 (0-based 7):     dim boosted = localBoost(maxPotion)
+        // Line 9 (0-based 8):     dim newHp = hero.heal(boosted)
+        // Line 10 (0-based 9):    print(hero.health, newHp)
         // Line 11 (0-based 10):   return 0
         // Line 12 (0-based 11): end fn
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///ws/main.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(import "player.cb"
-fn local_boost(base as int) as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(import "player.cb"
+fn localBoost(base as int) as int
     return base + 10
 end fn
 fn main() as int can error
-    const max_potion = 50
+    const maxPotion = 50
     dim hero = player.Player(name="Alice", health=100)
-    dim boosted = local_boost(max_potion)
-    dim new_hp = hero.heal(boosted)
-    print(hero.health, new_hp)
+    dim boosted = localBoost(maxPotion)
+    dim newHp = hero.heal(boosted)
+    print(hero.health, newHp)
     return 0
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 4. textDocument/documentSymbol on player.cb (id = 2)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws/player.cb"}}})"
         );
 
         // 5. textDocument/hover on inferred local variable 'hero' in main.cb (0-based line 6, char 9) (id = 3)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":6,"character":9}}})"
         );
 
         // 6. textDocument/hover on UFCS call 'hero.heal' in main.cb (0-based line 8, char 23 -> 'heal') (id = 4)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":8,"character":23}}})"
         );
 
         // 7. textDocument/hover on struct field 'hero.health' in main.cb (0-based line 9, char 16 -> 'health') (id = 5)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":5,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":16}}})"
         );
 
         // 8. textDocument/hover on builtin 'print' in main.cb (0-based line 9, char 5) (id = 6)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":6,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":5}}})"
         );
 
-        // 9. textDocument/definition on same-file function call 'local_boost' (0-based line 7, char 20) (id = 7)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        // 9. textDocument/definition on same-file function call 'localBoost' (0-based line 7, char 20) (id = 7)
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":7,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":7,"character":20}}})"
         );
 
         // 10. textDocument/definition on cross-module UFCS call 'hero.heal' (0-based line 8, char 23) (id = 8)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":8,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":8,"character":23}}})"
         );
 
         // 11. textDocument/definition on struct field 'hero.health' (0-based line 9, char 16) (id = 9)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":9,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":16}}})"
         );
 
-        // 12. textDocument/definition on local const 'max_potion' usage (0-based line 7, char 32) (id = 10)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        // 12. textDocument/definition on local const 'maxPotion' usage (0-based line 7, char 32) (id = 10)
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":10,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":7,"character":32}}})"
         );
 
         // 13. Introduce transient syntax error in main.cb via didChange, then request documentSymbol (id = 11) and hover on 'hero' (id = 12)
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///ws/main.cb"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 2));
-            cb::json_object_set(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::json_add_array(arena);
-            const cb::JsonId change_item = cb::json_add_object(arena);
-            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, R"(import "player.cb"
-fn local_boost(base as int) as int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 2));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::jsonAddArray(arena);
+            const cb::JsonId changeItem = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, R"(import "player.cb"
+fn localBoost(base as int) as int
     return base + 10
 end fn
 fn main() as int can error
-    const max_potion = 50
+    const maxPotion = 50
     dim hero = player.Player(name="Alice", health=100)
     if
 )"));
-            cb::json_array_push(arena, changes, change_item);
-            cb::json_object_set(arena, params, "contentChanges", changes);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonArrayPush(arena, changes, changeItem);
+            cb::jsonObjectSet(arena, params, "contentChanges", changes);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":11,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws/main.cb"}}})"
         );
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":12,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":6,"character":9}}})"
         );
 
         // 14. shutdown & exit
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","method":"exit"})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        const int exit_code = cb::run_lsp_server(client_to_server, server_to_client);
-        CHECK(exit_code == 0);
+        const int exitCode = cb::runLspServer(clientToServer, serverToClient);
+        CHECK(exitCode == 0);
 
         // Msg 1: initialize response capabilities
-        const auto init_resp = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(init_resp.ok);
-        const cb::JsonId caps = cb::json_get_field(
-            init_resp.arena,
-            cb::json_get_field(init_resp.arena, init_resp.root, "result"),
+        const auto initResp = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(initResp.ok);
+        const cb::JsonId caps = cb::jsonGetField(
+            initResp.arena,
+            cb::jsonGetField(initResp.arena, initResp.root, "result"),
             "capabilities"
         );
-        CHECK(cb::json_get_bool(init_resp.arena, cb::json_get_field(init_resp.arena, caps, "documentSymbolProvider")) == true);
-        CHECK(cb::json_get_bool(init_resp.arena, cb::json_get_field(init_resp.arena, caps, "definitionProvider")) == true);
-        CHECK(cb::json_get_bool(init_resp.arena, cb::json_get_field(init_resp.arena, caps, "hoverProvider")) == true);
+        CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "documentSymbolProvider")) == true);
+        CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "definitionProvider")) == true);
+        CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "hoverProvider")) == true);
 
         // Msg 2 & 3: publishDiagnostics for player.cb and main.cb (both valid)
-        const auto diag_player = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(diag_player.ok);
-        const auto diag_main = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(diag_main.ok);
+        const auto diagPlayer = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(diagPlayer.ok);
+        const auto diagMain = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(diagMain.ok);
 
         // Msg 4: documentSymbol response for player.cb (id = 2)
-        const auto doc_sym_resp = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(doc_sym_resp.ok);
-        CHECK(cb::json_get_int(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, doc_sym_resp.root, "id")) == 2);
-        const cb::JsonId sym_arr_id = cb::json_get_field(doc_sym_resp.arena, doc_sym_resp.root, "result");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(doc_sym_resp.arena.nodes[sym_arr_id]));
-        const auto& sym_elems = std::get<cb::JsonArray>(doc_sym_resp.arena.nodes[sym_arr_id]).elements;
-        REQUIRE(sym_elems.size() == 3);
+        const auto docSymResp = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(docSymResp.ok);
+        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, docSymResp.root, "id")) == 2);
+        const cb::JsonId symArrId = cb::jsonGetField(docSymResp.arena, docSymResp.root, "result");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(docSymResp.arena.nodes[symArrId]));
+        const auto& symElems = std::get<cb::JsonArray>(docSymResp.arena.nodes[symArrId]).elements;
+        REQUIRE(symElems.size() == 3);
 
         // Symbol 0: Alias 'Score' (kind 26)
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[0], "name")) == "Score");
-        CHECK(cb::json_get_int(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[0], "kind")) == 26);
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[0], "detail")) == "= int");
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "name")) == "Score");
+        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "kind")) == 26);
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "detail")) == "= int");
 
         // Symbol 1: Type 'Player' (kind 23) with 2 Field children (kind 8)
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[1], "name")) == "Player");
-        CHECK(cb::json_get_int(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[1], "kind")) == 23);
-        const cb::JsonId children_id = cb::json_get_field(doc_sym_resp.arena, sym_elems[1], "children");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(doc_sym_resp.arena.nodes[children_id]));
-        const auto& field_children = std::get<cb::JsonArray>(doc_sym_resp.arena.nodes[children_id]).elements;
-        REQUIRE(field_children.size() == 2);
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, field_children[0], "name")) == "name");
-        CHECK(cb::json_get_int(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, field_children[0], "kind")) == 8);
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, field_children[0], "detail")) == "str");
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, field_children[1], "name")) == "health");
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, field_children[1], "detail")) == "int");
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "name")) == "Player");
+        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "kind")) == 23);
+        const cb::JsonId childrenId = cb::jsonGetField(docSymResp.arena, symElems[1], "children");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(docSymResp.arena.nodes[childrenId]));
+        const auto& fieldChildren = std::get<cb::JsonArray>(docSymResp.arena.nodes[childrenId]).elements;
+        REQUIRE(fieldChildren.size() == 2);
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "name")) == "name");
+        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "kind")) == 8);
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "detail")) == "str");
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[1], "name")) == "health");
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[1], "detail")) == "int");
 
         // Symbol 2: Fn 'heal' (kind 12)
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[2], "name")) == "heal");
-        CHECK(cb::json_get_int(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[2], "kind")) == 12);
-        CHECK(cb::json_get_string(doc_sym_resp.arena, cb::json_get_field(doc_sym_resp.arena, sym_elems[2], "detail")) == "(byref p as Player, amount as int) as int can error");
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "name")) == "heal");
+        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "kind")) == 12);
+        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "detail")) == "(byref p as Player, amount as int) as int can error");
 
         // Msg 5: hover on inferred variable 'hero' (id = 3)
-        const auto hover_hero = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(hover_hero.ok);
-        const cb::JsonId h3_contents = cb::json_get_field(
-            hover_hero.arena,
-            cb::json_get_field(hover_hero.arena, hover_hero.root, "result"),
+        const auto hoverHero = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(hoverHero.ok);
+        const cb::JsonId h3Contents = cb::jsonGetField(
+            hoverHero.arena,
+            cb::jsonGetField(hoverHero.arena, hoverHero.root, "result"),
             "contents"
         );
-        const auto h3_val = cb::json_get_string(hover_hero.arena, cb::json_get_field(hover_hero.arena, h3_contents, "value"));
-        REQUIRE(h3_val.has_value());
-        CHECK(h3_val.value().find("dim hero as Player") != std::string::npos);
+        const auto h3Val = cb::jsonGetString(hoverHero.arena, cb::jsonGetField(hoverHero.arena, h3Contents, "value"));
+        REQUIRE(h3Val.has_value());
+        CHECK(h3Val.value().find("dim hero as Player") != std::string::npos);
 
         // Msg 6: hover on UFCS call 'hero.heal' (id = 4)
-        const auto hover_heal = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(hover_heal.ok);
-        const cb::JsonId h4_contents = cb::json_get_field(
-            hover_heal.arena,
-            cb::json_get_field(hover_heal.arena, hover_heal.root, "result"),
+        const auto hoverHeal = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(hoverHeal.ok);
+        const cb::JsonId h4Contents = cb::jsonGetField(
+            hoverHeal.arena,
+            cb::jsonGetField(hoverHeal.arena, hoverHeal.root, "result"),
             "contents"
         );
-        const auto h4_val = cb::json_get_string(hover_heal.arena, cb::json_get_field(hover_heal.arena, h4_contents, "value"));
-        REQUIRE(h4_val.has_value());
-        CHECK(h4_val.value().find("pub fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
+        const auto h4Val = cb::jsonGetString(hoverHeal.arena, cb::jsonGetField(hoverHeal.arena, h4Contents, "value"));
+        REQUIRE(h4Val.has_value());
+        CHECK(h4Val.value().find("pub fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
 
         // Msg 7: hover on struct field 'hero.health' (id = 5)
-        const auto hover_field = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(hover_field.ok);
-        const cb::JsonId h5_contents = cb::json_get_field(
-            hover_field.arena,
-            cb::json_get_field(hover_field.arena, hover_field.root, "result"),
+        const auto hoverField = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(hoverField.ok);
+        const cb::JsonId h5Contents = cb::jsonGetField(
+            hoverField.arena,
+            cb::jsonGetField(hoverField.arena, hoverField.root, "result"),
             "contents"
         );
-        const auto h5_val = cb::json_get_string(hover_field.arena, cb::json_get_field(hover_field.arena, h5_contents, "value"));
-        REQUIRE(h5_val.has_value());
-        CHECK(h5_val.value().find("(field) Player.health as int") != std::string::npos);
+        const auto h5Val = cb::jsonGetString(hoverField.arena, cb::jsonGetField(hoverField.arena, h5Contents, "value"));
+        REQUIRE(h5Val.has_value());
+        CHECK(h5Val.value().find("(field) Player.health as int") != std::string::npos);
 
         // Msg 8: hover on builtin 'print' (id = 6)
-        const auto hover_print = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(hover_print.ok);
-        const cb::JsonId h6_contents = cb::json_get_field(
-            hover_print.arena,
-            cb::json_get_field(hover_print.arena, hover_print.root, "result"),
+        const auto hoverPrint = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(hoverPrint.ok);
+        const cb::JsonId h6Contents = cb::jsonGetField(
+            hoverPrint.arena,
+            cb::jsonGetField(hoverPrint.arena, hoverPrint.root, "result"),
             "contents"
         );
-        const auto h6_val = cb::json_get_string(hover_print.arena, cb::json_get_field(hover_print.arena, h6_contents, "value"));
-        REQUIRE(h6_val.has_value());
-        CHECK(h6_val.value().find("fn print(values...)") != std::string::npos);
+        const auto h6Val = cb::jsonGetString(hoverPrint.arena, cb::jsonGetField(hoverPrint.arena, h6Contents, "value"));
+        REQUIRE(h6Val.has_value());
+        CHECK(h6Val.value().find("fn print(values...)") != std::string::npos);
 
-        // Msg 9: definition on same-file 'local_boost' (id = 7) -> main.cb, 0-based line 1, char 3
-        const auto def_local_fn = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(def_local_fn.ok);
-        const cb::JsonId def7_res = cb::json_get_field(def_local_fn.arena, def_local_fn.root, "result");
-        CHECK(cb::json_get_string(def_local_fn.arena, cb::json_get_field(def_local_fn.arena, def7_res, "uri")) == "file:///ws/main.cb");
-        const cb::JsonId def7_start = cb::json_get_field(
-            def_local_fn.arena,
-            cb::json_get_field(def_local_fn.arena, def7_res, "range"),
+        // Msg 9: definition on same-file 'localBoost' (id = 7) -> main.cb, 0-based line 1, char 3
+        const auto defLocalFn = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(defLocalFn.ok);
+        const cb::JsonId def7Res = cb::jsonGetField(defLocalFn.arena, defLocalFn.root, "result");
+        CHECK(cb::jsonGetString(defLocalFn.arena, cb::jsonGetField(defLocalFn.arena, def7Res, "uri")) == "file:///ws/main.cb");
+        const cb::JsonId def7Start = cb::jsonGetField(
+            defLocalFn.arena,
+            cb::jsonGetField(defLocalFn.arena, def7Res, "range"),
             "start"
         );
-        CHECK(cb::json_get_int(def_local_fn.arena, cb::json_get_field(def_local_fn.arena, def7_start, "line")) == 1);
-        CHECK(cb::json_get_int(def_local_fn.arena, cb::json_get_field(def_local_fn.arena, def7_start, "character")) == 3);
+        CHECK(cb::jsonGetInt(defLocalFn.arena, cb::jsonGetField(defLocalFn.arena, def7Start, "line")) == 1);
+        CHECK(cb::jsonGetInt(defLocalFn.arena, cb::jsonGetField(defLocalFn.arena, def7Start, "character")) == 3);
 
         // Msg 10: definition on cross-module UFCS 'hero.heal' (id = 8) -> player.cb, 0-based line 5, char 7
-        const auto def_ufcs = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(def_ufcs.ok);
-        const cb::JsonId def8_res = cb::json_get_field(def_ufcs.arena, def_ufcs.root, "result");
-        CHECK(cb::json_get_string(def_ufcs.arena, cb::json_get_field(def_ufcs.arena, def8_res, "uri")) == "file:///ws/player.cb");
-        const cb::JsonId def8_start = cb::json_get_field(
-            def_ufcs.arena,
-            cb::json_get_field(def_ufcs.arena, def8_res, "range"),
+        const auto defUfcs = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(defUfcs.ok);
+        const cb::JsonId def8Res = cb::jsonGetField(defUfcs.arena, defUfcs.root, "result");
+        CHECK(cb::jsonGetString(defUfcs.arena, cb::jsonGetField(defUfcs.arena, def8Res, "uri")) == "file:///ws/player.cb");
+        const cb::JsonId def8Start = cb::jsonGetField(
+            defUfcs.arena,
+            cb::jsonGetField(defUfcs.arena, def8Res, "range"),
             "start"
         );
-        CHECK(cb::json_get_int(def_ufcs.arena, cb::json_get_field(def_ufcs.arena, def8_start, "line")) == 5);
-        CHECK(cb::json_get_int(def_ufcs.arena, cb::json_get_field(def_ufcs.arena, def8_start, "character")) == 7);
+        CHECK(cb::jsonGetInt(defUfcs.arena, cb::jsonGetField(defUfcs.arena, def8Start, "line")) == 5);
+        CHECK(cb::jsonGetInt(defUfcs.arena, cb::jsonGetField(defUfcs.arena, def8Start, "character")) == 7);
 
         // Msg 11: definition on struct field 'hero.health' (id = 9) -> player.cb, 0-based line 3, char 4
-        const auto def_field = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(def_field.ok);
-        const cb::JsonId def9_res = cb::json_get_field(def_field.arena, def_field.root, "result");
-        CHECK(cb::json_get_string(def_field.arena, cb::json_get_field(def_field.arena, def9_res, "uri")) == "file:///ws/player.cb");
-        const cb::JsonId def9_start = cb::json_get_field(
-            def_field.arena,
-            cb::json_get_field(def_field.arena, def9_res, "range"),
+        const auto defField = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(defField.ok);
+        const cb::JsonId def9Res = cb::jsonGetField(defField.arena, defField.root, "result");
+        CHECK(cb::jsonGetString(defField.arena, cb::jsonGetField(defField.arena, def9Res, "uri")) == "file:///ws/player.cb");
+        const cb::JsonId def9Start = cb::jsonGetField(
+            defField.arena,
+            cb::jsonGetField(defField.arena, def9Res, "range"),
             "start"
         );
-        CHECK(cb::json_get_int(def_field.arena, cb::json_get_field(def_field.arena, def9_start, "line")) == 3);
-        CHECK(cb::json_get_int(def_field.arena, cb::json_get_field(def_field.arena, def9_start, "character")) == 4);
+        CHECK(cb::jsonGetInt(defField.arena, cb::jsonGetField(defField.arena, def9Start, "line")) == 3);
+        CHECK(cb::jsonGetInt(defField.arena, cb::jsonGetField(defField.arena, def9Start, "character")) == 4);
 
-        // Msg 12: definition on local const 'max_potion' (id = 10) -> main.cb, 0-based line 5, char 10
-        const auto def_var = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(def_var.ok);
-        const cb::JsonId def10_res = cb::json_get_field(def_var.arena, def_var.root, "result");
-        CHECK(cb::json_get_string(def_var.arena, cb::json_get_field(def_var.arena, def10_res, "uri")) == "file:///ws/main.cb");
-        const cb::JsonId def10_start = cb::json_get_field(
-            def_var.arena,
-            cb::json_get_field(def_var.arena, def10_res, "range"),
+        // Msg 12: definition on local const 'maxPotion' (id = 10) -> main.cb, 0-based line 5, char 10
+        const auto defVar = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(defVar.ok);
+        const cb::JsonId def10Res = cb::jsonGetField(defVar.arena, defVar.root, "result");
+        CHECK(cb::jsonGetString(defVar.arena, cb::jsonGetField(defVar.arena, def10Res, "uri")) == "file:///ws/main.cb");
+        const cb::JsonId def10Start = cb::jsonGetField(
+            defVar.arena,
+            cb::jsonGetField(defVar.arena, def10Res, "range"),
             "start"
         );
-        CHECK(cb::json_get_int(def_var.arena, cb::json_get_field(def_var.arena, def10_start, "line")) == 5);
-        CHECK(cb::json_get_int(def_var.arena, cb::json_get_field(def_var.arena, def10_start, "character")) == 10);
+        CHECK(cb::jsonGetInt(defVar.arena, cb::jsonGetField(defVar.arena, def10Start, "line")) == 5);
+        CHECK(cb::jsonGetInt(defVar.arena, cb::jsonGetField(defVar.arena, def10Start, "character")) == 10);
 
         // Msg 13: publishDiagnostics for broken main.cb after didChange
-        const auto diag_broken = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(diag_broken.ok);
+        const auto diagBroken = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(diagBroken.ok);
 
         // Msg 14: documentSymbol on main.cb while broken (id = 11) -> falls back to last-known-good snapshot!
-        const auto sym_fallback = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(sym_fallback.ok);
-        const cb::JsonId fb_sym_arr = cb::json_get_field(sym_fallback.arena, sym_fallback.root, "result");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sym_fallback.arena.nodes[fb_sym_arr]));
-        CHECK(std::get<cb::JsonArray>(sym_fallback.arena.nodes[fb_sym_arr]).elements.size() == 2);
+        const auto symFallback = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(symFallback.ok);
+        const cb::JsonId fbSymArr = cb::jsonGetField(symFallback.arena, symFallback.root, "result");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(symFallback.arena.nodes[fbSymArr]));
+        CHECK(std::get<cb::JsonArray>(symFallback.arena.nodes[fbSymArr]).elements.size() == 2);
 
         // Msg 15: hover on 'hero' while main.cb has syntax error on next line (id = 12) -> falls back to last-known-good snapshot!
-        const auto hover_fallback = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(hover_fallback.ok);
-        const cb::JsonId h12_contents = cb::json_get_field(
-            hover_fallback.arena,
-            cb::json_get_field(hover_fallback.arena, hover_fallback.root, "result"),
+        const auto hoverFallback = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(hoverFallback.ok);
+        const cb::JsonId h12Contents = cb::jsonGetField(
+            hoverFallback.arena,
+            cb::jsonGetField(hoverFallback.arena, hoverFallback.root, "result"),
             "contents"
         );
-        const auto h12_val = cb::json_get_string(hover_fallback.arena, cb::json_get_field(hover_fallback.arena, h12_contents, "value"));
-        REQUIRE(h12_val.has_value());
-        CHECK(h12_val.value().find("dim hero as Player") != std::string::npos);
+        const auto h12Val = cb::jsonGetString(hoverFallback.arena, cb::jsonGetField(hoverFallback.arena, h12Contents, "value"));
+        REQUIRE(h12Val.has_value());
+        CHECK(h12Val.value().find("dim hero as Player") != std::string::npos);
     }
 }
 
 TEST_CASE("CleanBasic Language Server Phase 3: completion (dot UFCS/fields/modules/err/list, named args, types, scope) & signatureHelp", "[lsp]") {
-    auto has_completion_item = [](
+    auto hasCompletionItem = [](
         const cb::JsonArena& arena,
-        cb::JsonId arr_id,
+        cb::JsonId arrId,
         std::string_view label,
-        int64_t expected_kind = -1,
-        std::string_view detail_substr = ""
+        int64_t expectedKind = -1,
+        std::string_view detailSubstr = ""
     ) -> bool {
-        if (arr_id >= arena.nodes.size() || !std::holds_alternative<cb::JsonArray>(arena.nodes[arr_id])) {
+        if (arrId >= arena.nodes.size() || !std::holds_alternative<cb::JsonArray>(arena.nodes[arrId])) {
             return false;
         }
-        const auto& elems = std::get<cb::JsonArray>(arena.nodes[arr_id]).elements;
-        for (const cb::JsonId item_id : elems) {
-            const auto lbl = cb::json_get_string(arena, cb::json_get_field(arena, item_id, "label"));
+        const auto& elems = std::get<cb::JsonArray>(arena.nodes[arrId]).elements;
+        for (const cb::JsonId itemId : elems) {
+            const auto lbl = cb::jsonGetString(arena, cb::jsonGetField(arena, itemId, "label"));
             if (!lbl.has_value() || lbl.value() != label) {
                 continue;
             }
-            if (expected_kind >= 0) {
-                const auto k = cb::json_get_int(arena, cb::json_get_field(arena, item_id, "kind"));
-                if (!k.has_value() || k.value() != expected_kind) {
+            if (expectedKind >= 0) {
+                const auto k = cb::jsonGetInt(arena, cb::jsonGetField(arena, itemId, "kind"));
+                if (!k.has_value() || k.value() != expectedKind) {
                     continue;
                 }
             }
-            if (!detail_substr.empty()) {
-                const auto det = cb::json_get_string(arena, cb::json_get_field(arena, item_id, "detail"));
-                if (!det.has_value() || det.value().find(detail_substr) == std::string::npos) {
+            if (!detailSubstr.empty()) {
+                const auto det = cb::jsonGetString(arena, cb::jsonGetField(arena, itemId, "detail"));
+                if (!det.has_value() || det.value().find(detailSubstr) == std::string::npos) {
                     continue;
                 }
             }
@@ -1850,27 +1850,27 @@ TEST_CASE("CleanBasic Language Server Phase 3: completion (dot UFCS/fields/modul
     };
 
     SECTION("Two-stage dot-scrub recovery on brand-new variable, UFCS & struct fields, module exports, err/list, named args, types, and signatureHelp") {
-        std::stringstream client_to_server;
-        std::stringstream server_to_client;
+        std::stringstream clientToServer;
+        std::stringstream serverToClient;
 
         // 1. initialize (id = 1)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
         );
 
         // 2. didOpen player.cb
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///ws/player.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(pub alias Score = int
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/player.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(pub alias Score = int
 pub type Player
     name as str
     health as int
@@ -1879,19 +1879,19 @@ pub fn heal(byref p as Player, amount as int, bonus as int) as int can error
     p.health = p.health + amount + bonus
     return p.health
 end fn
-fn secret_helper(p as Player) as int
+fn secretHelper(p as Player) as int
     return p.health
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // 3. didOpen main.cb directly with a brand-new variable 'hero' and an incomplete trailing dot 'hero.' on the very next line!
         // Note: main.cb has NO prior cached snapshot when 'hero.' is typed!
         // Line 0: import "player.cb"
-        // Line 1: fn local_buff(byref p as player.Player, shield as int)
+        // Line 1: fn localBuff(byref p as player.Player, shield as int)
         // Line 2:     p.health = p.health + shield
         // Line 3: end fn
         // Line 4: fn main() as int
@@ -1905,16 +1905,16 @@ end fn
         // Line 12: end fn
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///ws/main.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(import "player.cb"
-fn local_buff(byref p as player.Player, shield as int)
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(import "player.cb"
+fn localBuff(byref p as player.Player, shield as int)
     p.health = p.health + shield
 end fn
 fn main() as int
@@ -1927,32 +1927,32 @@ fn main() as int
     return 0
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // Req id=2: textDocument/completion at 'hero.' (line 10, character 9)
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":9}}})"
         );
 
         // 4. didChange main.cb to test module alias completion 'player.' (line 10, char 11)
-        auto send_main_change = [&](int version, std::string_view new_line_10) {
+        auto sendMainChange = [&](int version, std::string_view newLine10) {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///ws/main.cb"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, version));
-            cb::json_object_set(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::json_add_array(arena);
-            const cb::JsonId change_item = cb::json_add_object(arena);
-            std::string full_src = R"(import "player.cb"
-fn local_buff(byref p as player.Player, shield as int)
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, version));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            const cb::JsonId changes = cb::jsonAddArray(arena);
+            const cb::JsonId changeItem = cb::jsonAddObject(arena);
+            std::string fullSrc = R"(import "player.cb"
+fn localBuff(byref p as player.Player, shield as int)
     p.health = p.health + shield
 end fn
 fn main() as int
@@ -1962,291 +1962,291 @@ fn main() as int
     dim nums as list[int] = [1, 2]
     dim hero = player.Player(name="Alice", health=100)
 )";
-            full_src += std::string(new_line_10) + "\n    return 0\nend fn\n";
-            cb::json_object_set(arena, change_item, "text", cb::json_add_string(arena, full_src));
-            cb::json_array_push(arena, changes, change_item);
-            cb::json_object_set(arena, params, "contentChanges", changes);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            fullSrc += std::string(newLine10) + "\n    return 0\nend fn\n";
+            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, fullSrc));
+            cb::jsonArrayPush(arena, changes, changeItem);
+            cb::jsonObjectSet(arena, params, "contentChanges", changes);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         };
 
         // Change v2: '    player.' (line 10, char 11) -> Req id=3
-        send_main_change(2, "    player.");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(2, "    player.");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":11}}})"
         );
 
         // Change v3: '    e.' (line 10, char 6) -> Req id=4 (built-in err fields .msg and .code)
-        send_main_change(3, "    e.");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(3, "    e.");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":4,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":6}}})"
         );
 
         // Change v4: '    nums.' (line 10, char 9) -> Req id=5 (built-in list[int] methods .push and .append)
-        send_main_change(4, "    nums.");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(4, "    nums.");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":9}}})"
         );
 
         // Change v5: '    dim p2 = player.Player(' (line 10, char 27) -> Req id=6 (named field= completion) & Req id=7 (signatureHelp on struct constructor)
-        send_main_change(5, "    dim p2 = player.Player(");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(5, "    dim p2 = player.Player(");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":6,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":27}}})"
         );
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":7,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":27}}})"
         );
 
         // Change v6: '    hero.heal(25, ' (line 10, char 18) -> Req id=8 (UFCS signatureHelp at 2nd visible parameter: activeParameter == 1)
-        send_main_change(6, "    hero.heal(25, ");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(6, "    hero.heal(25, ");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":8,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":18}}})"
         );
 
         // Change v7: '    dim x as ' (line 10, char 13) -> Req id=9 (type annotation completion after 'as ')
-        send_main_change(7, "    dim x as ");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(7, "    dim x as ");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":9,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":13}}})"
         );
 
         // Change v8: '    he' (line 10, char 6) -> Req id=10 (general scope completion filtered by prefix 'he' -> finds 'hero')
-        send_main_change(8, "    he");
-        cb::write_jsonrpc_message(
-            client_to_server,
+        sendMainChange(8, "    he");
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":10,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":6}}})"
         );
 
         // shutdown & exit
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","method":"exit"})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        const int exit_code = cb::run_lsp_server(client_to_server, server_to_client);
-        CHECK(exit_code == 0);
+        const int exitCode = cb::runLspServer(clientToServer, serverToClient);
+        CHECK(exitCode == 0);
 
         // Helper to read next response with a specific id (skipping publishDiagnostics notifications)
-        auto read_response_for_id = [&](int64_t target_id) -> cb::JsonParseResult {
+        auto readResponseForId = [&](int64_t targetId) -> cb::JsonParseResult {
             while (true) {
-                const auto raw_opt = cb::read_jsonrpc_message(server_to_client);
-                REQUIRE(raw_opt.has_value());
-                auto parsed = cb::parse_json(raw_opt.value());
+                const auto rawOpt = cb::readJsonrpcMessage(serverToClient);
+                REQUIRE(rawOpt.has_value());
+                auto parsed = cb::parseJson(rawOpt.value());
                 REQUIRE(parsed.ok);
-                const auto id_opt = cb::json_get_int(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "id"));
-                if (id_opt.has_value() && id_opt.value() == target_id) {
+                const auto idOpt = cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "id"));
+                if (idOpt.has_value() && idOpt.value() == targetId) {
                     return parsed;
                 }
             }
         };
 
         // 1. Verify initialize capabilities (id = 1)
-        const auto init_resp = read_response_for_id(1);
-        const cb::JsonId init_res = cb::json_get_field(init_resp.arena, init_resp.root, "result");
-        const cb::JsonId caps = cb::json_get_field(init_resp.arena, init_res, "capabilities");
-        const cb::JsonId comp_prov = cb::json_get_field(init_resp.arena, caps, "completionProvider");
-        REQUIRE(comp_prov != cb::JSON_INVALID_ID);
-        const cb::JsonId sig_prov = cb::json_get_field(init_resp.arena, caps, "signatureHelpProvider");
-        REQUIRE(sig_prov != cb::JSON_INVALID_ID);
-        const cb::JsonId srv_info = cb::json_get_field(init_resp.arena, init_res, "serverInfo");
-        CHECK(cb::json_get_string(init_resp.arena, cb::json_get_field(init_resp.arena, srv_info, "version")) == "0.3.0");
+        const auto initResp = readResponseForId(1);
+        const cb::JsonId initRes = cb::jsonGetField(initResp.arena, initResp.root, "result");
+        const cb::JsonId caps = cb::jsonGetField(initResp.arena, initRes, "capabilities");
+        const cb::JsonId compProv = cb::jsonGetField(initResp.arena, caps, "completionProvider");
+        REQUIRE(compProv != cb::JSON_INVALID_ID);
+        const cb::JsonId sigProv = cb::jsonGetField(initResp.arena, caps, "signatureHelpProvider");
+        REQUIRE(sigProv != cb::JSON_INVALID_ID);
+        const cb::JsonId srvInfo = cb::jsonGetField(initResp.arena, initRes, "serverInfo");
+        CHECK(cb::jsonGetString(initResp.arena, cb::jsonGetField(initResp.arena, srvInfo, "version")) == "0.3.0");
 
         // 2. Verify dot-completion on brand-new variable 'hero.' (id = 2)
-        // Must include struct fields ('name', 'health'), cross-module UFCS ('heal'), and same-module UFCS ('local_buff'),
-        // while excluding private cross-module 'secret_helper'.
-        const auto comp_hero = read_response_for_id(2);
-        const cb::JsonId hero_items = cb::json_get_field(comp_hero.arena, comp_hero.root, "result");
-        CHECK(has_completion_item(comp_hero.arena, hero_items, "name", 5, "as str"));
-        CHECK(has_completion_item(comp_hero.arena, hero_items, "health", 5, "as int"));
-        CHECK(has_completion_item(comp_hero.arena, hero_items, "heal", 2, "ufcs fn heal(amount as int, bonus as int) as int can error"));
-        CHECK(has_completion_item(comp_hero.arena, hero_items, "local_buff", 2, "ufcs fn local_buff(shield as int)"));
-        CHECK_FALSE(has_completion_item(comp_hero.arena, hero_items, "secret_helper"));
+        // Must include struct fields ('name', 'health'), cross-module UFCS ('heal'), and same-module UFCS ('localBuff'),
+        // while excluding private cross-module 'secretHelper'.
+        const auto compHero = readResponseForId(2);
+        const cb::JsonId heroItems = cb::jsonGetField(compHero.arena, compHero.root, "result");
+        CHECK(hasCompletionItem(compHero.arena, heroItems, "name", 5, "as str"));
+        CHECK(hasCompletionItem(compHero.arena, heroItems, "health", 5, "as int"));
+        CHECK(hasCompletionItem(compHero.arena, heroItems, "heal", 2, "ufcs fn heal(amount as int, bonus as int) as int can error"));
+        CHECK(hasCompletionItem(compHero.arena, heroItems, "localBuff", 2, "ufcs fn localBuff(shield as int)"));
+        CHECK_FALSE(hasCompletionItem(compHero.arena, heroItems, "secretHelper"));
 
         // 3. Verify module alias dot-completion 'player.' (id = 3)
-        const auto comp_mod = read_response_for_id(3);
-        const cb::JsonId mod_items = cb::json_get_field(comp_mod.arena, comp_mod.root, "result");
-        CHECK(has_completion_item(comp_mod.arena, mod_items, "Player", 22, "type Player"));
-        CHECK(has_completion_item(comp_mod.arena, mod_items, "Score", 25, "alias Score = int"));
-        CHECK(has_completion_item(comp_mod.arena, mod_items, "heal", 3));
-        CHECK_FALSE(has_completion_item(comp_mod.arena, mod_items, "secret_helper"));
+        const auto compMod = readResponseForId(3);
+        const cb::JsonId modItems = cb::jsonGetField(compMod.arena, compMod.root, "result");
+        CHECK(hasCompletionItem(compMod.arena, modItems, "Player", 22, "type Player"));
+        CHECK(hasCompletionItem(compMod.arena, modItems, "Score", 25, "alias Score = int"));
+        CHECK(hasCompletionItem(compMod.arena, modItems, "heal", 3));
+        CHECK_FALSE(hasCompletionItem(compMod.arena, modItems, "secretHelper"));
 
         // 4. Verify built-in err dot-completion 'e.' (id = 4)
-        const auto comp_err = read_response_for_id(4);
-        const cb::JsonId err_items = cb::json_get_field(comp_err.arena, comp_err.root, "result");
-        CHECK(has_completion_item(comp_err.arena, err_items, "msg", 5, "as str"));
-        CHECK(has_completion_item(comp_err.arena, err_items, "code", 5, "as int"));
+        const auto compErr = readResponseForId(4);
+        const cb::JsonId errItems = cb::jsonGetField(compErr.arena, compErr.root, "result");
+        CHECK(hasCompletionItem(compErr.arena, errItems, "msg", 5, "as str"));
+        CHECK(hasCompletionItem(compErr.arena, errItems, "code", 5, "as int"));
 
         // 5. Verify built-in list[int] dot-completion 'nums.' (id = 5)
-        const auto comp_list = read_response_for_id(5);
-        const cb::JsonId list_items = cb::json_get_field(comp_list.arena, comp_list.root, "result");
-        CHECK(has_completion_item(comp_list.arena, list_items, "push", 2, "fn(item as int)"));
-        CHECK(has_completion_item(comp_list.arena, list_items, "append", 2, "fn(item as int)"));
+        const auto compList = readResponseForId(5);
+        const cb::JsonId listItems = cb::jsonGetField(compList.arena, compList.root, "result");
+        CHECK(hasCompletionItem(compList.arena, listItems, "push", 2, "fn(item as int)"));
+        CHECK(hasCompletionItem(compList.arena, listItems, "append", 2, "fn(item as int)"));
 
         // 6. Verify named field= completion inside 'player.Player(' (id = 6)
-        const auto comp_named = read_response_for_id(6);
-        const cb::JsonId named_items = cb::json_get_field(comp_named.arena, comp_named.root, "result");
-        CHECK(has_completion_item(comp_named.arena, named_items, "name=", 5, "as str"));
-        CHECK(has_completion_item(comp_named.arena, named_items, "health=", 5, "as int"));
+        const auto compNamed = readResponseForId(6);
+        const cb::JsonId namedItems = cb::jsonGetField(compNamed.arena, compNamed.root, "result");
+        CHECK(hasCompletionItem(compNamed.arena, namedItems, "name=", 5, "as str"));
+        CHECK(hasCompletionItem(compNamed.arena, namedItems, "health=", 5, "as int"));
 
         // 7. Verify signatureHelp inside 'player.Player(' (id = 7)
-        const auto sig_ctor = read_response_for_id(7);
-        const cb::JsonId sig_ctor_res = cb::json_get_field(sig_ctor.arena, sig_ctor.root, "result");
-        CHECK(cb::json_get_int(sig_ctor.arena, cb::json_get_field(sig_ctor.arena, sig_ctor_res, "activeParameter")) == 0);
-        const cb::JsonId ctor_sigs = cb::json_get_field(sig_ctor.arena, sig_ctor_res, "signatures");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sig_ctor.arena.nodes[ctor_sigs]));
-        const cb::JsonId ctor_sig0 = std::get<cb::JsonArray>(sig_ctor.arena.nodes[ctor_sigs]).elements[0];
-        CHECK(cb::json_get_string(sig_ctor.arena, cb::json_get_field(sig_ctor.arena, ctor_sig0, "label")) ==
+        const auto sigCtor = readResponseForId(7);
+        const cb::JsonId sigCtorRes = cb::jsonGetField(sigCtor.arena, sigCtor.root, "result");
+        CHECK(cb::jsonGetInt(sigCtor.arena, cb::jsonGetField(sigCtor.arena, sigCtorRes, "activeParameter")) == 0);
+        const cb::JsonId ctorSigs = cb::jsonGetField(sigCtor.arena, sigCtorRes, "signatures");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(sigCtor.arena.nodes[ctorSigs]));
+        const cb::JsonId ctorSig0 = std::get<cb::JsonArray>(sigCtor.arena.nodes[ctorSigs]).elements[0];
+        CHECK(cb::jsonGetString(sigCtor.arena, cb::jsonGetField(sigCtor.arena, ctorSig0, "label")) ==
               "Player(name as str, health as int) as Player");
 
         // 8. Verify UFCS signatureHelp inside 'hero.heal(25, ' (id = 8)
         // Receiver 'byref p as Player' is omitted from visible UFCS parameters, and activeParameter is 1 ('bonus as int')
-        const auto sig_ufcs = read_response_for_id(8);
-        const cb::JsonId sig_ufcs_res = cb::json_get_field(sig_ufcs.arena, sig_ufcs.root, "result");
-        CHECK(cb::json_get_int(sig_ufcs.arena, cb::json_get_field(sig_ufcs.arena, sig_ufcs_res, "activeParameter")) == 1);
-        const cb::JsonId ufcs_sigs = cb::json_get_field(sig_ufcs.arena, sig_ufcs_res, "signatures");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sig_ufcs.arena.nodes[ufcs_sigs]));
-        const cb::JsonId ufcs_sig0 = std::get<cb::JsonArray>(sig_ufcs.arena.nodes[ufcs_sigs]).elements[0];
-        CHECK(cb::json_get_string(sig_ufcs.arena, cb::json_get_field(sig_ufcs.arena, ufcs_sig0, "label")) ==
+        const auto sigUfcs = readResponseForId(8);
+        const cb::JsonId sigUfcsRes = cb::jsonGetField(sigUfcs.arena, sigUfcs.root, "result");
+        CHECK(cb::jsonGetInt(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, sigUfcsRes, "activeParameter")) == 1);
+        const cb::JsonId ufcsSigs = cb::jsonGetField(sigUfcs.arena, sigUfcsRes, "signatures");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(sigUfcs.arena.nodes[ufcsSigs]));
+        const cb::JsonId ufcsSig0 = std::get<cb::JsonArray>(sigUfcs.arena.nodes[ufcsSigs]).elements[0];
+        CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsSig0, "label")) ==
               "fn heal(amount as int, bonus as int) as int can error");
-        const cb::JsonId ufcs_params = cb::json_get_field(sig_ufcs.arena, ufcs_sig0, "parameters");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sig_ufcs.arena.nodes[ufcs_params]));
-        const auto& ufcs_param_elems = std::get<cb::JsonArray>(sig_ufcs.arena.nodes[ufcs_params]).elements;
-        REQUIRE(ufcs_param_elems.size() == 2);
-        CHECK(cb::json_get_string(sig_ufcs.arena, cb::json_get_field(sig_ufcs.arena, ufcs_param_elems[0], "label")) == "amount as int");
-        CHECK(cb::json_get_string(sig_ufcs.arena, cb::json_get_field(sig_ufcs.arena, ufcs_param_elems[1], "label")) == "bonus as int");
+        const cb::JsonId ufcsParams = cb::jsonGetField(sigUfcs.arena, ufcsSig0, "parameters");
+        REQUIRE(std::holds_alternative<cb::JsonArray>(sigUfcs.arena.nodes[ufcsParams]));
+        const auto& ufcsParamElems = std::get<cb::JsonArray>(sigUfcs.arena.nodes[ufcsParams]).elements;
+        REQUIRE(ufcsParamElems.size() == 2);
+        CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[0], "label")) == "amount as int");
+        CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[1], "label")) == "bonus as int");
 
         // 9. Verify type annotation completion after 'dim x as ' (id = 9)
-        const auto comp_types = read_response_for_id(9);
-        const cb::JsonId type_items = cb::json_get_field(comp_types.arena, comp_types.root, "result");
-        CHECK(has_completion_item(comp_types.arena, type_items, "int", 14));
-        CHECK(has_completion_item(comp_types.arena, type_items, "str", 14));
-        CHECK(has_completion_item(comp_types.arena, type_items, "list", 14));
-        CHECK(has_completion_item(comp_types.arena, type_items, "player", 9));
+        const auto compTypes = readResponseForId(9);
+        const cb::JsonId typeItems = cb::jsonGetField(compTypes.arena, compTypes.root, "result");
+        CHECK(hasCompletionItem(compTypes.arena, typeItems, "int", 14));
+        CHECK(hasCompletionItem(compTypes.arena, typeItems, "str", 14));
+        CHECK(hasCompletionItem(compTypes.arena, typeItems, "list", 14));
+        CHECK(hasCompletionItem(compTypes.arena, typeItems, "player", 9));
 
         // 10. Verify general scope completion with prefix 'he' (id = 10)
-        const auto comp_scope = read_response_for_id(10);
-        const cb::JsonId scope_items = cb::json_get_field(comp_scope.arena, comp_scope.root, "result");
-        CHECK(has_completion_item(comp_scope.arena, scope_items, "hero", 6, "as Player"));
+        const auto compScope = readResponseForId(10);
+        const cb::JsonId scopeItems = cb::jsonGetField(compScope.arena, compScope.root, "result");
+        CHECK(hasCompletionItem(compScope.arena, scopeItems, "hero", 6, "as Player"));
     }
 }
 
 TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are valid", "[vscode][lsp]") {
     SECTION("editors/vscode/package.json manifest and contributes schema") {
-        const std::string raw = cb::test_e2e::read_file_text("editors/vscode/package.json");
+        const std::string raw = cb::testE2E::readFileText("editors/vscode/package.json");
         REQUIRE(!raw.empty());
-        const cb::JsonParseResult parsed = cb::parse_json(raw);
+        const cb::JsonParseResult parsed = cb::parseJson(raw);
         REQUIRE(parsed.ok);
-        CHECK(cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "name")) == "cleanbasic");
-        CHECK(cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, parsed.root, "main")) == "./extension.js");
+        CHECK(cb::jsonGetString(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "name")) == "cleanbasic");
+        CHECK(cb::jsonGetString(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "main")) == "./extension.js");
 
-        const cb::JsonId contributes = cb::json_get_field(parsed.arena, parsed.root, "contributes");
+        const cb::JsonId contributes = cb::jsonGetField(parsed.arena, parsed.root, "contributes");
         REQUIRE(contributes != cb::INVALID_ID);
 
-        const cb::JsonId langs = cb::json_get_field(parsed.arena, contributes, "languages");
+        const cb::JsonId langs = cb::jsonGetField(parsed.arena, contributes, "languages");
         REQUIRE(std::holds_alternative<cb::JsonArray>(parsed.arena.nodes[langs]));
         const cb::JsonId lang0 = std::get<cb::JsonArray>(parsed.arena.nodes[langs]).elements[0];
-        CHECK(cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, lang0, "id")) == "cleanbasic");
+        CHECK(cb::jsonGetString(parsed.arena, cb::jsonGetField(parsed.arena, lang0, "id")) == "cleanbasic");
 
-        const cb::JsonId grammars = cb::json_get_field(parsed.arena, contributes, "grammars");
+        const cb::JsonId grammars = cb::jsonGetField(parsed.arena, contributes, "grammars");
         REQUIRE(std::holds_alternative<cb::JsonArray>(parsed.arena.nodes[grammars]));
         const cb::JsonId gram0 = std::get<cb::JsonArray>(parsed.arena.nodes[grammars]).elements[0];
-        CHECK(cb::json_get_string(parsed.arena, cb::json_get_field(parsed.arena, gram0, "scopeName")) == "source.cleanbasic");
+        CHECK(cb::jsonGetString(parsed.arena, cb::jsonGetField(parsed.arena, gram0, "scopeName")) == "source.cleanbasic");
 
-        const cb::JsonId config = cb::json_get_field(parsed.arena, contributes, "configuration");
-        const cb::JsonId props = cb::json_get_field(parsed.arena, config, "properties");
-        CHECK(cb::json_get_field(parsed.arena, props, "cleanbasic.executablePath") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(parsed.arena, props, "cleanbasic.trace.server") != cb::INVALID_ID);
+        const cb::JsonId config = cb::jsonGetField(parsed.arena, contributes, "configuration");
+        const cb::JsonId props = cb::jsonGetField(parsed.arena, config, "properties");
+        CHECK(cb::jsonGetField(parsed.arena, props, "cleanbasic.executablePath") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(parsed.arena, props, "cleanbasic.trace.server") != cb::INVALID_ID);
     }
 
     SECTION("editors/vscode/language-configuration.json, TextMate grammar, snippets, and .vscode/launch.json") {
-        const cb::JsonParseResult lang_cfg = cb::parse_json(cb::test_e2e::read_file_text("editors/vscode/language-configuration.json"));
-        REQUIRE(lang_cfg.ok);
-        const cb::JsonId comments = cb::json_get_field(lang_cfg.arena, lang_cfg.root, "comments");
-        CHECK(cb::json_get_string(lang_cfg.arena, cb::json_get_field(lang_cfg.arena, comments, "lineComment")) == "'");
-        CHECK(cb::json_get_field(lang_cfg.arena, lang_cfg.root, "folding") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(lang_cfg.arena, lang_cfg.root, "indentationRules") != cb::INVALID_ID);
+        const cb::JsonParseResult langCfg = cb::parseJson(cb::testE2E::readFileText("editors/vscode/language-configuration.json"));
+        REQUIRE(langCfg.ok);
+        const cb::JsonId comments = cb::jsonGetField(langCfg.arena, langCfg.root, "comments");
+        CHECK(cb::jsonGetString(langCfg.arena, cb::jsonGetField(langCfg.arena, comments, "lineComment")) == "'");
+        CHECK(cb::jsonGetField(langCfg.arena, langCfg.root, "folding") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(langCfg.arena, langCfg.root, "indentationRules") != cb::INVALID_ID);
 
-        const cb::JsonParseResult tm_gram = cb::parse_json(cb::test_e2e::read_file_text("editors/vscode/syntaxes/cleanbasic.tmLanguage.json"));
-        REQUIRE(tm_gram.ok);
-        CHECK(cb::json_get_string(tm_gram.arena, cb::json_get_field(tm_gram.arena, tm_gram.root, "scopeName")) == "source.cleanbasic");
-        const cb::JsonId repo = cb::json_get_field(tm_gram.arena, tm_gram.root, "repository");
-        CHECK(cb::json_get_field(tm_gram.arena, repo, "comments") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(tm_gram.arena, repo, "strings") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(tm_gram.arena, repo, "keywords") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(tm_gram.arena, repo, "types") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(tm_gram.arena, repo, "builtins") != cb::INVALID_ID);
+        const cb::JsonParseResult tmGram = cb::parseJson(cb::testE2E::readFileText("editors/vscode/syntaxes/cleanbasic.tmLanguage.json"));
+        REQUIRE(tmGram.ok);
+        CHECK(cb::jsonGetString(tmGram.arena, cb::jsonGetField(tmGram.arena, tmGram.root, "scopeName")) == "source.cleanbasic");
+        const cb::JsonId repo = cb::jsonGetField(tmGram.arena, tmGram.root, "repository");
+        CHECK(cb::jsonGetField(tmGram.arena, repo, "comments") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(tmGram.arena, repo, "strings") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(tmGram.arena, repo, "keywords") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(tmGram.arena, repo, "types") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(tmGram.arena, repo, "builtins") != cb::INVALID_ID);
 
-        const cb::JsonParseResult snippets = cb::parse_json(cb::test_e2e::read_file_text("editors/vscode/snippets/cleanbasic.code-snippets"));
+        const cb::JsonParseResult snippets = cb::parseJson(cb::testE2E::readFileText("editors/vscode/snippets/cleanbasic.code-snippets"));
         REQUIRE(snippets.ok);
-        CHECK(cb::json_get_field(snippets.arena, snippets.root, "Function Declaration") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(snippets.arena, snippets.root, "Select Case Block") != cb::INVALID_ID);
-        CHECK(cb::json_get_field(snippets.arena, snippets.root, "On Error Handler") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(snippets.arena, snippets.root, "Function Declaration") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(snippets.arena, snippets.root, "Select Case Block") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(snippets.arena, snippets.root, "On Error Handler") != cb::INVALID_ID);
 
-        const cb::JsonParseResult launch = cb::parse_json(cb::test_e2e::read_file_text(".vscode/launch.json"));
+        const cb::JsonParseResult launch = cb::parseJson(cb::testE2E::readFileText(".vscode/launch.json"));
         REQUIRE(launch.ok);
-        const cb::JsonId configs = cb::json_get_field(launch.arena, launch.root, "configurations");
+        const cb::JsonId configs = cb::jsonGetField(launch.arena, launch.root, "configurations");
         REQUIRE(std::holds_alternative<cb::JsonArray>(launch.arena.nodes[configs]));
         const cb::JsonId cfg0 = std::get<cb::JsonArray>(launch.arena.nodes[configs]).elements[0];
-        CHECK(cb::json_get_string(launch.arena, cb::json_get_field(launch.arena, cfg0, "type")) == "extensionHost");
+        CHECK(cb::jsonGetString(launch.arena, cb::jsonGetField(launch.arena, cfg0, "type")) == "extensionHost");
 
-        const std::string ext_js = cb::test_e2e::read_file_text("editors/vscode/extension.js");
-        CHECK(ext_js.find("LanguageClient") != std::string::npos);
-        CHECK(ext_js.find("cleanbasic.restartServer") != std::string::npos);
-        CHECK(ext_js.find("path.resolve(__dirname, '..', '..', 'build', exeName)") != std::string::npos);
-        CHECK(ext_js.find("TransportKind.stdio") == std::string::npos);
+        const std::string extJs = cb::testE2E::readFileText("editors/vscode/extension.js");
+        CHECK(extJs.find("LanguageClient") != std::string::npos);
+        CHECK(extJs.find("cleanbasic.restartServer") != std::string::npos);
+        CHECK(extJs.find("path.resolve(__dirname, '..', '..', 'build', exeName)") != std::string::npos);
+        CHECK(extJs.find("TransportKind.stdio") == std::string::npos);
     }
 
     SECTION("cleanbasic lsp --stdio subprocess invocation exits cleanly with code 0") {
-        std::string cb_bin_path = "./build/cleanbasic";
-        std::ifstream cb_bin_root("build/cleanbasic");
-        if (!cb_bin_root.good()) {
-            std::ifstream cb_bin_local("./cleanbasic");
-            if (cb_bin_local.good()) {
-                cb_bin_path = "./cleanbasic";
+        std::string cbBinPath = "./build/cleanbasic";
+        std::ifstream cbBinRoot("build/cleanbasic");
+        if (!cbBinRoot.good()) {
+            std::ifstream cbBinLocal("./cleanbasic");
+            if (cbBinLocal.good()) {
+                cbBinPath = "./cleanbasic";
             }
         }
 
-        std::ostringstream lsp_input_ss;
-        cb::write_jsonrpc_message(
-            lsp_input_ss,
+        std::ostringstream lspInputSs;
+        cb::writeJsonrpcMessage(
+            lspInputSs,
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"
         );
-        cb::write_jsonrpc_message(
-            lsp_input_ss,
+        cb::writeJsonrpcMessage(
+            lspInputSs,
             R"({"jsonrpc":"2.0","id":2,"method":"shutdown"})"
         );
-        cb::write_jsonrpc_message(
-            lsp_input_ss,
+        cb::writeJsonrpcMessage(
+            lspInputSs,
             R"({"jsonrpc":"2.0","method":"exit"})"
         );
 
-        const std::string tmp_in = "/tmp/cb_lsp_stdio_in.txt";
-        const std::string tmp_out = "/tmp/cb_lsp_stdio_out.txt";
+        const std::string tmpIn = "/tmp/cbLspStdioIn.txt";
+        const std::string tmpOut = "/tmp/cbLspStdioOut.txt";
         {
-            std::ofstream out_f(tmp_in, std::ios::binary);
-            out_f << lsp_input_ss.str();
+            std::ofstream outF(tmpIn, std::ios::binary);
+            outF << lspInputSs.str();
         }
 
-        const std::string cmd = cb_bin_path + " lsp --stdio < " + tmp_in + " > " + tmp_out + " 2>&1";
+        const std::string cmd = cbBinPath + " lsp --stdio < " + tmpIn + " > " + tmpOut + " 2>&1";
         const int rc = std::system(cmd.c_str());
         CHECK(rc == 0);
 
-        const std::string out_text = cb::test_e2e::read_file_text(tmp_out);
-        CHECK(out_text.find("cleanbasic-lsp") != std::string::npos);
+        const std::string outText = cb::testE2E::readFileText(tmpOut);
+        CHECK(outText.find("cleanbasic-lsp") != std::string::npos);
 
         std::error_code ec;
-        std::filesystem::remove(tmp_in, ec);
-        std::filesystem::remove(tmp_out, ec);
+        std::filesystem::remove(tmpIn, ec);
+        std::filesystem::remove(tmpOut, ec);
     }
 }
 
 TEST_CASE("Standard library std/json module: vendor/ + stdlib/ resolution, UFCS queries, error handling, and E2E compilation", "[stdlib][json][e2e]") {
     SECTION("E2E fixture tests/cases/stdlib_json.cb compiles and runs natively") {
-        cb::test_e2e::run_e2e_fixture("stdlib_json", "tests/cases/stdlib_json.cb");
+        cb::testE2E::runE2EFixture("stdlibJson", "tests/cases/stdlib_json.cb");
     }
 
     SECTION("import 'std/json' and 'std/json.cb' resolve module ID 'std/json', default alias 'json', and module-relative json_bridge.hpp") {
@@ -2258,176 +2258,176 @@ fn main() as int
     end error
     dim doc = json.parse("3.5")
     dim root = doc.root()
-    dim pi = doc.get_float(root)
+    dim pi = doc.getFloat(root)
     if pi > 3.0
         return 0
     end if
     return 1
 end fn
 )";
-        const auto res = cb::transpile_source(src, "app_with_std_json.cb");
+        const auto res = cb::transpileSource(src, "appWithStdJson.cb");
         REQUIRE(res.ok);
         REQUIRE(!res.symbols.headers.empty());
         CHECK(res.symbols.headers[0].find("stdlib/json/json_bridge.hpp") != std::string::npos);
-        CHECK(res.cpp_code.find("cb_std_json__parse(") != std::string::npos);
-        CHECK(res.cpp_code.find("cb_std_json__get_float(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_json__parse(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_json__getFloat(") != std::string::npos);
     }
 
     SECTION("LSP go-to-definition and hover resolve std/json symbols into stdlib/json/json.cb") {
-        std::stringstream client_to_server;
-        std::stringstream server_to_client;
+        std::stringstream clientToServer;
+        std::stringstream serverToClient;
 
-        cb::write_jsonrpc_message(
-            client_to_server,
+        cb::writeJsonrpcMessage(
+            clientToServer,
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"
         );
 
         {
             cb::JsonArena arena;
-            const cb::JsonId msg = cb::json_add_object(arena);
-            cb::json_object_set(arena, msg, "jsonrpc", cb::json_add_string(arena, "2.0"));
-            cb::json_object_set(arena, msg, "method", cb::json_add_string(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::json_add_object(arena);
-            const cb::JsonId td = cb::json_add_object(arena);
-            cb::json_object_set(arena, td, "uri", cb::json_add_string(arena, "file:///virtual_ws/std_json_lsp.cb"));
-            cb::json_object_set(arena, td, "languageId", cb::json_add_string(arena, "cleanbasic"));
-            cb::json_object_set(arena, td, "version", cb::json_add_int(arena, 1));
-            cb::json_object_set(arena, td, "text", cb::json_add_string(arena, R"(import "std/json"
+            const cb::JsonId msg = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+            const cb::JsonId params = cb::jsonAddObject(arena);
+            const cb::JsonId td = cb::jsonAddObject(arena);
+            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///virtualWs/stdJsonLsp.cb"));
+            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(import "std/json"
 fn run() can error
     dim doc = json.parse("{}")
 end fn
 )"));
-            cb::json_object_set(arena, params, "textDocument", td);
-            cb::json_object_set(arena, msg, "params", params);
-            cb::write_jsonrpc_message(client_to_server, cb::serialize_json(arena, msg));
+            cb::jsonObjectSet(arena, params, "textDocument", td);
+            cb::jsonObjectSet(arena, msg, "params", params);
+            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
         // Request definition on 'parse' in 'json.parse("{}")' (line 2, character 20)
-        cb::write_jsonrpc_message(
-            client_to_server,
-            R"({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///virtual_ws/std_json_lsp.cb"},"position":{"line":2,"character":20}}})"
+        cb::writeJsonrpcMessage(
+            clientToServer,
+            R"({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///virtualWs/stdJsonLsp.cb"},"position":{"line":2,"character":20}}})"
         );
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","id":3,"method":"shutdown"})");
-        cb::write_jsonrpc_message(client_to_server, R"({"jsonrpc":"2.0","method":"exit"})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":3,"method":"shutdown"})");
+        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        const int rc = cb::run_lsp_server(client_to_server, server_to_client);
+        const int rc = cb::runLspServer(clientToServer, serverToClient);
         CHECK(rc == 0);
 
         // Read initialize response & didOpen diagnostics
-        (void)cb::read_jsonrpc_message(server_to_client);
-        const auto diag_msg = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(diag_msg.ok);
-        const cb::JsonId diags = cb::json_get_field(diag_msg.arena, cb::json_get_field(diag_msg.arena, diag_msg.root, "params"), "diagnostics");
-        CHECK(std::get<cb::JsonArray>(diag_msg.arena.nodes[diags]).elements.empty());
+        (void)cb::readJsonrpcMessage(serverToClient);
+        const auto diagMsg = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(diagMsg.ok);
+        const cb::JsonId diags = cb::jsonGetField(diagMsg.arena, cb::jsonGetField(diagMsg.arena, diagMsg.root, "params"), "diagnostics");
+        CHECK(std::get<cb::JsonArray>(diagMsg.arena.nodes[diags]).elements.empty());
 
         // Read definition response -> points to stdlib/json/json.cb
-        const auto def_msg = cb::parse_json(cb::read_jsonrpc_message(server_to_client).value());
-        REQUIRE(def_msg.ok);
-        const cb::JsonId def_res = cb::json_get_field(def_msg.arena, def_msg.root, "result");
-        const auto def_uri = cb::json_get_string(def_msg.arena, cb::json_get_field(def_msg.arena, def_res, "uri"));
-        REQUIRE(def_uri.has_value());
-        CHECK(def_uri.value().find("stdlib/json/json.cb") != std::string::npos);
+        const auto defMsg = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
+        REQUIRE(defMsg.ok);
+        const cb::JsonId defRes = cb::jsonGetField(defMsg.arena, defMsg.root, "result");
+        const auto defUri = cb::jsonGetString(defMsg.arena, cb::jsonGetField(defMsg.arena, defRes, "uri"));
+        REQUIRE(defUri.has_value());
+        CHECK(defUri.value().find("stdlib/json/json.cb") != std::string::npos);
     }
 }
 
 TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags, and compiler command generation", "[sdk][cross][cli]") {
-    SECTION("resolve_sdk_root_dir locates portable SDK layout via CLEANBASIC_HOME, exe dir, exe parent, and fallback") {
-        const std::string tmp_base = "/tmp/cb_portable_sdk_test";
+    SECTION("resolveSdkRootDir locates portable SDK layout via CLEANBASIC_HOME, exe dir, exe parent, and fallback") {
+        const std::string tmpBase = "/tmp/cbPortableSdkTest";
         std::error_code ec;
-        std::filesystem::remove_all(tmp_base, ec);
+        std::filesystem::remove_all(tmpBase, ec);
 
-        const std::string sdk_root = tmp_base + "/cleanbasic-sdk";
-        const std::string sdk_bin_dir = sdk_root + "/bin";
-        const std::string sdk_multi_cfg_dir = sdk_root + "/build/Release";
-        const std::string env_sdk = tmp_base + "/custom-env-sdk";
+        const std::string sdkRoot = tmpBase + "/cleanbasic-sdk";
+        const std::string sdkBinDir = sdkRoot + "/bin";
+        const std::string sdkMultiCfgDir = sdkRoot + "/build/Release";
+        const std::string envSdk = tmpBase + "/custom-env-sdk";
 
-        std::filesystem::create_directories(sdk_root + "/stdlib/json", ec);
-        std::filesystem::create_directories(sdk_root + "/vendor", ec);
-        std::filesystem::create_directories(sdk_bin_dir, ec);
-        std::filesystem::create_directories(sdk_multi_cfg_dir, ec);
-        std::filesystem::create_directories(env_sdk + "/stdlib", ec);
-        std::filesystem::create_directories(env_sdk + "/vendor", ec);
+        std::filesystem::create_directories(sdkRoot + "/stdlib/json", ec);
+        std::filesystem::create_directories(sdkRoot + "/vendor", ec);
+        std::filesystem::create_directories(sdkBinDir, ec);
+        std::filesystem::create_directories(sdkMultiCfgDir, ec);
+        std::filesystem::create_directories(envSdk + "/stdlib", ec);
+        std::filesystem::create_directories(envSdk + "/vendor", ec);
 
-        CHECK(cb::is_valid_sdk_root(sdk_root));
-        CHECK(cb::is_valid_sdk_root(env_sdk));
-        CHECK_FALSE(cb::is_valid_sdk_root(sdk_bin_dir));
+        CHECK(cb::isValidSdkRoot(sdkRoot));
+        CHECK(cb::isValidSdkRoot(envSdk));
+        CHECK_FALSE(cb::isValidSdkRoot(sdkBinDir));
 
         // 1. Executable directly inside SDK root: <sdk>/cleanbasic
-        CHECK(cb::resolve_sdk_root_dir("", sdk_root + "/cleanbasic", "/nonexistent") == sdk_root);
+        CHECK(cb::resolveSdkRootDir("", sdkRoot + "/cleanbasic", "/nonexistent") == sdkRoot);
 
         // 2. Executable inside <sdk>/bin/cleanbasic
-        CHECK(cb::resolve_sdk_root_dir("", sdk_bin_dir + "/cleanbasic.exe", "/nonexistent") == sdk_root);
+        CHECK(cb::resolveSdkRootDir("", sdkBinDir + "/cleanbasic.exe", "/nonexistent") == sdkRoot);
 
         // 3. Executable inside <sdk>/build/Release/cleanbasic
-        CHECK(cb::resolve_sdk_root_dir("", sdk_multi_cfg_dir + "/cleanbasic", "/nonexistent") == sdk_root);
+        CHECK(cb::resolveSdkRootDir("", sdkMultiCfgDir + "/cleanbasic", "/nonexistent") == sdkRoot);
 
         // 4. CLEANBASIC_HOME takes highest priority
-        CHECK(cb::resolve_sdk_root_dir(env_sdk + "/", sdk_root + "/cleanbasic", sdk_root) == env_sdk);
+        CHECK(cb::resolveSdkRootDir(envSdk + "/", sdkRoot + "/cleanbasic", sdkRoot) == envSdk);
 
         // 5. Fallback to compile-time root when exe path is outside any SDK layout
-        CHECK(cb::resolve_sdk_root_dir("", "/usr/local/bin/cleanbasic", sdk_root) == sdk_root);
+        CHECK(cb::resolveSdkRootDir("", "/usr/local/bin/cleanbasic", sdkRoot) == sdkRoot);
 
-        // 6. Live cleanbasic_root_dir() resolves a valid SDK root containing stdlib/ and vendor/
-        CHECK(cb::is_valid_sdk_root(cb::cleanbasic_root_dir()));
+        // 6. Live cleanbasicRootDir() resolves a valid SDK root containing stdlib/ and vendor/
+        CHECK(cb::isValidSdkRoot(cb::cleanbasicRootDir()));
 
-        std::filesystem::remove_all(tmp_base, ec);
+        std::filesystem::remove_all(tmpBase, ec);
     }
 
-    SECTION("resolve_target_spec maps Linux, Windows, and macOS targets to Zig triples and extensions") {
-        const cb::TargetSpec native_spec = cb::resolve_target_spec("");
-        CHECK(native_spec.ok);
-        CHECK_FALSE(native_spec.is_cross);
-        CHECK(native_spec.canonical_name == "native");
+    SECTION("resolveTargetSpec maps Linux, Windows, and macOS targets to Zig triples and extensions") {
+        const cb::TargetSpec nativeSpec = cb::resolveTargetSpec("");
+        CHECK(nativeSpec.ok);
+        CHECK_FALSE(nativeSpec.isCross);
+        CHECK(nativeSpec.canonicalName == "native");
 
-        const cb::TargetSpec linux_spec = cb::resolve_target_spec("linux");
-        CHECK(linux_spec.ok);
-        CHECK(linux_spec.is_cross);
-        CHECK_FALSE(linux_spec.is_windows);
-        CHECK(linux_spec.zig_triple == "x86_64-linux-musl");
-        CHECK(linux_spec.binary_ext == "");
+        const cb::TargetSpec linuxSpec = cb::resolveTargetSpec("linux");
+        CHECK(linuxSpec.ok);
+        CHECK(linuxSpec.isCross);
+        CHECK_FALSE(linuxSpec.isWindows);
+        CHECK(linuxSpec.zigTriple == "x86_64-linux-musl");
+        CHECK(linuxSpec.binaryExt == "");
 
-        const cb::TargetSpec linux_arm_spec = cb::resolve_target_spec("linux-arm64");
-        CHECK(linux_arm_spec.ok);
-        CHECK(linux_arm_spec.is_cross);
-        CHECK(linux_arm_spec.zig_triple == "aarch64-linux-musl");
+        const cb::TargetSpec linuxArmSpec = cb::resolveTargetSpec("linux-arm64");
+        CHECK(linuxArmSpec.ok);
+        CHECK(linuxArmSpec.isCross);
+        CHECK(linuxArmSpec.zigTriple == "aarch64-linux-musl");
 
-        const cb::TargetSpec win_spec = cb::resolve_target_spec("windows");
-        CHECK(win_spec.ok);
-        CHECK(win_spec.is_cross);
-        CHECK(win_spec.is_windows);
-        CHECK(win_spec.zig_triple == "x86_64-windows-gnu");
-        CHECK(win_spec.binary_ext == ".exe");
-        CHECK(cb::resolve_binary_output_path("dist", "", win_spec) == "dist/app.exe");
-        CHECK(cb::resolve_binary_output_path("dist", "dist/my_game", win_spec) == "dist/my_game.exe");
-        CHECK(cb::resolve_binary_output_path("dist", "dist/my_game.exe", win_spec) == "dist/my_game.exe");
+        const cb::TargetSpec winSpec = cb::resolveTargetSpec("windows");
+        CHECK(winSpec.ok);
+        CHECK(winSpec.isCross);
+        CHECK(winSpec.isWindows);
+        CHECK(winSpec.zigTriple == "x86_64-windows-gnu");
+        CHECK(winSpec.binaryExt == ".exe");
+        CHECK(cb::resolveBinaryOutputPath("dist", "", winSpec) == "dist/app.exe");
+        CHECK(cb::resolveBinaryOutputPath("dist", "dist/myGame", winSpec) == "dist/myGame.exe");
+        CHECK(cb::resolveBinaryOutputPath("dist", "dist/myGame.exe", winSpec) == "dist/myGame.exe");
 
-        const cb::TargetSpec win_arm_spec = cb::resolve_target_spec("windows-arm64");
-        CHECK(win_arm_spec.ok);
-        CHECK(win_arm_spec.is_windows);
-        CHECK(win_arm_spec.zig_triple == "aarch64-windows-gnu");
+        const cb::TargetSpec winArmSpec = cb::resolveTargetSpec("windows-arm64");
+        CHECK(winArmSpec.ok);
+        CHECK(winArmSpec.isWindows);
+        CHECK(winArmSpec.zigTriple == "aarch64-windows-gnu");
 
-        const cb::TargetSpec mac_spec = cb::resolve_target_spec("macos");
-        CHECK(mac_spec.ok);
-        CHECK(mac_spec.is_cross);
-        CHECK_FALSE(mac_spec.is_windows);
-        CHECK(mac_spec.zig_triple == "x86_64-macos");
+        const cb::TargetSpec macSpec = cb::resolveTargetSpec("macos");
+        CHECK(macSpec.ok);
+        CHECK(macSpec.isCross);
+        CHECK_FALSE(macSpec.isWindows);
+        CHECK(macSpec.zigTriple == "x86_64-macos");
 
-        const cb::TargetSpec mac_arm_spec = cb::resolve_target_spec("macos-arm64");
-        CHECK(mac_arm_spec.ok);
-        CHECK(mac_arm_spec.zig_triple == "aarch64-macos");
+        const cb::TargetSpec macArmSpec = cb::resolveTargetSpec("macos-arm64");
+        CHECK(macArmSpec.ok);
+        CHECK(macArmSpec.zigTriple == "aarch64-macos");
 
-        const cb::TargetSpec bad_spec = cb::resolve_target_spec("solaris-sparc");
-        CHECK_FALSE(bad_spec.ok);
-        CHECK(bad_spec.error_message.find("Unsupported target") != std::string::npos);
+        const cb::TargetSpec badSpec = cb::resolveTargetSpec("solaris-sparc");
+        CHECK_FALSE(badSpec.ok);
+        CHECK(badSpec.errorMessage.find("Unsupported target") != std::string::npos);
     }
 
-    SECTION("resolve_compiler_command and build_compile_command generate portable C++17 invocation") {
-        const cb::TargetSpec win_spec = cb::resolve_target_spec("windows");
-        const std::string cross_cc = cb::resolve_compiler_command(win_spec, "");
-        CHECK(cross_cc == "zig c++ -target x86_64-windows-gnu");
+    SECTION("resolveCompilerCommand and buildCompileCommand generate portable C++17 invocation") {
+        const cb::TargetSpec winSpec = cb::resolveTargetSpec("windows");
+        const std::string crossCc = cb::resolveCompilerCommand(winSpec, "");
+        CHECK(crossCc == "zig c++ -target x86_64-windows-gnu");
 
-        const std::string cmd = cb::build_compile_command(
-            cross_cc,
+        const std::string cmd = cb::buildCompileCommand(
+            crossCc,
             "/opt/cleanbasic-sdk",
             "projects/demo",
             "projects/demo/build.cpp",
@@ -2441,50 +2441,50 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         CHECK(cmd.find(R"("projects/demo/build.cpp" -o "projects/demo/app.exe" -lm)") != std::string::npos);
     }
 
-    SECTION("parse_cli_args parses --target, --bin, and --cc and build_file compiles with custom options") {
-        const cb::CliArgs args1 = cb::parse_cli_args({"build", "main.cb", "--target", "windows", "-b", "dist/game", "--cc", "zig c++"});
+    SECTION("parseCliArgs parses --target, --bin, and --cc and buildFile compiles with custom options") {
+        const cb::CliArgs args1 = cb::parseCliArgs({"build", "main.cb", "--target", "windows", "-b", "dist/game", "--cc", "zig c++"});
         CHECK(args1.ok);
-        CHECK(args1.input_file == "main.cb");
-        CHECK(args1.compile_binary);
+        CHECK(args1.inputFile == "main.cb");
+        CHECK(args1.compileBinary);
         CHECK(args1.target == "windows");
-        CHECK(args1.binary_output == "dist/game");
+        CHECK(args1.binaryOutput == "dist/game");
         CHECK(args1.compiler == "zig c++");
 
-        const cb::CliArgs args2 = cb::parse_cli_args({"main.cb", "-b", "out_bin"});
+        const cb::CliArgs args2 = cb::parseCliArgs({"main.cb", "-b", "outBin"});
         CHECK(args2.ok);
-        CHECK(args2.compile_binary);
-        CHECK(args2.binary_output == "out_bin");
+        CHECK(args2.compileBinary);
+        CHECK(args2.binaryOutput == "outBin");
 
-        const cb::CliArgs bad_args = cb::parse_cli_args({"build", "main.cb", "--target"});
-        CHECK_FALSE(bad_args.ok);
+        const cb::CliArgs badArgs = cb::parseCliArgs({"build", "main.cb", "--target"});
+        CHECK_FALSE(badArgs.ok);
 
-        // Verify build_file rejects unknown target with TargetError
-        const cb::BuildFileResult bad_target_res = cb::build_file(
+        // Verify buildFile rejects unknown target with TargetError
+        const cb::BuildFileResult badTargetRes = cb::buildFile(
             "tests/cases/fibonacci.cb",
-            "build/test_artifacts/bad_target.cpp",
+            "build/testArtifacts/badTarget.cpp",
             true,
             "",
             "invalid-os"
         );
-        CHECK_FALSE(bad_target_res.ok);
-        CHECK(bad_target_res.error.kind == "TargetError");
+        CHECK_FALSE(badTargetRes.ok);
+        CHECK(badTargetRes.error.kind == "TargetError");
 
-        // Verify build_file compiles native binary with explicit --bin and --cc g++
-        const std::string out_cpp = "build/test_artifacts/cli_opts_fib.cpp";
-        const std::string out_bin = "build/test_artifacts/cli_opts_fib_bin";
-        const cb::BuildFileResult ok_res = cb::build_file(
+        // Verify buildFile compiles native binary with explicit --bin and --cc g++
+        const std::string outCpp = "build/testArtifacts/cliOptsFib.cpp";
+        const std::string outBin = "build/testArtifacts/cliOptsFibBin";
+        const cb::BuildFileResult okRes = cb::buildFile(
             "tests/cases/fibonacci.cb",
-            out_cpp,
+            outCpp,
             true,
-            out_bin,
+            outBin,
             "native",
             "g++"
         );
-        INFO("Build diagnostic: " << cb::format_diagnostic(ok_res.error));
-        REQUIRE(ok_res.ok);
-        CHECK(ok_res.output_binary_path == out_bin);
-        CHECK(ok_res.compile_command.find(R"(-I")") != std::string::npos);
+        INFO("Build diagnostic: " << cb::formatDiagnostic(okRes.error));
+        REQUIRE(okRes.ok);
+        CHECK(okRes.outputBinaryPath == outBin);
+        CHECK(okRes.compileCommand.find(R"(-I")") != std::string::npos);
         std::error_code ec;
-        CHECK(std::filesystem::exists(out_bin, ec));
+        CHECK(std::filesystem::exists(outBin, ec));
     }
 }

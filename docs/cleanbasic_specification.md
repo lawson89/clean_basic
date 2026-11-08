@@ -4,12 +4,12 @@ CleanBasic is a statically typed, procedural systems programming language. It co
 
 ### Transpiler Internals & Architecture Suite
 For deep-dive technical documentation on each compiler stage, consult:
-* [Transpiler Architecture & Arena Design](transpiler_architecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
-* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
-* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `pub` visibility, and C++ identifier mangling.
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `on error` verification.
-* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cpp_emitter_and_interop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
-* [C++17 Strict Data-Oriented Subset](cpp_subset.md) — Coding standards for the transpiler implementation.
+* [Transpiler Architecture & Arena Design](transpilerArchitecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
+* [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
+* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `pub` visibility, and C++ identifier mangling.
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `on error` verification.
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cppEmitterAndInterop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
+* [C++17 Strict Data-Oriented Subset](cppSubset.md) — Coding standards for the transpiler implementation.
 
 ---
 
@@ -116,9 +116,9 @@ QualifiedIdent  ::= Identifier ("." Identifier)*
 
 Every `.cb` file is implicitly a module. Everything is private by default; the `pub` keyword exposes types, aliases, and functions to the importer.
 * **Relative Nested Paths:** Module imports (`import "entities/hero.cb"` or `import "../shared/math.cb"`) are resolved relative to the directory of the importing file and normalized to canonical project-relative module IDs (e.g., `entities/hero`).
-* **Default & Explicit Aliases (`as`):** `import "entities/hero.cb"` binds the module alias `hero` (the filename stem). When two modules share a stem (e.g., `ui/button.cb` and `input/button.cb`), use `import "input/button.cb" as input_btn` to disambiguate. Duplicate module aliases in the same file are rejected at compile time.
+* **Default & Explicit Aliases (`as`):** `import "entities/hero.cb"` binds the module alias `hero` (the filename stem). When two modules share a stem (e.g., `ui/button.cb` and `input/button.cb`), use `import "input/button.cb" as inputBtn` to disambiguate. Duplicate module aliases in the same file are rejected at compile time.
 * **Diamond Deduplication & Circular Import Rejection:** Shared dependencies imported across multiple modules are loaded once in topological order; circular import chains are rejected with a clear diagnostic.
-* **Module Scoping & C++ Name Mangling:** Imported non-`extern` declarations are emitted with collision-free mangled C++ identifiers (`cb_<sanitized_module_id>__<name>`, e.g., `cb_entities_hero__Player`), allowing different modules to define identical struct or function names without C++ ODR or redefinition conflicts.
+* **Module Scoping & C++ Name Mangling:** Imported non-`extern` declarations are emitted with collision-free mangled C++ identifiers (`cb_<sanitizedModuleId>__<name>`, e.g., `cb_entities_hero__Player`), allowing different modules to define identical struct or function names without C++ ODR or redefinition conflicts.
 
 **player.cb (The Library Module)**
 
@@ -135,7 +135,7 @@ pub fn heal(byref p as Player, amount as int)
 end fn
 
 ' Private function (no 'pub')
-fn calculate_max_health() as int
+fn calculateMaxHealth() as int
     return 100
 end fn
 ```
@@ -151,26 +151,26 @@ import "player.cb"
 
 fn main() as int
     ' IMMUTABILITY: Cannot be changed after declaration (supports optional or inferred type)
-    const max_potion = 50 
+    const maxPotion = 50 
     
     ' MUTABILITY & INFERENCE: 'dim' allows reassignment, type is inferred
-    dim uses_left = 3 
-    uses_left = 2
+    dim usesLeft = 3 
+    usesLeft = 2
 
     ' VALUE SEMANTICS: Stack allocation (flat, fast, zero cleanup needed)
     dim hero = player.Player(name="Alice", health=10)
 
     ' UFCS (Unified Function Call Syntax): 
-    ' The compiler translates hero.heal(max_potion) into heal(hero, max_potion)
+    ' The compiler translates hero.heal(maxPotion) into heal(hero, maxPotion)
     ' Because heal() asks for 'byref', the original hero is mutated in place.
-    hero.heal(max_potion)
+    hero.heal(maxPotion)
     return 0
 end fn
 ```
 
 ### 3. Error Handling & Cleanup (Static Bubbling & Defer)
 
-CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `can error` to their signature (`fn connect(ip as str) as Connection can error` or void `fn validate_port(port as int) can error`), raise errors with `error("...", [code=N])`, and use tuple-free `return` statements.
+CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `can error` to their signature (`fn connect(ip as str) as Connection can error` or void `fn validatePort(port as int) can error`), raise errors with `error("...", [code=N])`, and use tuple-free `return` statements.
 
 1. **Implicit Bubbling:** If a fallible function calls another fallible function (with no active `on error` handler in scope), the transpiler automatically injects an invisible check that returns the error upward. The developer writes zero error boilerplate.
 2. **Deterministic Cleanup (`defer`):** The `defer ... end defer` block guarantees execution when the function exits (via a successful return, an `on error` return, or an error bubble), mapping cleanly to C++ RAII scope-exit destructors in LIFO order.
@@ -192,32 +192,32 @@ pub fn connect(ip as str) as Connection can error
     return Connection(id=1)
 end fn
 
-pub fn close_connection(conn as Connection)
+pub fn closeConnection(conn as Connection)
     ' Cleanup logic goes here
 end fn
 
 ' Declares 'can error', enabling implicit error bubbling
-pub fn process_network() as int can error
-    ' IMPLICIT BUBBLING: If connect fails, process_network immediately returns the error.
+pub fn processNetwork() as int can error
+    ' IMPLICIT BUBBLING: If connect fails, processNetwork immediately returns the error.
     dim conn = connect("192.168.1.1")
     
     ' DETERMINISTIC CLEANUP: Runs right before the function exits, no matter how.
     defer
-        close_connection(conn)
+        closeConnection(conn)
     end defer
     
     return 100
 end fn
 
-fn start_server()
-    ' start_server() cannot fail. Register a scope-level 'on error' handler
+fn startServer()
+    ' startServer() cannot fail. Register a scope-level 'on error' handler
     ' before calling any fallible functions in this scope.
     on error e
         print("Failed to start server (code=" & e.code & "): " & e.msg)
         return
     end error
 
-    dim records = process_network()
+    dim records = processNetwork()
     print("Connected and processed ", records, " records.")
 end fn
 ```
@@ -227,7 +227,7 @@ end fn
 CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and integral/boolean `select case` blocks lowered directly to native C++ `switch` statements.
 
 ```vb
-fn demo_containers() as int
+fn demoContainers() as int
     dim nums as list[int] = [10, 20, 30]
     dim scores as dict[str, int] = {"alice": 100, "bob": 85}
 

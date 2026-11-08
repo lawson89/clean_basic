@@ -7,6 +7,6 @@ pub fn boost(byref u as Unit, amount as int)
     u.hp = u.hp + amount
 end fn
 
-fn secret_multiplier() as int
+fn secretMultiplier() as int
     return 999
 end fn

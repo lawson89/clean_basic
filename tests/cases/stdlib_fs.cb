@@ -1,0 +1,106 @@
+' EXPECT_CPP: #include "
+' EXPECT_CPP: fs_bridge.hpp"
+' EXPECT_CPP: cbStdFsWrite(
+' EXPECT_CPP: cbStdFsOpen(
+' EXPECT_CPP: cbStdFsClose(
+' EXPECT_OUT: Path helpers: dir=build/testArtifacts/stdlibFsSandbox, file=notes.txt, ext=.txt
+' EXPECT_OUT: Whole-file lines=3, first=alpha, copiedSize=18
+' EXPECT_OUT: Streamed lines=3: [L1] [L2] [L3], eofAfter=true
+' EXPECT_OUT: Directory entries=2: copy.txt, stream.log
+' EXPECT_OUT: Caught missing file (code=404)
+' EXPECT_OUT: Cleanup complete: exists=false
+
+import "std/fs"
+
+fn testWholeFileAndCopy(baseDir as str) can error
+    dim notesPath = fs.joinPath(baseDir, "notes.txt")
+    dim copyPath = fs.joinPath(baseDir, "copy.txt")
+
+    print("Path helpers: dir=" & fs.parentDir(notesPath) & ", file=" & fs.fileName(notesPath) & ", ext=" & fs.ext(notesPath))
+
+    fs.write(notesPath, "alpha\r\nbeta\n")
+    fs.append(notesPath, "gamma\n")
+    fs.copy(notesPath, copyPath)
+
+    dim allLines = fs.lines(notesPath)
+    dim copiedSz = fs.size(copyPath)
+    if fs.exists(notesPath) and fs.isFile(copyPath)
+        print("Whole-file lines=" & len(allLines) & ", first=" & allLines[0] & ", copiedSize=" & copiedSz)
+    end if
+
+    fs.remove(notesPath)
+end fn
+
+fn testStreamingFile(baseDir as str) can error
+    dim logPath = fs.joinPath(baseDir, "stream.log")
+
+    dim writer = fs.openMode(logPath, "w")
+    defer
+        writer.close()
+    end defer
+    writer.writeLine("L1")
+    writer.writeStr("L2\r\n")
+    writer.flush()
+    writer.close()
+
+    dim appender = fs.openMode(logPath, "a")
+    defer
+        appender.close()
+    end defer
+    appender.writeLine("L3")
+    appender.close()
+
+    dim reader = fs.open(logPath)
+    defer
+        reader.close()
+    end defer
+
+    dim count = 0
+    dim summary = ""
+    dim line = ""
+    while reader.readLine(line)
+        count = count + 1
+        summary = summary & " [" & line & "]"
+    end while
+
+    dim atEof = reader.eof()
+    print("Streamed lines=" & count & ":" & summary & ", eofAfter=" & atEof)
+end fn
+
+fn testMissingFile(baseDir as str)
+    on error e
+        print("Caught missing file (code=" & e.code & ")")
+        return
+    end error
+
+    dim missing = fs.joinPath(baseDir, "doesNotExist.txt")
+    dim content = fs.read(missing)
+    print(content)
+end fn
+
+fn main() as int
+    on error e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end error
+
+    dim baseDir = "build/testArtifacts/stdlibFsSandbox"
+    if fs.exists(baseDir)
+        fs.remove(baseDir)
+    end if
+    fs.mkdir(baseDir)
+
+    testWholeFileAndCopy(baseDir)
+    testStreamingFile(baseDir)
+
+    if fs.isDir(baseDir)
+        dim entries = fs.dir(baseDir)
+        print("Directory entries=" & len(entries) & ": " & entries[0] & ", " & entries[1])
+    end if
+
+    testMissingFile(baseDir)
+
+    fs.remove(baseDir)
+    print("Cleanup complete: exists=" & fs.exists(baseDir))
+    return 0
+end fn

@@ -38,22 +38,22 @@ struct TypeNode {
     uint32_t line = 1;
     uint32_t col = 1;
     std::string name;
-    std::vector<TypeId> type_args;
+    std::vector<TypeId> typeArgs;
 };
 
 struct Param {
     uint32_t line = 1;
     uint32_t col = 1;
     std::string name;
-    TypeId type_id = INVALID_ID;
-    bool is_byref = false;
+    TypeId typeId = INVALID_ID;
+    bool isByref = false;
 };
 
 struct FieldDecl {
     uint32_t line = 1;
     uint32_t col = 1;
     std::string name;
-    TypeId type_id = INVALID_ID;
+    TypeId typeId = INVALID_ID;
 };
 
 // ==========================================
@@ -62,7 +62,7 @@ struct FieldDecl {
 
 struct NumberLiteral {
     std::string raw = "0";
-    bool is_float = false;
+    bool isFloat = false;
 };
 
 struct StringLiteral {
@@ -94,7 +94,7 @@ struct UnaryOp {
 
 struct FieldAccess {
     ExprId target = INVALID_ID;
-    std::string field_name;
+    std::string fieldName;
 };
 
 struct IndexAccess {
@@ -110,7 +110,7 @@ struct NamedArg {
 struct FuncCall {
     ExprId callee = INVALID_ID;
     std::vector<ExprId> args;
-    std::vector<NamedArg> named_args;
+    std::vector<NamedArg> namedArgs;
 };
 
 struct ListLiteral {
@@ -152,23 +152,23 @@ struct ExprNode {
 // ==========================================
 
 struct ErrorBlock {
-    std::string err_var;
+    std::string errVar;
     std::vector<StmtId> body;
 };
 
 struct VarAssignment {
     ExprId target = INVALID_ID;
-    bool is_dim = false;
-    bool is_const = false;
-    bool has_declared_type = false;
-    TypeId declared_type = INVALID_ID;
+    bool isDim = false;
+    bool isConst = false;
+    bool hasDeclaredType = false;
+    TypeId declaredType = INVALID_ID;
     ExprId value = INVALID_ID;
-    bool implicit_bubble = false;
+    bool implicitBubble = false;
 };
 
 struct ExprStmt {
     ExprId expr = INVALID_ID;
-    bool implicit_bubble = false;
+    bool implicitBubble = false;
 };
 
 struct ElseIfBranch {
@@ -180,27 +180,27 @@ struct ElseIfBranch {
 
 struct IfStmt {
     ExprId condition = INVALID_ID;
-    std::vector<StmtId> then_body;
-    std::vector<ElseIfBranch> elif_branches;
-    bool has_else = false;
-    std::vector<StmtId> else_body;
+    std::vector<StmtId> thenBody;
+    std::vector<ElseIfBranch> elifBranches;
+    bool hasElse = false;
+    std::vector<StmtId> elseBody;
 };
 
 struct RangeSpec {
-    bool has_range = false;
+    bool hasRange = false;
     uint32_t line = 1;
     uint32_t col = 1;
     ExprId start = INVALID_ID;
     ExprId end = INVALID_ID;
-    bool has_step = false;
+    bool hasStep = false;
     ExprId step = INVALID_ID;
     bool inclusive = false;
 };
 
 struct ForStmt {
-    std::vector<std::string> loop_vars;
-    RangeSpec range_spec;
-    bool has_iterable = false;
+    std::vector<std::string> loopVars;
+    RangeSpec rangeSpec;
+    bool hasIterable = false;
     ExprId iterable = INVALID_ID;
     std::vector<StmtId> body;
 };
@@ -208,15 +208,15 @@ struct ForStmt {
 struct SelectCase {
     uint32_t line = 1;
     uint32_t col = 1;
-    ExprId match_expr = INVALID_ID;
+    ExprId matchExpr = INVALID_ID;
     std::vector<StmtId> body;
 };
 
 struct SelectStmt {
     ExprId target = INVALID_ID;
     std::vector<SelectCase> cases;
-    bool has_case_else = false;
-    std::vector<StmtId> case_else;
+    bool hasCaseElse = false;
+    std::vector<StmtId> caseElse;
 };
 
 struct DeferStmt {
@@ -257,32 +257,32 @@ struct StmtNode {
 struct ImportDecl {
     std::string kind = "module";
     std::string target;
-    bool has_alias = false;
+    bool hasAlias = false;
     std::string alias;
-    std::string resolved_module_id = "";
+    std::string resolvedModuleId = "";
 };
 
 struct AliasDecl {
     std::string name;
-    TypeId target_type = INVALID_ID;
-    bool is_pub = false;
+    TypeId targetType = INVALID_ID;
+    bool isPub = false;
 };
 
 struct TypeDecl {
     std::string name;
     std::vector<FieldDecl> fields;
-    bool is_pub = false;
-    bool is_extern = false;
+    bool isPub = false;
+    bool isExtern = false;
 };
 
 struct FnDecl {
     std::string name;
     std::vector<Param> params;
-    TypeId return_type = INVALID_ID;
-    bool is_fallible = false;
+    TypeId returnType = INVALID_ID;
+    bool isFallible = false;
     std::vector<StmtId> body;
-    bool is_pub = false;
-    bool is_extern = false;
+    bool isPub = false;
+    bool isExtern = false;
 };
 
 using DeclVariant = std::variant<
@@ -295,12 +295,12 @@ using DeclVariant = std::variant<
 struct DeclNode {
     uint32_t line = 1;
     uint32_t col = 1;
-    uint32_t end_line = 1;
-    uint32_t name_line = 1;
-    uint32_t name_col = 1;
+    uint32_t endLine = 1;
+    uint32_t nameLine = 1;
+    uint32_t nameCol = 1;
     DeclVariant payload;
-    std::string module_id = "";
-    std::string file_name = "main.cb";
+    std::string moduleId = "";
+    std::string fileName = "main.cb";
 };
 
 struct AstArena {
@@ -314,53 +314,53 @@ struct Program {
     uint32_t line = 1;
     uint32_t col = 1;
     std::vector<DeclId> declarations;
-    std::string file_name = "main.cb";
+    std::string fileName = "main.cb";
 };
 
-inline std::string strip_module_prefix(std::string_view name) {
-    const size_t dot_idx = name.rfind('.');
-    if (dot_idx != std::string_view::npos) {
-        return std::string(name.substr(dot_idx + 1));
+inline std::string stripModulePrefix(std::string_view name) {
+    const size_t dotIdx = name.rfind('.');
+    if (dotIdx != std::string_view::npos) {
+        return std::string(name.substr(dotIdx + 1));
     }
     return std::string(name);
 }
 
-inline const TypeNode& empty_type_node() {
+inline const TypeNode& emptyTypeNode() {
     static const TypeNode kEmpty{};
     return kEmpty;
 }
 
-inline const TypeNode& get_type_node(const AstArena& arena, TypeId tid) {
+inline const TypeNode& getTypeNode(const AstArena& arena, TypeId tid) {
     if (tid < arena.types.size()) {
         return arena.types[tid];
     }
-    return empty_type_node();
+    return emptyTypeNode();
 }
 
-inline bool is_void_type(const AstArena& arena, TypeId tid) {
+inline bool isVoidType(const AstArena& arena, TypeId tid) {
     if (tid >= arena.types.size()) {
         return true;
     }
     return arena.types[tid].name == "void";
 }
 
-inline TypeId find_type(
+inline TypeId findType(
     const AstArena& arena,
     std::string_view name,
-    const std::vector<TypeId>& type_args = {}
+    const std::vector<TypeId>& typeArgs = {}
 ) {
     for (size_t i = 0; i < arena.types.size(); ++i) {
         const TypeNode& existing = arena.types[i];
         if (existing.name == name &&
-            existing.type_args == type_args) {
+            existing.typeArgs == typeArgs) {
             return static_cast<TypeId>(i);
         }
     }
     return INVALID_ID;
 }
 
-inline TypeId add_type(AstArena& arena, TypeNode node) {
-    const TypeId existing = find_type(arena, node.name, node.type_args);
+inline TypeId addType(AstArena& arena, TypeNode node) {
+    const TypeId existing = findType(arena, node.name, node.typeArgs);
     if (existing != INVALID_ID) {
         return existing;
     }
@@ -369,14 +369,14 @@ inline TypeId add_type(AstArena& arena, TypeNode node) {
     return id;
 }
 
-inline TypeId find_or_add_type(
+inline TypeId findOrAddType(
     AstArena& arena,
     std::string_view name,
-    const std::vector<TypeId>& type_args = {},
+    const std::vector<TypeId>& typeArgs = {},
     uint32_t line = 1,
     uint32_t col = 1
 ) {
-    const TypeId existing = find_type(arena, name, type_args);
+    const TypeId existing = findType(arena, name, typeArgs);
     if (existing != INVALID_ID) {
         return existing;
     }
@@ -384,13 +384,13 @@ inline TypeId find_or_add_type(
     node.line = line;
     node.col = col;
     node.name = std::string(name);
-    node.type_args = type_args;
+    node.typeArgs = typeArgs;
     const TypeId id = static_cast<TypeId>(arena.types.size());
     arena.types.push_back(std::move(node));
     return id;
 }
 
-inline ExprId add_expr(AstArena& arena, uint32_t line, uint32_t col, ExprVariant payload) {
+inline ExprId addExpr(AstArena& arena, uint32_t line, uint32_t col, ExprVariant payload) {
     const ExprId id = static_cast<ExprId>(arena.exprs.size());
     ExprNode node{};
     node.line = line;
@@ -400,7 +400,7 @@ inline ExprId add_expr(AstArena& arena, uint32_t line, uint32_t col, ExprVariant
     return id;
 }
 
-inline StmtId add_stmt(AstArena& arena, uint32_t line, uint32_t col, StmtVariant payload) {
+inline StmtId addStmt(AstArena& arena, uint32_t line, uint32_t col, StmtVariant payload) {
     const StmtId id = static_cast<StmtId>(arena.stmts.size());
     StmtNode node{};
     node.line = line;
@@ -410,15 +410,15 @@ inline StmtId add_stmt(AstArena& arena, uint32_t line, uint32_t col, StmtVariant
     return id;
 }
 
-inline std::string normalize_rel_path(std::string_view raw_path) {
+inline std::string normalizeRelPath(std::string_view rawPath) {
     std::vector<std::string> parts;
     size_t start = 0;
-    while (start <= raw_path.size()) {
+    while (start <= rawPath.size()) {
         size_t end = start;
-        while (end < raw_path.size() && raw_path[end] != '/' && raw_path[end] != '\0') {
+        while (end < rawPath.size() && rawPath[end] != '/' && rawPath[end] != '\0') {
             end += 1;
         }
-        const std::string_view seg = raw_path.substr(start, end - start);
+        const std::string_view seg = rawPath.substr(start, end - start);
         if (!seg.empty() && seg != ".") {
             if (seg == "..") {
                 if (!parts.empty() && parts.back() != "..") {
@@ -430,7 +430,7 @@ inline std::string normalize_rel_path(std::string_view raw_path) {
                 parts.emplace_back(seg);
             }
         }
-        if (end >= raw_path.size()) {
+        if (end >= rawPath.size()) {
             break;
         }
         start = end + 1;
@@ -445,33 +445,33 @@ inline std::string normalize_rel_path(std::string_view raw_path) {
     return out;
 }
 
-inline std::string parent_dir_of(std::string_view file_path) {
-    const std::string sep_chars = std::string("/") + std::string(1, static_cast<char>(92));
-    const size_t slash_idx = file_path.find_last_of(sep_chars);
-    if (slash_idx != std::string_view::npos) {
-        if (slash_idx == 0) {
+inline std::string parentDirOf(std::string_view filePath) {
+    const std::string sepChars = std::string("/") + std::string(1, static_cast<char>(92));
+    const size_t slashIdx = filePath.find_last_of(sepChars);
+    if (slashIdx != std::string_view::npos) {
+        if (slashIdx == 0) {
             return "/";
         }
-        return std::string(file_path.substr(0, slash_idx));
+        return std::string(filePath.substr(0, slashIdx));
     }
     return ".";
 }
 
-inline std::string get_env_var(const std::string& name) {
+inline std::string getEnvVar(const std::string& name) {
     if (std::getenv(name.c_str()) != nullptr) {
         return std::string(std::getenv(name.c_str()));
     }
     return "";
 }
 
-inline std::string detect_executable_path() {
+inline std::string detectExecutablePath() {
 #if defined(_WIN32)
     std::array<char, 4096> buf{};
     const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
     if (len > 0 && len < buf.size()) {
         std::error_code ec;
         const std::filesystem::path p(std::string(buf.data(), static_cast<size_t>(len)));
-        return p.generic_string();
+        return p.genericString();
     }
     return "";
 #elif defined(__APPLE__)
@@ -481,34 +481,34 @@ inline std::string detect_executable_path() {
         std::error_code ec;
         const std::filesystem::path p = std::filesystem::canonical(std::filesystem::path(buf.data()), ec);
         if (!ec) {
-            return p.generic_string();
+            return p.genericString();
         }
-        return std::filesystem::path(buf.data()).generic_string();
+        return std::filesystem::path(buf.data()).genericString();
     }
     return "";
 #else
     std::error_code ec;
-    const std::filesystem::path exe_p = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (!ec && !exe_p.empty()) {
-        return exe_p.generic_string();
+    const std::filesystem::path exeP = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !exeP.empty()) {
+        return exeP.generic_string();
     }
     return "";
 #endif
 }
 
-inline bool is_valid_sdk_root(std::string_view candidate_dir) {
-    if (candidate_dir.empty()) {
+inline bool isValidSdkRoot(std::string_view candidateDir) {
+    if (candidateDir.empty()) {
         return false;
     }
     std::error_code ec1;
     std::error_code ec2;
-    const std::filesystem::path base{std::string(candidate_dir)};
-    const bool has_stdlib = std::filesystem::is_directory(base / "stdlib", ec1);
-    const bool has_vendor = std::filesystem::is_directory(base / "vendor", ec2);
-    return !ec1 && !ec2 && has_stdlib && has_vendor;
+    const std::filesystem::path base{std::string(candidateDir)};
+    const bool hasStdlib = std::filesystem::is_directory(base / "stdlib", ec1);
+    const bool hasVendor = std::filesystem::is_directory(base / "vendor", ec2);
+    return !ec1 && !ec2 && hasStdlib && hasVendor;
 }
 
-inline std::string strip_trailing_slashes(std::string_view path) {
+inline std::string stripTrailingSlashes(std::string_view path) {
     const char bslash = static_cast<char>(92);
     size_t end = path.size();
     while (end > 1 && (path[end - 1] == '/' || path[end - 1] == bslash)) {
@@ -517,7 +517,7 @@ inline std::string strip_trailing_slashes(std::string_view path) {
     return std::string(path.substr(0, end));
 }
 
-inline std::string compile_time_root_dir() {
+inline std::string compileTimeRootDir() {
 #ifdef CLEANBASIC_ROOT_DIR
     return std::string(CLEANBASIC_ROOT_DIR);
 #else
@@ -525,111 +525,111 @@ inline std::string compile_time_root_dir() {
 #endif
 }
 
-inline std::string resolve_sdk_root_dir(
-    std::string_view env_home,
-    std::string_view exe_path,
-    std::string_view compile_time_root
+inline std::string resolveSdkRootDir(
+    std::string_view envHome,
+    std::string_view exePath,
+    std::string_view compileTimeRoot
 ) {
-    if (!env_home.empty()) {
-        const std::string clean_env = strip_trailing_slashes(env_home);
-        if (is_valid_sdk_root(clean_env)) {
-            return clean_env;
+    if (!envHome.empty()) {
+        const std::string cleanEnv = stripTrailingSlashes(envHome);
+        if (isValidSdkRoot(cleanEnv)) {
+            return cleanEnv;
         }
         std::error_code ec;
-        if (std::filesystem::is_directory(std::filesystem::path(clean_env), ec) && !ec) {
-            return clean_env;
+        if (std::filesystem::is_directory(std::filesystem::path(cleanEnv), ec) && !ec) {
+            return cleanEnv;
         }
     }
 
-    if (!exe_path.empty()) {
-        const std::string exe_dir = parent_dir_of(exe_path);
-        if (is_valid_sdk_root(exe_dir)) {
-            return exe_dir;
+    if (!exePath.empty()) {
+        const std::string exeDir = parentDirOf(exePath);
+        if (isValidSdkRoot(exeDir)) {
+            return exeDir;
         }
-        const std::string exe_parent = parent_dir_of(exe_dir);
-        if (exe_parent != exe_dir && is_valid_sdk_root(exe_parent)) {
-            return exe_parent;
+        const std::string exeParent = parentDirOf(exeDir);
+        if (exeParent != exeDir && isValidSdkRoot(exeParent)) {
+            return exeParent;
         }
-        const std::string exe_grandparent = parent_dir_of(exe_parent);
-        if (exe_grandparent != exe_parent && is_valid_sdk_root(exe_grandparent)) {
-            return exe_grandparent;
+        const std::string exeGrandparent = parentDirOf(exeParent);
+        if (exeGrandparent != exeParent && isValidSdkRoot(exeGrandparent)) {
+            return exeGrandparent;
         }
     }
 
-    if (!compile_time_root.empty() && is_valid_sdk_root(compile_time_root)) {
-        return std::string(compile_time_root);
+    if (!compileTimeRoot.empty() && isValidSdkRoot(compileTimeRoot)) {
+        return std::string(compileTimeRoot);
     }
 
-    if (is_valid_sdk_root(".")) {
+    if (isValidSdkRoot(".")) {
         return ".";
     }
 
-    if (!compile_time_root.empty()) {
-        return std::string(compile_time_root);
+    if (!compileTimeRoot.empty()) {
+        return std::string(compileTimeRoot);
     }
     return ".";
 }
 
-inline std::string cleanbasic_root_dir() {
-    return resolve_sdk_root_dir(
-        get_env_var("CLEANBASIC_HOME"),
-        detect_executable_path(),
-        compile_time_root_dir()
+inline std::string cleanbasicRootDir() {
+    return resolveSdkRootDir(
+        getEnvVar("CLEANBASIC_HOME"),
+        detectExecutablePath(),
+        compileTimeRootDir()
     );
 }
 
-inline bool is_std_import_target(std::string_view import_target) {
-    return import_target.size() >= 5 && import_target.substr(0, 4) == "std/";
+inline bool isStdImportTarget(std::string_view importTarget) {
+    return importTarget.size() >= 5 && importTarget.substr(0, 4) == "std/";
 }
 
-inline std::string strip_cb_ext(std::string_view path) {
+inline std::string stripCbExt(std::string_view path) {
     if (path.size() > 3 && path.substr(path.size() - 3) == ".cb") {
         return std::string(path.substr(0, path.size() - 3));
     }
     return std::string(path);
 }
 
-inline std::string resolve_module_id(std::string_view importer_module_id, std::string_view import_target) {
-    if (is_std_import_target(import_target)) {
-        return normalize_rel_path(strip_cb_ext(import_target));
+inline std::string resolveModuleId(std::string_view importerModuleId, std::string_view importTarget) {
+    if (isStdImportTarget(importTarget)) {
+        return normalizeRelPath(stripCbExt(importTarget));
     }
-    std::string importer_dir;
-    if (!importer_module_id.empty()) {
-        const size_t slash_idx = importer_module_id.find_last_of('/');
-        if (slash_idx != std::string_view::npos) {
-            importer_dir = std::string(importer_module_id.substr(0, slash_idx));
+    std::string importerDir;
+    if (!importerModuleId.empty()) {
+        const size_t slashIdx = importerModuleId.find_last_of('/');
+        if (slashIdx != std::string_view::npos) {
+            importerDir = std::string(importerModuleId.substr(0, slashIdx));
         }
     }
     std::string combined;
-    if (!importer_dir.empty()) {
-        combined = importer_dir + "/" + std::string(import_target);
+    if (!importerDir.empty()) {
+        combined = importerDir + "/" + std::string(importTarget);
     } else {
-        combined = std::string(import_target);
+        combined = std::string(importTarget);
     }
-    return strip_cb_ext(normalize_rel_path(combined));
+    return stripCbExt(normalizeRelPath(combined));
 }
 
-inline std::string default_import_alias(std::string_view import_target) {
-    std::string alias(import_target);
-    const size_t slash_idx = alias.find_last_of('/');
-    if (slash_idx != std::string::npos) {
-        alias = alias.substr(slash_idx + 1);
+inline std::string defaultImportAlias(std::string_view importTarget) {
+    std::string alias(importTarget);
+    const size_t slashIdx = alias.find_last_of('/');
+    if (slashIdx != std::string::npos) {
+        alias = alias.substr(slashIdx + 1);
     }
     if (alias.size() > 3 && alias.substr(alias.size() - 3) == ".cb") {
         alias = alias.substr(0, alias.size() - 3);
     } else {
-        alias = strip_module_prefix(alias);
+        alias = stripModulePrefix(alias);
     }
     return alias;
 }
 
-inline std::string sanitize_module_id(std::string_view module_id) {
+inline std::string sanitizeModuleId(std::string_view moduleId) {
     std::string out;
-    out.reserve(module_id.size());
-    for (const char c : module_id) {
-        const bool is_alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-        const bool is_num = (c >= '0' && c <= '9');
-        if (is_alpha || is_num || c == '_') {
+    out.reserve(moduleId.size());
+    for (const char c : moduleId) {
+        const bool isAlpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        const bool isNum = (c >= '0' && c <= '9');
+        if (isAlpha || isNum || c == '_') {
             out.push_back(c);
         } else {
             out.push_back('_');
@@ -638,14 +638,14 @@ inline std::string sanitize_module_id(std::string_view module_id) {
     return out;
 }
 
-inline std::string symbol_key(std::string_view module_id, std::string_view name) {
-    if (module_id.empty()) {
+inline std::string symbolKey(std::string_view moduleId, std::string_view name) {
+    if (moduleId.empty()) {
         return std::string(name);
     }
-    return std::string(module_id) + "::" + std::string(name);
+    return std::string(moduleId) + "::" + std::string(name);
 }
 
-inline std::pair<std::string, std::string> split_symbol_key(std::string_view key) {
+inline std::pair<std::string, std::string> splitSymbolKey(std::string_view key) {
     const size_t sep = key.find("::");
     if (sep != std::string_view::npos) {
         return {std::string(key.substr(0, sep)), std::string(key.substr(sep + 2))};
@@ -653,59 +653,59 @@ inline std::pair<std::string, std::string> split_symbol_key(std::string_view key
     return {"", std::string(key)};
 }
 
-inline std::string make_cpp_type_name(std::string_view module_id, std::string_view name, bool is_extern = false) {
-    if (is_extern || module_id.empty()) {
+inline std::string makeCppTypeName(std::string_view moduleId, std::string_view name, bool isExtern = false) {
+    if (isExtern || moduleId.empty()) {
         return std::string(name);
     }
-    return "cb_" + sanitize_module_id(module_id) + "__" + std::string(name);
+    return "cb_" + sanitizeModuleId(moduleId) + "__" + std::string(name);
 }
 
-inline std::string make_cpp_fn_name(std::string_view module_id, std::string_view name, bool is_extern = false) {
-    if (is_extern) {
+inline std::string makeCppFnName(std::string_view moduleId, std::string_view name, bool isExtern = false) {
+    if (isExtern) {
         return std::string(name);
     }
-    if (module_id.empty()) {
+    if (moduleId.empty()) {
         if (name == "main") {
-            return "cb_main";
+            return "cbMain";
         }
         return std::string(name);
     }
-    return "cb_" + sanitize_module_id(module_id) + "__" + std::string(name);
+    return "cb_" + sanitizeModuleId(moduleId) + "__" + std::string(name);
 }
 
-inline DeclId add_decl(
+inline DeclId addDecl(
     AstArena& arena,
     uint32_t line,
     uint32_t col,
     DeclVariant payload,
-    std::string_view module_id = "",
-    std::string_view file_name = "main.cb",
-    uint32_t end_line = 0,
-    uint32_t name_line = 0,
-    uint32_t name_col = 0
+    std::string_view moduleId = "",
+    std::string_view fileName = "main.cb",
+    uint32_t endLine = 0,
+    uint32_t nameLine = 0,
+    uint32_t nameCol = 0
 ) {
     const DeclId id = static_cast<DeclId>(arena.decls.size());
     DeclNode node{};
     node.line = line;
     node.col = col;
-    if (end_line > 0) {
-        node.end_line = end_line;
+    if (endLine > 0) {
+        node.endLine = endLine;
     } else {
-        node.end_line = line;
+        node.endLine = line;
     }
-    if (name_line > 0) {
-        node.name_line = name_line;
+    if (nameLine > 0) {
+        node.nameLine = nameLine;
     } else {
-        node.name_line = line;
+        node.nameLine = line;
     }
-    if (name_col > 0) {
-        node.name_col = name_col;
+    if (nameCol > 0) {
+        node.nameCol = nameCol;
     } else {
-        node.name_col = col;
+        node.nameCol = col;
     }
     node.payload = std::move(payload);
-    node.module_id = std::string(module_id);
-    node.file_name = std::string(file_name);
+    node.moduleId = std::string(moduleId);
+    node.fileName = std::string(fileName);
     arena.decls.push_back(std::move(node));
     return id;
 }

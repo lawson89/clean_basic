@@ -1,0 +1,82 @@
+' CleanBasic Standard Library: std/os
+' CLI arguments, standard streams, environment variables, working directory, platform, clock, sleep, subprocess, and exit
+
+import header "os_bridge.hpp"
+
+' CLI & Standard Streams
+extern fn cbOsArgs() as list[str]
+extern fn cbOsEprint(msg as str)
+extern fn cbOsReadLine(byref outLine as str) as bool
+extern fn cbOsReadAll() as str
+
+' Environment, Working Directory & Platform
+extern fn cbOsEnv(name as str) as str
+extern fn cbOsHasEnv(name as str) as bool
+extern fn cbOsCwd() as str can error
+extern fn cbOsChdir(path as str) can error
+extern fn cbOsPlatform() as str
+
+' Timing & Process Control
+extern fn cbOsClock() as int
+extern fn cbOsSleep(ms as int)
+extern fn cbOsRun(cmd as str) as int
+extern fn cbOsExit(code as int)
+
+' --- Public API: CLI & Standard Streams ---
+
+pub fn args() as list[str]
+    return cbOsArgs()
+end fn
+
+pub fn eprint(msg as str)
+    cbOsEprint(msg)
+end fn
+
+pub fn readLine(byref outLine as str) as bool
+    return cbOsReadLine(outLine)
+end fn
+
+pub fn readAll() as str
+    return cbOsReadAll()
+end fn
+
+' --- Public API: Environment, Working Directory & Platform ---
+
+pub fn env(name as str) as str
+    return cbOsEnv(name)
+end fn
+
+pub fn hasEnv(name as str) as bool
+    return cbOsHasEnv(name)
+end fn
+
+pub fn cwd() as str can error
+    dim dir = cbOsCwd()
+    return dir
+end fn
+
+pub fn chdir(path as str) can error
+    cbOsChdir(path)
+end fn
+
+pub fn platform() as str
+    return cbOsPlatform()
+end fn
+
+' --- Public API: Timing & Process Control ---
+
+pub fn clock() as int
+    return cbOsClock()
+end fn
+
+pub fn sleep(ms as int)
+    cbOsSleep(ms)
+end fn
+
+pub fn run(cmd as str) as int
+    return cbOsRun(cmd)
+end fn
+
+pub fn exit(code as int)
+    cbOsExit(code)
+end fn

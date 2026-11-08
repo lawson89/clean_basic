@@ -1,10 +1,10 @@
-' EXPECT_CPP: int fib_iterative(int n)
-' EXPECT_CPP: int fib_recursive(int n)
+' EXPECT_CPP: int fibIterative(int n)
+' EXPECT_CPP: int fibRecursive(int n)
 ' FORBID_CPP: std::shared_ptr
 ' EXPECT_OUT: Iterative Fib(10) = 55
 ' EXPECT_OUT: Recursive Fib(10) = 55
 
-pub fn fib_iterative(n as int) as int
+pub fn fibIterative(n as int) as int
     if n <= 0
         return 0
     else if n == 1
@@ -13,35 +13,35 @@ pub fn fib_iterative(n as int) as int
 
     dim a = 0
     dim b = 1
-    dim next_val = 0
+    dim nextVal = 0
 
     for i = 2 to n
-        next_val = a + b
+        nextVal = a + b
         a = b
-        b = next_val
+        b = nextVal
     end for
 
     return b
 end fn
 
-pub fn fib_recursive(n as int) as int
+pub fn fibRecursive(n as int) as int
     if n <= 0
         return 0
     else if n == 1
         return 1
     end if
     
-    return fib_recursive(n - 1) + fib_recursive(n - 2)
+    return fibRecursive(n - 1) + fibRecursive(n - 2)
 end fn
 
 fn main() as int
     const target = 10
     
-    dim iter_result = fib_iterative(target)
-    print("Iterative Fib(", target, ") = ", iter_result)
+    dim iterResult = fibIterative(target)
+    print("Iterative Fib(", target, ") = ", iterResult)
     
-    dim rec_result = fib_recursive(target)
-    print("Recursive Fib(", target, ") = ", rec_result)
+    dim recResult = fibRecursive(target)
+    print("Recursive Fib(", target, ") = ", recResult)
     
     return 0
 end fn

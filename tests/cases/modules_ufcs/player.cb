@@ -10,6 +10,6 @@ pub fn heal(byref p as Player, amount as int)
 end fn
 
 ' Private function (no 'pub')
-fn calculate_max_health() as int
+fn calculateMaxHealth() as int
     return 100
 end fn

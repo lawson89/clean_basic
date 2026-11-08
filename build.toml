@@ -1,0 +1,5 @@
+
+[commands]
+compile = "g++ tests/run_app.cpp -o run_app && ./run_app"
+test_all = "echo ok"
+  

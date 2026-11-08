@@ -1,0 +1,255 @@
+' CleanBasic Standard Library: std/str
+' UTF-8 codepoint-safe string processing, searching, splitting, trimming, slicing, and explicit ascii_* helpers
+
+import header "str_bridge.hpp"
+
+' UTF-8 Inspection & Codepoints
+extern fn cbStrUtf8Len(s as str) as int
+extern fn cbStrUtf8Valid(s as str) as bool
+extern fn cbStrChars(s as str) as list[str]
+
+' Search & Match
+extern fn cbStrContains(s as str, sub as str) as bool
+extern fn cbStrFind(s as str, sub as str) as int
+extern fn cbStrRfind(s as str, sub as str) as int
+extern fn cbStrCount(s as str, sub as str) as int
+extern fn cbStrStartsWith(s as str, prefix as str) as bool
+extern fn cbStrEndsWith(s as str, suffix as str) as bool
+extern fn cbStrAsciiEqualsIgnoreCase(s as str, other as str) as bool
+extern fn cbStrAsciiStartsWithIgnoreCase(s as str, prefix as str) as bool
+extern fn cbStrAsciiEndsWithIgnoreCase(s as str, suffix as str) as bool
+extern fn cbStrAsciiFindIgnoreCase(s as str, sub as str) as int
+extern fn cbStrAsciiRfindIgnoreCase(s as str, sub as str) as int
+extern fn cbStrAsciiContainsIgnoreCase(s as str, sub as str) as bool
+
+' Splitting & Joining
+extern fn cbStrSplit(s as str, sep as str) as list[str]
+extern fn cbStrFields(s as str) as list[str]
+extern fn cbStrLines(s as str) as list[str]
+extern fn cbStrJoin(parts as list[str], sep as str) as str
+
+' Trimming & Padding
+extern fn cbStrTrim(s as str) as str
+extern fn cbStrLtrim(s as str) as str
+extern fn cbStrRtrim(s as str) as str
+extern fn cbStrTrimChars(s as str, chars as str) as str
+extern fn cbStrPadLeft(s as str, width as int, pad as str) as str
+extern fn cbStrPadRight(s as str, width as int, pad as str) as str
+
+' Slicing & Substrings
+extern fn cbStrSlice(s as str, start as int, stop as int) as str
+extern fn cbStrLeft(s as str, n as int) as str
+extern fn cbStrRight(s as str, n as int) as str
+extern fn cbStrMid(s as str, start as int, count as int) as str
+extern fn cbStrCharAt(s as str, idx as int) as str
+extern fn cbStrByteAt(s as str, idx as int) as int
+extern fn cbStrFromChar(code as int) as str
+
+' Transformations
+extern fn cbStrReplace(s as str, oldSub as str, newSub as str) as str
+extern fn cbStrReplaceFirst(s as str, oldSub as str, newSub as str) as str
+extern fn cbStrAsciiLower(s as str) as str
+extern fn cbStrAsciiUpper(s as str) as str
+extern fn cbStrRepeat(s as str, n as int) as str
+extern fn cbStrReverse(s as str) as str
+
+' Parsing & ASCII Character Classification
+extern fn cbStrToInt(s as str) as int can error
+extern fn cbStrToFloat(s as str) as float can error
+extern fn cbStrToBool(s as str) as bool can error
+extern fn cbStrAsciiIsDigit(s as str) as bool
+extern fn cbStrAsciiIsAlpha(s as str) as bool
+extern fn cbStrAsciiIsSpace(s as str) as bool
+
+' --- Public API: UTF-8 Inspection & Codepoints ---
+
+pub fn utf8Len(s as str) as int
+    return cbStrUtf8Len(s)
+end fn
+
+pub fn utf8Valid(s as str) as bool
+    return cbStrUtf8Valid(s)
+end fn
+
+pub fn chars(s as str) as list[str]
+    return cbStrChars(s)
+end fn
+
+' --- Public API: Search & Match ---
+
+pub fn contains(s as str, sub as str) as bool
+    return cbStrContains(s, sub)
+end fn
+
+pub fn find(s as str, sub as str) as int
+    return cbStrFind(s, sub)
+end fn
+
+pub fn rfind(s as str, sub as str) as int
+    return cbStrRfind(s, sub)
+end fn
+
+pub fn count(s as str, sub as str) as int
+    return cbStrCount(s, sub)
+end fn
+
+pub fn startsWith(s as str, prefix as str) as bool
+    return cbStrStartsWith(s, prefix)
+end fn
+
+pub fn endsWith(s as str, suffix as str) as bool
+    return cbStrEndsWith(s, suffix)
+end fn
+
+pub fn asciiEqualsIgnoreCase(s as str, other as str) as bool
+    return cbStrAsciiEqualsIgnoreCase(s, other)
+end fn
+
+pub fn asciiStartsWithIgnoreCase(s as str, prefix as str) as bool
+    return cbStrAsciiStartsWithIgnoreCase(s, prefix)
+end fn
+
+pub fn asciiEndsWithIgnoreCase(s as str, suffix as str) as bool
+    return cbStrAsciiEndsWithIgnoreCase(s, suffix)
+end fn
+
+pub fn asciiFindIgnoreCase(s as str, sub as str) as int
+    return cbStrAsciiFindIgnoreCase(s, sub)
+end fn
+
+pub fn asciiRfindIgnoreCase(s as str, sub as str) as int
+    return cbStrAsciiRfindIgnoreCase(s, sub)
+end fn
+
+pub fn asciiContainsIgnoreCase(s as str, sub as str) as bool
+    return cbStrAsciiContainsIgnoreCase(s, sub)
+end fn
+
+' --- Public API: Splitting & Joining ---
+
+pub fn split(s as str, sep as str) as list[str]
+    return cbStrSplit(s, sep)
+end fn
+
+pub fn fields(s as str) as list[str]
+    return cbStrFields(s)
+end fn
+
+pub fn lines(s as str) as list[str]
+    return cbStrLines(s)
+end fn
+
+pub fn join(parts as list[str], sep as str) as str
+    return cbStrJoin(parts, sep)
+end fn
+
+' --- Public API: Trimming & Padding ---
+
+pub fn trim(s as str) as str
+    return cbStrTrim(s)
+end fn
+
+pub fn ltrim(s as str) as str
+    return cbStrLtrim(s)
+end fn
+
+pub fn rtrim(s as str) as str
+    return cbStrRtrim(s)
+end fn
+
+pub fn trimChars(s as str, chars as str) as str
+    return cbStrTrimChars(s, chars)
+end fn
+
+pub fn padLeft(s as str, width as int, pad as str) as str
+    return cbStrPadLeft(s, width, pad)
+end fn
+
+pub fn padRight(s as str, width as int, pad as str) as str
+    return cbStrPadRight(s, width, pad)
+end fn
+
+' --- Public API: Slicing & Substrings ---
+
+pub fn slice(s as str, start as int, stop as int) as str
+    return cbStrSlice(s, start, stop)
+end fn
+
+pub fn left(s as str, n as int) as str
+    return cbStrLeft(s, n)
+end fn
+
+pub fn right(s as str, n as int) as str
+    return cbStrRight(s, n)
+end fn
+
+pub fn mid(s as str, start as int, count as int) as str
+    return cbStrMid(s, start, count)
+end fn
+
+pub fn charAt(s as str, idx as int) as str
+    return cbStrCharAt(s, idx)
+end fn
+
+pub fn byteAt(s as str, idx as int) as int
+    return cbStrByteAt(s, idx)
+end fn
+
+pub fn fromChar(code as int) as str
+    return cbStrFromChar(code)
+end fn
+
+' --- Public API: Transformations ---
+
+pub fn replace(s as str, oldSub as str, newSub as str) as str
+    return cbStrReplace(s, oldSub, newSub)
+end fn
+
+pub fn replaceFirst(s as str, oldSub as str, newSub as str) as str
+    return cbStrReplaceFirst(s, oldSub, newSub)
+end fn
+
+pub fn asciiLower(s as str) as str
+    return cbStrAsciiLower(s)
+end fn
+
+pub fn asciiUpper(s as str) as str
+    return cbStrAsciiUpper(s)
+end fn
+
+pub fn repeat(s as str, n as int) as str
+    return cbStrRepeat(s, n)
+end fn
+
+pub fn reverse(s as str) as str
+    return cbStrReverse(s)
+end fn
+
+' --- Public API: Parsing & ASCII Character Classification ---
+
+pub fn toInt(s as str) as int can error
+    dim val = cbStrToInt(s)
+    return val
+end fn
+
+pub fn toFloat(s as str) as float can error
+    dim val = cbStrToFloat(s)
+    return val
+end fn
+
+pub fn toBool(s as str) as bool can error
+    dim val = cbStrToBool(s)
+    return val
+end fn
+
+pub fn asciiIsDigit(s as str) as bool
+    return cbStrAsciiIsDigit(s)
+end fn
+
+pub fn asciiIsAlpha(s as str) as bool
+    return cbStrAsciiIsAlpha(s)
+end fn
+
+pub fn asciiIsSpace(s as str) as bool
+    return cbStrAsciiIsSpace(s)
+end fn

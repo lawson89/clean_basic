@@ -27,36 +27,36 @@ using cb_vendor_json::JsonVariant;
 using cb_vendor_json::JsonArena;
 using cb_vendor_json::JsonParseResult;
 
-using cb_vendor_json::json_add_node;
-using cb_vendor_json::json_add_null;
-using cb_vendor_json::json_add_bool;
-using cb_vendor_json::json_add_int;
-using cb_vendor_json::json_add_float;
-using cb_vendor_json::json_add_string;
-using cb_vendor_json::json_add_array;
-using cb_vendor_json::json_add_object;
-using cb_vendor_json::json_array_push;
-using cb_vendor_json::json_object_set;
+using cb_vendor_json::jsonAddNode;
+using cb_vendor_json::jsonAddNull;
+using cb_vendor_json::jsonAddBool;
+using cb_vendor_json::jsonAddInt;
+using cb_vendor_json::jsonAddFloat;
+using cb_vendor_json::jsonAddString;
+using cb_vendor_json::jsonAddArray;
+using cb_vendor_json::jsonAddObject;
+using cb_vendor_json::jsonArrayPush;
+using cb_vendor_json::jsonObjectSet;
 
-using cb_vendor_json::json_get_field;
-using cb_vendor_json::json_get_string;
-using cb_vendor_json::json_get_int;
-using cb_vendor_json::json_get_float;
-using cb_vendor_json::json_get_bool;
-using cb_vendor_json::json_is_null;
+using cb_vendor_json::jsonGetField;
+using cb_vendor_json::jsonGetString;
+using cb_vendor_json::jsonGetInt;
+using cb_vendor_json::jsonGetFloat;
+using cb_vendor_json::jsonGetBool;
+using cb_vendor_json::jsonIsNull;
 
 using cb_vendor_json::JSON_BACKSLASH;
 using cb_vendor_json::JSON_DQUOTE;
-using cb_vendor_json::json_hex_digit_value;
-using cb_vendor_json::parse_json;
-using cb_vendor_json::serialize_json_into;
-using cb_vendor_json::serialize_json;
+using cb_vendor_json::jsonHexDigitValue;
+using cb_vendor_json::parseJson;
+using cb_vendor_json::serializeJsonInto;
+using cb_vendor_json::serializeJson;
 
 // ==========================================
 // JSON-RPC 2.0 Content-Length Framing
 // ==========================================
 
-inline std::string trim_ascii_ws(std::string_view sv) {
+inline std::string trimAsciiWs(std::string_view sv) {
     size_t start = 0;
     while (start < sv.size() && (sv[start] == ' ' || sv[start] == '\t' || sv[start] == '\r' || sv[start] == '\n')) {
         start += 1;
@@ -68,7 +68,7 @@ inline std::string trim_ascii_ws(std::string_view sv) {
     return std::string(sv.substr(start, end - start));
 }
 
-inline bool starts_with_ignore_case(std::string_view text, std::string_view prefix) {
+inline bool startsWithIgnoreCase(std::string_view text, std::string_view prefix) {
     if (text.size() < prefix.size()) {
         return false;
     }
@@ -82,7 +82,7 @@ inline bool starts_with_ignore_case(std::string_view text, std::string_view pref
     return true;
 }
 
-inline std::optional<size_t> parse_decimal_size(std::string_view sv) {
+inline std::optional<size_t> parseDecimalSize(std::string_view sv) {
     if (sv.empty()) {
         return std::nullopt;
     }
@@ -96,9 +96,9 @@ inline std::optional<size_t> parse_decimal_size(std::string_view sv) {
     return value;
 }
 
-inline std::optional<std::string> read_jsonrpc_message(std::istream& in) {
-    std::optional<size_t> content_length = std::nullopt;
-    bool saw_header_line = false;
+inline std::optional<std::string> readJsonrpcMessage(std::istream& in) {
+    std::optional<size_t> contentLength = std::nullopt;
+    bool sawHeaderLine = false;
     std::string line;
 
     while (std::getline(in, line)) {
@@ -106,29 +106,29 @@ inline std::optional<std::string> read_jsonrpc_message(std::istream& in) {
             line.pop_back();
         }
         if (line.empty()) {
-            if (!saw_header_line) {
+            if (!sawHeaderLine) {
                 continue;
             }
             break;
         }
-        saw_header_line = true;
+        sawHeaderLine = true;
         const std::string_view prefix = "Content-Length:";
-        if (starts_with_ignore_case(line, prefix)) {
-            const std::string len_str = trim_ascii_ws(std::string_view(line).substr(prefix.size()));
-            content_length = parse_decimal_size(len_str);
-            if (!content_length.has_value()) {
+        if (startsWithIgnoreCase(line, prefix)) {
+            const std::string lenStr = trimAsciiWs(std::string_view(line).substr(prefix.size()));
+            contentLength = parseDecimalSize(lenStr);
+            if (!contentLength.has_value()) {
                 return std::nullopt;
             }
         }
     }
 
-    if (!content_length.has_value()) {
+    if (!contentLength.has_value()) {
         return std::nullopt;
     }
 
     std::string payload;
-    payload.reserve(content_length.value());
-    for (size_t i = 0; i < content_length.value(); ++i) {
+    payload.reserve(contentLength.value());
+    for (size_t i = 0; i < contentLength.value(); ++i) {
         char ch = '\0';
         if (!in.get(ch)) {
             return std::nullopt;
@@ -138,8 +138,8 @@ inline std::optional<std::string> read_jsonrpc_message(std::istream& in) {
     return payload;
 }
 
-inline void write_jsonrpc_message(std::ostream& out, std::string_view json_payload) {
-    out << "Content-Length: " << json_payload.size() << "\r\n\r\n" << json_payload;
+inline void writeJsonrpcMessage(std::ostream& out, std::string_view jsonPayload) {
+    out << "Content-Length: " << jsonPayload.size() << "\r\n\r\n" << jsonPayload;
     out.flush();
 }
 

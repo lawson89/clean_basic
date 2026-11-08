@@ -1,0 +1,151 @@
+' CleanBasic Standard Library: std/fs
+' Filesystem I/O, slot-table streaming File handle, metadata, directory, and path utilities
+
+import header "fs_bridge.hpp"
+
+pub extern type CbFile
+pub alias File = CbFile
+
+' Whole-file operations
+extern fn cbFsRead(path as str) as str can error
+extern fn cbFsLines(path as str) as list[str] can error
+extern fn cbFsWrite(path as str, content as str) can error
+extern fn cbFsAppend(path as str, content as str) can error
+extern fn cbFsCopy(src as str, dst as str) can error
+
+' Streaming File operations
+extern fn cbFsOpen(path as str) as CbFile can error
+extern fn cbFsOpenMode(path as str, mode as str) as CbFile can error
+extern fn cbFsReadLine(f as CbFile, byref outLine as str) as bool can error
+extern fn cbFsEof(f as CbFile) as bool
+extern fn cbFsWriteStream(f as CbFile, text as str) can error
+extern fn cbFsWriteLine(f as CbFile, text as str) can error
+extern fn cbFsFlush(f as CbFile) can error
+extern fn cbFsIsOpen(f as CbFile) as bool
+extern fn cbFsClose(byref f as CbFile)
+
+' Metadata, directories, and paths
+extern fn cbFsExists(path as str) as bool
+extern fn cbFsIsFile(path as str) as bool
+extern fn cbFsIsDir(path as str) as bool
+extern fn cbFsSize(path as str) as int can error
+extern fn cbFsDir(path as str) as list[str] can error
+extern fn cbFsMkdir(path as str) can error
+extern fn cbFsRemove(path as str) can error
+extern fn cbFsJoinPath(a as str, b as str) as str
+extern fn cbFsParentDir(path as str) as str
+extern fn cbFsFileName(path as str) as str
+extern fn cbFsExt(path as str) as str
+
+' --- Public API: Whole-file operations ---
+
+pub fn read(path as str) as str can error
+    dim res = cbFsRead(path)
+    return res
+end fn
+
+pub fn lines(path as str) as list[str] can error
+    dim res = cbFsLines(path)
+    return res
+end fn
+
+pub fn write(path as str, content as str) can error
+    cbFsWrite(path, content)
+end fn
+
+pub fn append(path as str, content as str) can error
+    cbFsAppend(path, content)
+end fn
+
+pub fn copy(src as str, dst as str) can error
+    cbFsCopy(src, dst)
+end fn
+
+' --- Public API: Streaming File operations (UFCS on File) ---
+
+pub fn open(path as str) as File can error
+    dim f = cbFsOpen(path)
+    return f
+end fn
+
+pub fn openMode(path as str, mode as str) as File can error
+    dim f = cbFsOpenMode(path, mode)
+    return f
+end fn
+
+pub fn readLine(f as File, byref outLine as str) as bool can error
+    dim ok = cbFsReadLine(f, outLine)
+    return ok
+end fn
+
+pub fn eof(f as File) as bool
+    return cbFsEof(f)
+end fn
+
+pub fn writeStr(f as File, text as str) can error
+    cbFsWriteStream(f, text)
+end fn
+
+pub fn writeLine(f as File, text as str) can error
+    cbFsWriteLine(f, text)
+end fn
+
+pub fn flush(f as File) can error
+    cbFsFlush(f)
+end fn
+
+pub fn isOpen(f as File) as bool
+    return cbFsIsOpen(f)
+end fn
+
+pub fn close(byref f as File)
+    cbFsClose(f)
+end fn
+
+' --- Public API: Metadata, directories, and paths ---
+
+pub fn exists(path as str) as bool
+    return cbFsExists(path)
+end fn
+
+pub fn isFile(path as str) as bool
+    return cbFsIsFile(path)
+end fn
+
+pub fn isDir(path as str) as bool
+    return cbFsIsDir(path)
+end fn
+
+pub fn size(path as str) as int can error
+    dim sz = cbFsSize(path)
+    return sz
+end fn
+
+pub fn dir(path as str) as list[str] can error
+    dim items = cbFsDir(path)
+    return items
+end fn
+
+pub fn mkdir(path as str) can error
+    cbFsMkdir(path)
+end fn
+
+pub fn remove(path as str) can error
+    cbFsRemove(path)
+end fn
+
+pub fn joinPath(a as str, b as str) as str
+    return cbFsJoinPath(a, b)
+end fn
+
+pub fn parentDir(path as str) as str
+    return cbFsParentDir(path)
+end fn
+
+pub fn fileName(path as str) as str
+    return cbFsFileName(path)
+end fn
+
+pub fn ext(path as str) as str
+    return cbFsExt(path)
+end fn

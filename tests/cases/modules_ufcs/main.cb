@@ -1,31 +1,31 @@
 ' EXPECT_CPP: struct cb_player__Player {
 ' EXPECT_CPP: void cb_player__heal(cb_player__Player& p, int amount)
-' EXPECT_CPP: const int max_potion = 50;
-' EXPECT_CPP: int uses_left = 3;
-' EXPECT_CPP: uses_left = 2;
-' EXPECT_CPP: cb_player__Player stack_hero = cb_player__Player{std::string("Alice"), 10};
-' EXPECT_CPP: cb_player__heal(stack_hero, max_potion);
+' EXPECT_CPP: const int maxPotion = 50;
+' EXPECT_CPP: int usesLeft = 3;
+' EXPECT_CPP: usesLeft = 2;
+' EXPECT_CPP: cb_player__Player stackHero = cb_player__Player{std::string("Alice"), 10};
+' EXPECT_CPP: cb_player__heal(stackHero, maxPotion);
 ' FORBID_CPP: throw
 ' FORBID_CPP: std::make_shared
 ' EXPECT_OUT: Alice: 60
-' EXPECT_OUT: uses_left: 2
+' EXPECT_OUT: usesLeft: 2
 
 import "player.cb"
 
 fn main()
     ' IMMUTABILITY: Cannot be changed after declaration
-    const max_potion as int = 50
+    const maxPotion as int = 50
 
     ' MUTABILITY & INFERENCE: 'dim' allows reassignment, type is inferred
-    dim uses_left = 3
-    uses_left = 2
+    dim usesLeft = 3
+    usesLeft = 2
 
     ' MEMORY: Stack allocation (flat, fast, zero cleanup needed)
-    dim stack_hero = player.Player(name="Alice", health=10)
+    dim stackHero = player.Player(name="Alice", health=10)
 
     ' UFCS (Unified Function Call Syntax):
-    stack_hero.heal(max_potion)
+    stackHero.heal(maxPotion)
 
-    print(stack_hero.name, ": ", stack_hero.health)
-    print("uses_left: " & uses_left)
+    print(stackHero.name, ": ", stackHero.health)
+    print("usesLeft: " & usesLeft)
 end fn

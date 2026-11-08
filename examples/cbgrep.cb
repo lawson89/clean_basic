@@ -1,0 +1,214 @@
+' CleanBasic Example: cbgrep
+' Fast Unix grep / ripgrep-style CLI utility written in pure CleanBasic
+' Demonstrates std/os, std/fs (streaming File + defer + recursive dir walk), and std/str (zero-allocation search)
+'
+' Usage:
+'   cbgrep [-icnv] <pattern> [path...]
+
+import "std/os"
+import "std/fs"
+import "std/str"
+
+type GrepOptions
+    ignoreCase as bool
+    lineNumbers as bool
+    countOnly as bool
+    invertMatch as bool
+end type
+
+fn printUsage()
+    os.eprint("Usage: cbgrep [-icnv] <pattern> [path...]")
+end fn
+
+fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
+    dim flags = arg.slice(1, len(arg)).chars()
+    for ch in flags
+        if ch == "i"
+            opts.ignoreCase = true
+        else if ch == "n"
+            opts.lineNumbers = true
+        else if ch == "c"
+            opts.countOnly = true
+        else if ch == "v"
+            opts.invertMatch = true
+        else
+            os.eprint("cbgrep: invalid option -- '" & ch & "'")
+            printUsage()
+            return false
+        end if
+    end for
+    return true
+end fn
+
+fn lineMatches(line as str, pattern as str, opts as GrepOptions) as bool
+    dim matched = false
+    if opts.ignoreCase
+        matched = line.asciiFindIgnoreCase(pattern) != -1
+    else
+        matched = line.find(pattern) != -1
+    end if
+    if opts.invertMatch
+        return not matched
+    end if
+    return matched
+end fn
+
+fn formatMatchLine(path as str, showPath as bool, lineNum as int, line as str, opts as GrepOptions) as str
+    if showPath and opts.lineNumbers
+        return path & ":" & lineNum & ":" & line
+    else if showPath
+        return path & ":" & line
+    else if opts.lineNumbers
+        return str(lineNum) & ":" & line
+    end if
+    return line
+end fn
+
+fn printCountResult(path as str, showPath as bool, matchedCount as int)
+    if showPath
+        print(path & ":" & matchedCount)
+    else
+        print(matchedCount)
+    end if
+end fn
+
+fn searchStdin(pattern as str, opts as GrepOptions, showPath as bool) as int
+    dim matchedCount = 0
+    dim lineNum = 0
+    dim line = ""
+    while os.readLine(line)
+        lineNum = lineNum + 1
+        if lineMatches(line, pattern, opts)
+            matchedCount = matchedCount + 1
+            if not opts.countOnly
+                print(formatMatchLine("(standard input)", showPath, lineNum, line, opts))
+            end if
+        end if
+    end while
+    if opts.countOnly
+        printCountResult("(standard input)", showPath, matchedCount)
+    end if
+    return matchedCount
+end fn
+
+fn searchFile(path as str, pattern as str, opts as GrepOptions, showPath as bool) as int can error
+    dim f = fs.open(path)
+    defer
+        f.close()
+    end defer
+
+    dim matchedCount = 0
+    dim lineNum = 0
+    dim line = ""
+    while f.readLine(line)
+        lineNum = lineNum + 1
+        if lineMatches(line, pattern, opts)
+            matchedCount = matchedCount + 1
+            if not opts.countOnly
+                print(formatMatchLine(path, showPath, lineNum, line, opts))
+            end if
+        end if
+    end while
+
+    if opts.countOnly
+        printCountResult(path, showPath, matchedCount)
+    end if
+    return matchedCount
+end fn
+
+fn searchFileSafe(path as str, pattern as str, opts as GrepOptions, showPath as bool, byref hadError as bool) as int
+    on error e
+        os.eprint("cbgrep: " & path & ": " & e.msg)
+        hadError = true
+        return 0
+    end error
+
+    dim count = searchFile(path, pattern, opts, showPath)
+    return count
+end fn
+
+fn searchDir(dirPath as str, pattern as str, opts as GrepOptions, byref hadError as bool) as int
+    on error e
+        os.eprint("cbgrep: " & dirPath & ": " & e.msg)
+        hadError = true
+        return 0
+    end error
+
+    dim total = 0
+    dim entries = fs.dir(dirPath)
+    for name in entries
+        if not name.startsWith(".")
+            dim childPath = fs.joinPath(dirPath, name)
+            if fs.isDir(childPath)
+                total = total + searchDir(childPath, pattern, opts, hadError)
+            else if fs.isFile(childPath)
+                total = total + searchFileSafe(childPath, pattern, opts, true, hadError)
+            end if
+        end if
+    end for
+    return total
+end fn
+
+fn main() as int
+    dim argv = os.args()
+    dim opts = GrepOptions(ignoreCase=false, lineNumbers=false, countOnly=false, invertMatch=false)
+    dim hasPattern = false
+    dim pattern = ""
+    dim targets as list[str] = []
+    dim flagsDone = false
+
+    if len(argv) > 1
+        for i = 1 to len(argv) - 1
+            dim arg = argv[i]
+            if not flagsDone and not hasPattern and (arg == "-h" or arg == "--help")
+                printUsage()
+                return 0
+            else if not flagsDone and arg == "--"
+                flagsDone = true
+            else if not flagsDone and not hasPattern and arg.startsWith("-") and arg != "-"
+                if not parseFlagGroup(arg, opts)
+                    return 2
+                end if
+            else if not hasPattern
+                pattern = arg
+                hasPattern = true
+            else
+                targets.push(arg)
+            end if
+        end for
+    end if
+
+    if not hasPattern
+        printUsage()
+        return 2
+    end if
+
+    dim totalMatches = 0
+    dim hadError = false
+
+    if len(targets) == 0
+        totalMatches = searchStdin(pattern, opts, false)
+    else
+        dim showPath = len(targets) > 1
+        for target in targets
+            if target == "-"
+                totalMatches = totalMatches + searchStdin(pattern, opts, showPath)
+            else if not fs.exists(target)
+                os.eprint("cbgrep: " & target & ": No such file or directory")
+                hadError = true
+            else if fs.isDir(target)
+                totalMatches = totalMatches + searchDir(target, pattern, opts, hadError)
+            else
+                totalMatches = totalMatches + searchFileSafe(target, pattern, opts, showPath, hadError)
+            end if
+        end for
+    end if
+
+    if hadError
+        return 2
+    end if
+    if totalMatches > 0
+        return 0
+    end if
+    return 1
+end fn

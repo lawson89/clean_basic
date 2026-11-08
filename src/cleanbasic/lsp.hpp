@@ -25,24 +25,24 @@ struct LspDocumentSnapshot {
 
 struct LspServerState {
     bool initialized = false;
-    bool shutdown_requested = false;
-    bool should_exit = false;
-    int exit_code = 0;
-    std::unordered_map<std::string, std::string> open_documents;
+    bool shutdownRequested = false;
+    bool shouldExit = false;
+    int exitCode = 0;
+    std::unordered_map<std::string, std::string> openDocuments;
     std::unordered_map<std::string, LspDocumentSnapshot> snapshots;
 };
 
-inline std::string wrap_vb_code_block(std::string_view code) {
+inline std::string wrapVbCodeBlock(std::string_view code) {
     const std::string fence(3, static_cast<char>(96));
     return fence + "vb\n" + std::string(code) + "\n" + fence;
 }
 
-inline std::string wrap_inline_code(std::string_view text) {
+inline std::string wrapInlineCode(std::string_view text) {
     const std::string tick(1, static_cast<char>(96));
     return tick + std::string(text) + tick;
 }
 
-inline bool is_ascii_alpha(char c) {
+inline bool isAsciiAlpha(char c) {
     if (c >= 'a' && c <= 'z') {
         return true;
     }
@@ -52,17 +52,17 @@ inline bool is_ascii_alpha(char c) {
     return false;
 }
 
-inline std::string percent_decode_uri_path(std::string_view raw) {
+inline std::string percentDecodeUriPath(std::string_view raw) {
     std::string out;
     out.reserve(raw.size());
     size_t i = 0;
     while (i < raw.size()) {
         if (raw[i] == '%' && i + 2 < raw.size()) {
-            const auto hi = json_hex_digit_value(raw[i + 1]);
-            const auto lo = json_hex_digit_value(raw[i + 2]);
+            const auto hi = jsonHexDigitValue(raw[i + 1]);
+            const auto lo = jsonHexDigitValue(raw[i + 2]);
             if (hi.has_value() && lo.has_value()) {
-                const uint32_t byte_val = (hi.value() << 4) | lo.value();
-                out.push_back(static_cast<char>(byte_val));
+                const uint32_t byteVal = (hi.value() << 4) | lo.value();
+                out.push_back(static_cast<char>(byteVal));
                 i += 3;
                 continue;
             }
@@ -73,7 +73,7 @@ inline std::string percent_decode_uri_path(std::string_view raw) {
     return out;
 }
 
-inline std::string uri_to_file_path(std::string_view uri) {
+inline std::string uriToFilePath(std::string_view uri) {
     std::string_view rest = uri;
     const std::string_view scheme = "file://";
     if (rest.size() >= scheme.size() && rest.substr(0, scheme.size()) == scheme) {
@@ -82,8 +82,8 @@ inline std::string uri_to_file_path(std::string_view uri) {
         if (rest.size() >= localhost.size() && rest.substr(0, localhost.size()) == localhost) {
             rest = rest.substr(localhost.size() - 1);
         }
-        std::string decoded = percent_decode_uri_path(rest);
-        if (decoded.size() >= 3 && decoded[0] == '/' && is_ascii_alpha(decoded[1]) && decoded[2] == ':') {
+        std::string decoded = percentDecodeUriPath(rest);
+        if (decoded.size() >= 3 && decoded[0] == '/' && isAsciiAlpha(decoded[1]) && decoded[2] == ':') {
             decoded = decoded.substr(1);
         }
         return decoded;
@@ -91,7 +91,7 @@ inline std::string uri_to_file_path(std::string_view uri) {
     return std::string(uri);
 }
 
-inline std::string file_path_to_uri(std::string_view path) {
+inline std::string filePathToUri(std::string_view path) {
     const std::string_view scheme = "file://";
     if (path.size() >= scheme.size() && path.substr(0, scheme.size()) == scheme) {
         return std::string(path);
@@ -102,31 +102,31 @@ inline std::string file_path_to_uri(std::string_view path) {
     return "file:///" + std::string(path);
 }
 
-inline std::unordered_map<std::string, std::string> build_open_file_buffers(const LspServerState& state) {
+inline std::unordered_map<std::string, std::string> buildOpenFileBuffers(const LspServerState& state) {
     std::unordered_map<std::string, std::string> buffers;
-    for (const auto& kv : state.open_documents) {
-        const std::string file_path = uri_to_file_path(kv.first);
-        buffers[file_path] = kv.second;
-        const std::string norm_path = normalize_rel_path(file_path);
-        if (!norm_path.empty()) {
-            buffers[norm_path] = kv.second;
+    for (const auto& kv : state.openDocuments) {
+        const std::string filePath = uriToFilePath(kv.first);
+        buffers[filePath] = kv.second;
+        const std::string normPath = normalizeRelPath(filePath);
+        if (!normPath.empty()) {
+            buffers[normPath] = kv.second;
         }
     }
     return buffers;
 }
 
-inline std::string read_document_text(const LspServerState& state, std::string_view uri) {
-    const auto it = state.open_documents.find(std::string(uri));
-    if (it != state.open_documents.end()) {
+inline std::string readDocumentText(const LspServerState& state, std::string_view uri) {
+    const auto it = state.openDocuments.find(std::string(uri));
+    if (it != state.openDocuments.end()) {
         return it->second;
     }
-    const std::string file_path = uri_to_file_path(uri);
-    const auto open_buffers = build_open_file_buffers(state);
-    const auto mem_opt = find_in_memory_source(open_buffers, file_path);
-    if (mem_opt.has_value()) {
-        return mem_opt.value();
+    const std::string filePath = uriToFilePath(uri);
+    const auto openBuffers = buildOpenFileBuffers(state);
+    const auto memOpt = findInMemorySource(openBuffers, filePath);
+    if (memOpt.has_value()) {
+        return memOpt.value();
     }
-    std::ifstream in(file_path);
+    std::ifstream in(filePath);
     if (!in.is_open()) {
         return "";
     }
@@ -135,116 +135,116 @@ inline std::string read_document_text(const LspServerState& state, std::string_v
     return ss.str();
 }
 
-inline LspDocumentSnapshot get_or_build_snapshot(LspServerState& state, std::string_view uri) {
-    const std::string uri_key(uri);
-    const std::string file_path = uri_to_file_path(uri);
-    const std::string text = read_document_text(state, uri);
+inline LspDocumentSnapshot getOrBuildSnapshot(LspServerState& state, std::string_view uri) {
+    const std::string uriKey(uri);
+    const std::string filePath = uriToFilePath(uri);
+    const std::string text = readDocumentText(state, uri);
     if (!text.empty()) {
-        const auto open_buffers = build_open_file_buffers(state);
-        const CheckSourceResult check_res = check_source(text, file_path, open_buffers);
-        if (check_res.ok) {
-            LspDocumentSnapshot snap{true, check_res.arena, check_res.program, check_res.symbols};
-            state.snapshots[uri_key] = snap;
+        const auto openBuffers = buildOpenFileBuffers(state);
+        const CheckSourceResult checkRes = checkSource(text, filePath, openBuffers);
+        if (checkRes.ok) {
+            LspDocumentSnapshot snap{true, checkRes.arena, checkRes.program, checkRes.symbols};
+            state.snapshots[uriKey] = snap;
             return snap;
         }
     }
-    const auto snap_it = state.snapshots.find(uri_key);
-    if (snap_it != state.snapshots.end() && snap_it->second.valid) {
-        return snap_it->second;
+    const auto snapIt = state.snapshots.find(uriKey);
+    if (snapIt != state.snapshots.end() && snapIt->second.valid) {
+        return snapIt->second;
     }
-    LspDocumentSnapshot empty_snap{};
-    empty_snap.valid = false;
-    return empty_snap;
+    LspDocumentSnapshot emptySnap{};
+    emptySnap.valid = false;
+    return emptySnap;
 }
 
-inline JsonId clone_json_scalar_or_null(const JsonArena& src_arena, JsonId src_id, JsonArena& dst_arena) {
-    if (src_id >= src_arena.nodes.size()) {
-        return json_add_null(dst_arena);
+inline JsonId cloneJsonScalarOrNull(const JsonArena& srcArena, JsonId srcId, JsonArena& dstArena) {
+    if (srcId >= srcArena.nodes.size()) {
+        return jsonAddNull(dstArena);
     }
-    const auto& var = src_arena.nodes[src_id];
+    const auto& var = srcArena.nodes[srcId];
     if (std::holds_alternative<JsonNull>(var)) {
-        return json_add_null(dst_arena);
+        return jsonAddNull(dstArena);
     }
     if (std::holds_alternative<JsonBool>(var)) {
-        return json_add_bool(dst_arena, std::get<JsonBool>(var).value);
+        return jsonAddBool(dstArena, std::get<JsonBool>(var).value);
     }
     if (std::holds_alternative<JsonNumber>(var)) {
         const auto& num = std::get<JsonNumber>(var);
-        if (num.is_int) {
-            return json_add_int(dst_arena, num.int_val);
+        if (num.isInt) {
+            return jsonAddInt(dstArena, num.intVal);
         }
-        return json_add_float(dst_arena, num.float_val);
+        return jsonAddFloat(dstArena, num.floatVal);
     }
     if (std::holds_alternative<JsonString>(var)) {
-        return json_add_string(dst_arena, std::get<JsonString>(var).value);
+        return jsonAddString(dstArena, std::get<JsonString>(var).value);
     }
-    return json_add_null(dst_arena);
+    return jsonAddNull(dstArena);
 }
 
-inline JsonId make_lsp_range(
+inline JsonId makeLspRange(
     JsonArena& arena,
-    uint32_t start_line_1based,
-    uint32_t start_col_1based,
-    uint32_t end_line_1based,
-    uint32_t end_col_1based
+    uint32_t startLine1Based,
+    uint32_t startCol1Based,
+    uint32_t endLine1Based,
+    uint32_t endCol1Based
 ) {
-    int64_t s_line = 0;
-    if (start_line_1based > 0) {
-        s_line = static_cast<int64_t>(start_line_1based - 1);
+    int64_t sLine = 0;
+    if (startLine1Based > 0) {
+        sLine = static_cast<int64_t>(startLine1Based - 1);
     }
-    int64_t s_col = 0;
-    if (start_col_1based > 0) {
-        s_col = static_cast<int64_t>(start_col_1based - 1);
+    int64_t sCol = 0;
+    if (startCol1Based > 0) {
+        sCol = static_cast<int64_t>(startCol1Based - 1);
     }
-    int64_t e_line = s_line;
-    if (end_line_1based > 0) {
-        e_line = static_cast<int64_t>(end_line_1based - 1);
+    int64_t eLine = sLine;
+    if (endLine1Based > 0) {
+        eLine = static_cast<int64_t>(endLine1Based - 1);
     }
-    if (e_line < s_line) {
-        e_line = s_line;
+    if (eLine < sLine) {
+        eLine = sLine;
     }
-    int64_t e_col = s_col;
-    if (end_col_1based > 0) {
-        e_col = static_cast<int64_t>(end_col_1based - 1);
+    int64_t eCol = sCol;
+    if (endCol1Based > 0) {
+        eCol = static_cast<int64_t>(endCol1Based - 1);
     }
 
-    const JsonId start_pos = json_add_object(arena);
-    json_object_set(arena, start_pos, "line", json_add_int(arena, s_line));
-    json_object_set(arena, start_pos, "character", json_add_int(arena, s_col));
+    const JsonId startPos = jsonAddObject(arena);
+    jsonObjectSet(arena, startPos, "line", jsonAddInt(arena, sLine));
+    jsonObjectSet(arena, startPos, "character", jsonAddInt(arena, sCol));
 
-    const JsonId end_pos = json_add_object(arena);
-    json_object_set(arena, end_pos, "line", json_add_int(arena, e_line));
-    json_object_set(arena, end_pos, "character", json_add_int(arena, e_col));
+    const JsonId endPos = jsonAddObject(arena);
+    jsonObjectSet(arena, endPos, "line", jsonAddInt(arena, eLine));
+    jsonObjectSet(arena, endPos, "character", jsonAddInt(arena, eCol));
 
-    const JsonId range_obj = json_add_object(arena);
-    json_object_set(arena, range_obj, "start", start_pos);
-    json_object_set(arena, range_obj, "end", end_pos);
-    return range_obj;
+    const JsonId rangeObj = jsonAddObject(arena);
+    jsonObjectSet(arena, rangeObj, "start", startPos);
+    jsonObjectSet(arena, rangeObj, "end", endPos);
+    return rangeObj;
 }
 
-inline JsonId make_lsp_location(
+inline JsonId makeLspLocation(
     JsonArena& arena,
-    std::string_view file_path,
-    uint32_t line_1based,
-    uint32_t col_1based,
-    size_t name_len
+    std::string_view filePath,
+    uint32_t line1Based,
+    uint32_t col1Based,
+    size_t nameLen
 ) {
-    uint32_t span_len = 1;
-    if (name_len > 0) {
-        span_len = static_cast<uint32_t>(name_len);
+    uint32_t spanLen = 1;
+    if (nameLen > 0) {
+        spanLen = static_cast<uint32_t>(nameLen);
     }
-    const JsonId loc = json_add_object(arena);
-    json_object_set(arena, loc, "uri", json_add_string(arena, file_path_to_uri(file_path)));
-    json_object_set(
+    const JsonId loc = jsonAddObject(arena);
+    jsonObjectSet(arena, loc, "uri", jsonAddString(arena, filePathToUri(filePath)));
+    jsonObjectSet(
         arena,
         loc,
         "range",
-        make_lsp_range(arena, line_1based, col_1based, line_1based, col_1based + span_len)
+        makeLspRange(arena, line1Based, col1Based, line1Based, col1Based + spanLen)
     );
     return loc;
 }
 
-inline std::string format_cleanbasic_type(const AstArena& arena, TypeId tid) {
+inline std::string formatCleanbasicType(const AstArena& arena, TypeId tid) {
     if (tid == INVALID_ID || tid >= arena.types.size()) {
         return "void";
     }
@@ -252,191 +252,191 @@ inline std::string format_cleanbasic_type(const AstArena& arena, TypeId tid) {
     if (tn.name.empty() || tn.name == "void") {
         return "void";
     }
-    const auto [mod_id, base_name] = split_symbol_key(tn.name);
-    std::string out = base_name;
-    if (!tn.type_args.empty()) {
+    const auto [modId, baseName] = splitSymbolKey(tn.name);
+    std::string out = baseName;
+    if (!tn.typeArgs.empty()) {
         out += "[";
-        for (size_t i = 0; i < tn.type_args.size(); ++i) {
+        for (size_t i = 0; i < tn.typeArgs.size(); ++i) {
             if (i > 0) {
                 out += ", ";
             }
-            out += format_cleanbasic_type(arena, tn.type_args[i]);
+            out += formatCleanbasicType(arena, tn.typeArgs[i]);
         }
         out += "]";
     }
     return out;
 }
 
-inline std::string format_fn_detail_signature(
+inline std::string formatFnDetailSignature(
     const AstArena& arena,
     const std::vector<Param>& params,
-    TypeId return_type,
-    bool is_fallible
+    TypeId returnType,
+    bool isFallible
 ) {
     std::string out = "(";
     for (size_t i = 0; i < params.size(); ++i) {
         if (i > 0) {
             out += ", ";
         }
-        if (params[i].is_byref) {
+        if (params[i].isByref) {
             out += "byref ";
         }
-        out += params[i].name + " as " + format_cleanbasic_type(arena, params[i].type_id);
+        out += params[i].name + " as " + formatCleanbasicType(arena, params[i].typeId);
     }
     out += ")";
-    if (!is_void_type(arena, return_type)) {
-        out += " as " + format_cleanbasic_type(arena, return_type);
+    if (!isVoidType(arena, returnType)) {
+        out += " as " + formatCleanbasicType(arena, returnType);
     }
-    if (is_fallible) {
+    if (isFallible) {
         out += " can error";
     }
     return out;
 }
 
-inline std::string format_fn_hover_markdown(const AstArena& arena, const FnSymbol& fn) {
+inline std::string formatFnHoverMarkdown(const AstArena& arena, const FnSymbol& fn) {
     std::string sig;
-    if (fn.is_pub) {
+    if (fn.isPub) {
         sig += "pub ";
     }
-    if (fn.is_extern) {
+    if (fn.isExtern) {
         sig += "extern ";
     }
-    sig += "fn " + fn.name + format_fn_detail_signature(arena, fn.params, fn.return_type, fn.is_fallible);
-    return wrap_vb_code_block(sig);
+    sig += "fn " + fn.name + formatFnDetailSignature(arena, fn.params, fn.returnType, fn.isFallible);
+    return wrapVbCodeBlock(sig);
 }
 
-inline std::string format_type_hover_markdown(const AstArena& arena, const TypeSymbol& ts) {
+inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts) {
     std::string code;
-    if (ts.is_pub) {
+    if (ts.isPub) {
         code += "pub ";
     }
-    if (ts.is_extern) {
+    if (ts.isExtern) {
         code += "extern ";
     }
     code += "type " + ts.name;
-    if (ts.is_extern && ts.field_order.empty()) {
-        return wrap_vb_code_block(code);
+    if (ts.isExtern && ts.fieldOrder.empty()) {
+        return wrapVbCodeBlock(code);
     }
     code += "\n";
-    for (const auto& f : ts.field_order) {
-        TypeId ftid = f.type_id;
+    for (const auto& f : ts.fieldOrder) {
+        TypeId ftid = f.typeId;
         const auto fit = ts.fields.find(f.name);
         if (fit != ts.fields.end()) {
             ftid = fit->second;
         }
-        code += "    " + f.name + " as " + format_cleanbasic_type(arena, ftid) + "\n";
+        code += "    " + f.name + " as " + formatCleanbasicType(arena, ftid) + "\n";
     }
     code += "end type";
-    return wrap_vb_code_block(code);
+    return wrapVbCodeBlock(code);
 }
 
-inline std::string format_alias_hover_markdown(
+inline std::string formatAliasHoverMarkdown(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
     const AliasSymbol& al
 ) {
     std::string code;
-    if (al.is_pub) {
+    if (al.isPub) {
         code += "pub ";
     }
-    const std::string raw_target = format_cleanbasic_type(arena, al.target_type);
-    const TypeId resolved_tid = resolve_alias(arena, symbols, al.module_id, al.target_type);
-    const std::string resolved_target = format_cleanbasic_type(arena, resolved_tid);
-    code += "alias " + al.name + " = " + raw_target;
-    std::string md = wrap_vb_code_block(code);
-    if (resolved_target != raw_target) {
+    const std::string rawTarget = formatCleanbasicType(arena, al.targetType);
+    const TypeId resolvedTid = resolveAlias(arena, symbols, al.moduleId, al.targetType);
+    const std::string resolvedTarget = formatCleanbasicType(arena, resolvedTid);
+    code += "alias " + al.name + " = " + rawTarget;
+    std::string md = wrapVbCodeBlock(code);
+    if (resolvedTarget != rawTarget) {
         md.push_back(static_cast<char>(10));
-        md += "Resolved type: " + wrap_inline_code(resolved_target);
+        md += "Resolved type: " + wrapInlineCode(resolvedTarget);
     }
     return md;
 }
 
-inline std::string format_var_hover_markdown(const AstArena& arena, const VarSymbol& vs) {
+inline std::string formatVarHoverMarkdown(const AstArena& arena, const VarSymbol& vs) {
     std::string prefix = "dim ";
-    if (vs.is_byref) {
+    if (vs.isByref) {
         prefix = "(param) byref ";
-    } else if (vs.is_const) {
+    } else if (vs.isConst) {
         prefix = "const ";
     }
-    const std::string tname = format_cleanbasic_type(arena, vs.type_id);
-    return wrap_vb_code_block(prefix + vs.name + " as " + tname);
+    const std::string tname = formatCleanbasicType(arena, vs.typeId);
+    return wrapVbCodeBlock(prefix + vs.name + " as " + tname);
 }
 
-inline std::optional<std::string> format_builtin_hover_markdown(std::string_view name) {
+inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view name) {
     if (name == "print") {
-        return wrap_vb_code_block("fn print(values...)") +
+        return wrapVbCodeBlock("fn print(values...)") +
             "\nWrites one or more values to standard output followed by a newline.";
     }
     if (name == "len") {
-        return wrap_vb_code_block("fn len(container as any) as int") +
+        return wrapVbCodeBlock("fn len(container as any) as int") +
             "\nReturns the number of elements in a list, dict, or str.";
     }
     if (name == "str") {
-        return wrap_vb_code_block("fn str(val as any) as str") +
+        return wrapVbCodeBlock("fn str(val as any) as str") +
             "\nConverts a numeric, boolean, or err value to a str.";
     }
     if (name == "error") {
-        return wrap_vb_code_block("fn error(msg as str, [code=1]) as err") +
+        return wrapVbCodeBlock("fn error(msg as str, [code=1]) as err") +
             "\nRaises and returns a structured err value from a can error function.";
     }
     return std::nullopt;
 }
 
-inline bool decl_belongs_to_file(
-    const DeclNode& decl_node,
-    std::string_view target_file_path,
-    std::string_view target_norm_path
+inline bool declBelongsToFile(
+    const DeclNode& declNode,
+    std::string_view targetFilePath,
+    std::string_view targetNormPath
 ) {
-    if (decl_node.file_name == target_file_path) {
+    if (declNode.fileName == targetFilePath) {
         return true;
     }
-    const std::string decl_norm = normalize_rel_path(decl_node.file_name);
-    if (!decl_norm.empty() && !target_norm_path.empty() && decl_norm == target_norm_path) {
+    const std::string declNorm = normalizeRelPath(declNode.fileName);
+    if (!declNorm.empty() && !targetNormPath.empty() && declNorm == targetNormPath) {
         return true;
     }
-    if (decl_node.module_id.empty() && decl_node.file_name.empty()) {
+    if (declNode.moduleId.empty() && declNode.fileName.empty()) {
         return true;
     }
     return false;
 }
 
-inline std::string find_module_id_for_file(
+inline std::string findModuleIdForFile(
     const AstArena& arena,
     const Program& program,
-    std::string_view file_path
+    std::string_view filePath
 ) {
-    const std::string norm_target = normalize_rel_path(file_path);
+    const std::string normTarget = normalizeRelPath(filePath);
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) {
             continue;
         }
         const DeclNode& dn = arena.decls[did];
-        if (decl_belongs_to_file(dn, file_path, norm_target)) {
-            return dn.module_id;
+        if (declBelongsToFile(dn, filePath, normTarget)) {
+            return dn.moduleId;
         }
     }
     return "";
 }
 
-inline std::optional<std::string> find_enclosing_fn_key(
+inline std::optional<std::string> findEnclosingFnKey(
     const AstArena& arena,
     const Program& program,
-    std::string_view file_path,
-    uint32_t cursor_line_1based
+    std::string_view filePath,
+    uint32_t cursorLine1Based
 ) {
-    const std::string norm_target = normalize_rel_path(file_path);
+    const std::string normTarget = normalizeRelPath(filePath);
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) {
             continue;
         }
         const DeclNode& dn = arena.decls[did];
-        if (!decl_belongs_to_file(dn, file_path, norm_target)) {
+        if (!declBelongsToFile(dn, filePath, normTarget)) {
             continue;
         }
         if (std::holds_alternative<FnDecl>(dn.payload)) {
             const auto& fn = std::get<FnDecl>(dn.payload);
-            if (cursor_line_1based >= dn.line && cursor_line_1based <= dn.end_line) {
-                return symbol_key(dn.module_id, fn.name);
+            if (cursorLine1Based >= dn.line && cursorLine1Based <= dn.endLine) {
+                return symbolKey(dn.moduleId, fn.name);
             }
         }
     }
@@ -446,52 +446,52 @@ inline std::optional<std::string> find_enclosing_fn_key(
 struct CursorTokenContext {
     bool found = false;
     Token token;
-    size_t token_index = 0;
-    bool has_dot_receiver = false;
-    std::string receiver_name;
-    bool is_import_target = false;
+    size_t tokenIndex = 0;
+    bool hasDotReceiver = false;
+    std::string receiverName;
+    bool isImportTarget = false;
 };
 
-inline CursorTokenContext resolve_cursor_token(
-    std::string_view source_text,
-    std::string_view file_path,
-    uint32_t line_1based,
-    uint32_t col_1based
+inline CursorTokenContext resolveCursorToken(
+    std::string_view sourceText,
+    std::string_view filePath,
+    uint32_t line1Based,
+    uint32_t col1Based
 ) {
     CursorTokenContext ctx{};
-    const LexResult lex_res = tokenize(source_text, file_path);
-    if (lex_res.tokens.empty()) {
+    const LexResult lexRes = tokenize(sourceText, filePath);
+    if (lexRes.tokens.empty()) {
         return ctx;
     }
 
-    for (size_t i = 0; i < lex_res.tokens.size(); ++i) {
-        const Token& tok = lex_res.tokens[i];
+    for (size_t i = 0; i < lexRes.tokens.size(); ++i) {
+        const Token& tok = lexRes.tokens[i];
         if (tok.kind == "EOF" || tok.kind == "NEWLINE") {
             continue;
         }
-        if (tok.line != line_1based) {
+        if (tok.line != line1Based) {
             continue;
         }
-        const uint32_t tok_start = tok.col;
-        uint32_t tok_len = 1;
+        const uint32_t tokStart = tok.col;
+        uint32_t tokLen = 1;
         if (!tok.value.empty()) {
-            tok_len = static_cast<uint32_t>(tok.value.size());
+            tokLen = static_cast<uint32_t>(tok.value.size());
         }
-        const uint32_t tok_end = tok_start + tok_len;
-        if (col_1based >= tok_start && col_1based <= tok_end) {
+        const uint32_t tokEnd = tokStart + tokLen;
+        if (col1Based >= tokStart && col1Based <= tokEnd) {
             ctx.found = true;
             ctx.token = tok;
-            ctx.token_index = i;
-            if (i >= 2 && lex_res.tokens[i - 1].kind == "DOT") {
-                const Token& prev_tok = lex_res.tokens[i - 2];
-                if (prev_tok.kind == "IDENT" || prev_tok.kind == "TYPE_KW") {
-                    ctx.has_dot_receiver = true;
-                    ctx.receiver_name = prev_tok.value;
+            ctx.tokenIndex = i;
+            if (i >= 2 && lexRes.tokens[i - 1].kind == "DOT") {
+                const Token& prevTok = lexRes.tokens[i - 2];
+                if (prevTok.kind == "IDENT" || prevTok.kind == "TYPE_KW") {
+                    ctx.hasDotReceiver = true;
+                    ctx.receiverName = prevTok.value;
                 }
             }
-            if (i >= 1 && lex_res.tokens[i - 1].kind == "KEYWORD" &&
-                lex_res.tokens[i - 1].value == "import" && tok.kind == "STRING") {
-                ctx.is_import_target = true;
+            if (i >= 1 && lexRes.tokens[i - 1].kind == "KEYWORD" &&
+                lexRes.tokens[i - 1].value == "import" && tok.kind == "STRING") {
+                ctx.isImportTarget = true;
             }
             return ctx;
         }
@@ -499,32 +499,32 @@ inline CursorTokenContext resolve_cursor_token(
     return ctx;
 }
 
-inline std::optional<std::string> find_module_file_path(
+inline std::optional<std::string> findModuleFilePath(
     const AstArena& arena,
     const Program& program,
-    std::string_view target_module_id,
-    std::string_view current_file_path,
-    std::string_view import_target = ""
+    std::string_view targetModuleId,
+    std::string_view currentFilePath,
+    std::string_view importTarget = ""
 ) {
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) {
             continue;
         }
         const DeclNode& dn = arena.decls[did];
-        if (dn.module_id == target_module_id && !dn.file_name.empty()) {
-            return dn.file_name;
+        if (dn.moduleId == targetModuleId && !dn.fileName.empty()) {
+            return dn.fileName;
         }
     }
-    if (!import_target.empty()) {
-        if (is_std_import_target(import_target)) {
-            const std::string std_sub = strip_cb_ext(import_target.substr(4));
-            return cleanbasic_root_dir() + "/stdlib/" + std_sub + "/" + std_sub + ".cb";
+    if (!importTarget.empty()) {
+        if (isStdImportTarget(importTarget)) {
+            const std::string stdSub = stripCbExt(importTarget.substr(4));
+            return cleanbasicRootDir() + "/stdlib/" + stdSub + "/" + stdSub + ".cb";
         }
-        const std::string dir = parent_dir_of(current_file_path);
+        const std::string dir = parentDirOf(currentFilePath);
         if (dir == ".") {
-            return std::string(import_target);
+            return std::string(importTarget);
         }
-        return normalize_rel_path(dir + "/" + std::string(import_target));
+        return normalizeRelPath(dir + "/" + std::string(importTarget));
     }
     return std::nullopt;
 }
@@ -532,181 +532,181 @@ inline std::optional<std::string> find_module_file_path(
 struct LspTextPositionParams {
     bool valid = false;
     std::string uri;
-    std::string file_path;
-    uint32_t line_0based = 0;
-    uint32_t char_0based = 0;
-    uint32_t line_1based = 1;
-    uint32_t col_1based = 1;
+    std::string filePath;
+    uint32_t line0Based = 0;
+    uint32_t char0Based = 0;
+    uint32_t line1Based = 1;
+    uint32_t col1Based = 1;
 };
 
-inline LspTextPositionParams parse_doc_position_params(const JsonArena& req_arena, JsonId params_id) {
+inline LspTextPositionParams parseDocPositionParams(const JsonArena& reqArena, JsonId paramsId) {
     LspTextPositionParams res{};
-    const JsonId text_doc = json_get_field(req_arena, params_id, "textDocument");
-    const auto uri_opt = json_get_string(req_arena, json_get_field(req_arena, text_doc, "uri"));
-    const JsonId pos_obj = json_get_field(req_arena, params_id, "position");
-    const auto line0_opt = json_get_int(req_arena, json_get_field(req_arena, pos_obj, "line"));
-    const auto char0_opt = json_get_int(req_arena, json_get_field(req_arena, pos_obj, "character"));
-    if (uri_opt.has_value()) {
-        res.uri = uri_opt.value();
-        res.file_path = uri_to_file_path(res.uri);
+    const JsonId textDoc = jsonGetField(reqArena, paramsId, "textDocument");
+    const auto uriOpt = jsonGetString(reqArena, jsonGetField(reqArena, textDoc, "uri"));
+    const JsonId posObj = jsonGetField(reqArena, paramsId, "position");
+    const auto line0Opt = jsonGetInt(reqArena, jsonGetField(reqArena, posObj, "line"));
+    const auto char0Opt = jsonGetInt(reqArena, jsonGetField(reqArena, posObj, "character"));
+    if (uriOpt.has_value()) {
+        res.uri = uriOpt.value();
+        res.filePath = uriToFilePath(res.uri);
     }
-    if (uri_opt.has_value() && line0_opt.has_value() && char0_opt.has_value()) {
+    if (uriOpt.has_value() && line0Opt.has_value() && char0Opt.has_value()) {
         res.valid = true;
-        res.line_0based = static_cast<uint32_t>(line0_opt.value());
-        res.char_0based = static_cast<uint32_t>(char0_opt.value());
-        res.line_1based = res.line_0based + 1;
-        res.col_1based = res.char_0based + 1;
+        res.line0Based = static_cast<uint32_t>(line0Opt.value());
+        res.char0Based = static_cast<uint32_t>(char0Opt.value());
+        res.line1Based = res.line0Based + 1;
+        res.col1Based = res.char0Based + 1;
     }
     return res;
 }
 
-inline void write_jsonrpc_result(
-    const JsonArena& req_arena,
-    JsonId req_id,
-    JsonArena& out_arena,
-    JsonId result_id,
+inline void writeJsonrpcResult(
+    const JsonArena& reqArena,
+    JsonId reqId,
+    JsonArena& outArena,
+    JsonId resultId,
     std::ostream& out
 ) {
-    const JsonId root = json_add_object(out_arena);
-    json_object_set(out_arena, root, "jsonrpc", json_add_string(out_arena, "2.0"));
-    json_object_set(out_arena, root, "id", clone_json_scalar_or_null(req_arena, req_id, out_arena));
-    json_object_set(out_arena, root, "result", result_id);
-    write_jsonrpc_message(out, serialize_json(out_arena, root));
+    const JsonId root = jsonAddObject(outArena);
+    jsonObjectSet(outArena, root, "jsonrpc", jsonAddString(outArena, "2.0"));
+    jsonObjectSet(outArena, root, "id", cloneJsonScalarOrNull(reqArena, reqId, outArena));
+    jsonObjectSet(outArena, root, "result", resultId);
+    writeJsonrpcMessage(out, serializeJson(outArena, root));
 }
 
-inline JsonId make_lsp_doc_symbol(
+inline JsonId makeLspDocSymbol(
     JsonArena& arena,
     std::string_view name,
     std::string_view detail,
     int64_t kind,
-    uint32_t start_line,
-    uint32_t start_col,
-    uint32_t end_line,
-    uint32_t name_line,
-    uint32_t name_col
+    uint32_t startLine,
+    uint32_t startCol,
+    uint32_t endLine,
+    uint32_t nameLine,
+    uint32_t nameCol
 ) {
-    const uint32_t name_len = static_cast<uint32_t>(name.size());
-    const JsonId sym_obj = json_add_object(arena);
-    json_object_set(arena, sym_obj, "name", json_add_string(arena, name));
-    json_object_set(arena, sym_obj, "detail", json_add_string(arena, detail));
-    json_object_set(arena, sym_obj, "kind", json_add_int(arena, kind));
-    json_object_set(arena, sym_obj, "range", make_lsp_range(arena, start_line, start_col, end_line, name_col + name_len));
-    json_object_set(arena, sym_obj, "selectionRange", make_lsp_range(arena, name_line, name_col, name_line, name_col + name_len));
-    return sym_obj;
+    const uint32_t nameLen = static_cast<uint32_t>(name.size());
+    const JsonId symObj = jsonAddObject(arena);
+    jsonObjectSet(arena, symObj, "name", jsonAddString(arena, name));
+    jsonObjectSet(arena, symObj, "detail", jsonAddString(arena, detail));
+    jsonObjectSet(arena, symObj, "kind", jsonAddInt(arena, kind));
+    jsonObjectSet(arena, symObj, "range", makeLspRange(arena, startLine, startCol, endLine, nameCol + nameLen));
+    jsonObjectSet(arena, symObj, "selectionRange", makeLspRange(arena, nameLine, nameCol, nameLine, nameCol + nameLen));
+    return symObj;
 }
 
-inline void publish_empty_diagnostics(std::string_view uri, std::ostream& out) {
+inline void publishEmptyDiagnostics(std::string_view uri, std::ostream& out) {
     JsonArena arena;
-    const JsonId root = json_add_object(arena);
-    json_object_set(arena, root, "jsonrpc", json_add_string(arena, "2.0"));
-    json_object_set(arena, root, "method", json_add_string(arena, "textDocument/publishDiagnostics"));
+    const JsonId root = jsonAddObject(arena);
+    jsonObjectSet(arena, root, "jsonrpc", jsonAddString(arena, "2.0"));
+    jsonObjectSet(arena, root, "method", jsonAddString(arena, "textDocument/publishDiagnostics"));
 
-    const JsonId params = json_add_object(arena);
-    json_object_set(arena, params, "uri", json_add_string(arena, uri));
-    json_object_set(arena, params, "diagnostics", json_add_array(arena));
-    json_object_set(arena, root, "params", params);
+    const JsonId params = jsonAddObject(arena);
+    jsonObjectSet(arena, params, "uri", jsonAddString(arena, uri));
+    jsonObjectSet(arena, params, "diagnostics", jsonAddArray(arena));
+    jsonObjectSet(arena, root, "params", params);
 
-    write_jsonrpc_message(out, serialize_json(arena, root));
+    writeJsonrpcMessage(out, serializeJson(arena, root));
 }
 
-inline void publish_document_diagnostics(
+inline void publishDocumentDiagnostics(
     LspServerState& state,
     std::string_view uri,
     std::string_view text,
     std::ostream& out
 ) {
-    const std::string file_path = uri_to_file_path(uri);
-    const auto open_buffers = build_open_file_buffers(state);
-    const CheckSourceResult check_res = check_source(text, file_path, open_buffers);
+    const std::string filePath = uriToFilePath(uri);
+    const auto openBuffers = buildOpenFileBuffers(state);
+    const CheckSourceResult checkRes = checkSource(text, filePath, openBuffers);
 
-    if (check_res.ok) {
-        state.snapshots[std::string(uri)] = LspDocumentSnapshot{true, check_res.arena, check_res.program, check_res.symbols};
+    if (checkRes.ok) {
+        state.snapshots[std::string(uri)] = LspDocumentSnapshot{true, checkRes.arena, checkRes.program, checkRes.symbols};
     }
 
     JsonArena arena;
-    const JsonId root = json_add_object(arena);
-    json_object_set(arena, root, "jsonrpc", json_add_string(arena, "2.0"));
-    json_object_set(arena, root, "method", json_add_string(arena, "textDocument/publishDiagnostics"));
+    const JsonId root = jsonAddObject(arena);
+    jsonObjectSet(arena, root, "jsonrpc", jsonAddString(arena, "2.0"));
+    jsonObjectSet(arena, root, "method", jsonAddString(arena, "textDocument/publishDiagnostics"));
 
-    const JsonId params = json_add_object(arena);
-    json_object_set(arena, params, "uri", json_add_string(arena, uri));
-    const JsonId diag_arr = json_add_array(arena);
+    const JsonId params = jsonAddObject(arena);
+    jsonObjectSet(arena, params, "uri", jsonAddString(arena, uri));
+    const JsonId diagArr = jsonAddArray(arena);
 
-    if (!check_res.ok) {
+    if (!checkRes.ok) {
         int64_t line0 = 0;
-        if (check_res.error.line > 0) {
-            line0 = static_cast<int64_t>(check_res.error.line - 1);
+        if (checkRes.error.line > 0) {
+            line0 = static_cast<int64_t>(checkRes.error.line - 1);
         }
         int64_t col0 = 0;
-        if (check_res.error.col > 0) {
-            col0 = static_cast<int64_t>(check_res.error.col - 1);
+        if (checkRes.error.col > 0) {
+            col0 = static_cast<int64_t>(checkRes.error.col - 1);
         }
 
-        const JsonId start_pos = json_add_object(arena);
-        json_object_set(arena, start_pos, "line", json_add_int(arena, line0));
-        json_object_set(arena, start_pos, "character", json_add_int(arena, col0));
+        const JsonId startPos = jsonAddObject(arena);
+        jsonObjectSet(arena, startPos, "line", jsonAddInt(arena, line0));
+        jsonObjectSet(arena, startPos, "character", jsonAddInt(arena, col0));
 
-        const JsonId end_pos = json_add_object(arena);
-        json_object_set(arena, end_pos, "line", json_add_int(arena, line0));
-        json_object_set(arena, end_pos, "character", json_add_int(arena, col0 + 1));
+        const JsonId endPos = jsonAddObject(arena);
+        jsonObjectSet(arena, endPos, "line", jsonAddInt(arena, line0));
+        jsonObjectSet(arena, endPos, "character", jsonAddInt(arena, col0 + 1));
 
-        const JsonId range_obj = json_add_object(arena);
-        json_object_set(arena, range_obj, "start", start_pos);
-        json_object_set(arena, range_obj, "end", end_pos);
+        const JsonId rangeObj = jsonAddObject(arena);
+        jsonObjectSet(arena, rangeObj, "start", startPos);
+        jsonObjectSet(arena, rangeObj, "end", endPos);
 
-        const JsonId diag_obj = json_add_object(arena);
-        json_object_set(arena, diag_obj, "range", range_obj);
-        json_object_set(arena, diag_obj, "severity", json_add_int(arena, 1));
-        json_object_set(arena, diag_obj, "source", json_add_string(arena, "cleanbasic"));
-        json_object_set(arena, diag_obj, "code", json_add_string(arena, check_res.error.kind));
-        json_object_set(arena, diag_obj, "message", json_add_string(arena, check_res.error.message));
+        const JsonId diagObj = jsonAddObject(arena);
+        jsonObjectSet(arena, diagObj, "range", rangeObj);
+        jsonObjectSet(arena, diagObj, "severity", jsonAddInt(arena, 1));
+        jsonObjectSet(arena, diagObj, "source", jsonAddString(arena, "cleanbasic"));
+        jsonObjectSet(arena, diagObj, "code", jsonAddString(arena, checkRes.error.kind));
+        jsonObjectSet(arena, diagObj, "message", jsonAddString(arena, checkRes.error.message));
 
-        json_array_push(arena, diag_arr, diag_obj);
+        jsonArrayPush(arena, diagArr, diagObj);
     }
 
-    json_object_set(arena, params, "diagnostics", diag_arr);
-    json_object_set(arena, root, "params", params);
+    jsonObjectSet(arena, params, "diagnostics", diagArr);
+    jsonObjectSet(arena, root, "params", params);
 
-    write_jsonrpc_message(out, serialize_json(arena, root));
+    writeJsonrpcMessage(out, serializeJson(arena, root));
 }
 
-inline void handle_document_symbol_request(
+inline void handleDocumentSymbolRequest(
     LspServerState& state,
-    const JsonArena& req_arena,
-    JsonId req_id,
-    JsonId params_id,
+    const JsonArena& reqArena,
+    JsonId reqId,
+    JsonId paramsId,
     std::ostream& out
 ) {
-    const LspTextPositionParams doc = parse_doc_position_params(req_arena, params_id);
-    JsonArena out_arena;
-    const JsonId symbols_arr = json_add_array(out_arena);
+    const LspTextPositionParams doc = parseDocPositionParams(reqArena, paramsId);
+    JsonArena outArena;
+    const JsonId symbolsArr = jsonAddArray(outArena);
 
     if (!doc.uri.empty()) {
-        const std::string norm_path = normalize_rel_path(doc.file_path);
-        const LspDocumentSnapshot snap = get_or_build_snapshot(state, doc.uri);
+        const std::string normPath = normalizeRelPath(doc.filePath);
+        const LspDocumentSnapshot snap = getOrBuildSnapshot(state, doc.uri);
         if (snap.valid) {
             for (const DeclId did : snap.program.declarations) {
                 if (did >= snap.arena.decls.size()) {
                     continue;
                 }
                 const DeclNode& dn = snap.arena.decls[did];
-                if (!decl_belongs_to_file(dn, doc.file_path, norm_path)) {
+                if (!declBelongsToFile(dn, doc.filePath, normPath)) {
                     continue;
                 }
                 if (std::holds_alternative<TypeDecl>(dn.payload)) {
                     const auto& td = std::get<TypeDecl>(dn.payload);
-                    const JsonId sym_obj = make_lsp_doc_symbol(
-                        out_arena, td.name, "type", 23, dn.line, dn.col, dn.end_line, dn.name_line, dn.name_col
+                    const JsonId symObj = makeLspDocSymbol(
+                        outArena, td.name, "type", 23, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol
                     );
-                    const JsonId children_arr = json_add_array(out_arena);
+                    const JsonId childrenArr = jsonAddArray(outArena);
                     for (const auto& field : td.fields) {
-                        json_array_push(
-                            out_arena,
-                            children_arr,
-                            make_lsp_doc_symbol(
-                                out_arena,
+                        jsonArrayPush(
+                            outArena,
+                            childrenArr,
+                            makeLspDocSymbol(
+                                outArena,
                                 field.name,
-                                format_cleanbasic_type(snap.arena, field.type_id),
+                                formatCleanbasicType(snap.arena, field.typeId),
                                 8,
                                 field.line,
                                 field.col,
@@ -716,40 +716,40 @@ inline void handle_document_symbol_request(
                             )
                         );
                     }
-                    json_object_set(out_arena, sym_obj, "children", children_arr);
-                    json_array_push(out_arena, symbols_arr, sym_obj);
+                    jsonObjectSet(outArena, symObj, "children", childrenArr);
+                    jsonArrayPush(outArena, symbolsArr, symObj);
                 } else if (std::holds_alternative<FnDecl>(dn.payload)) {
                     const auto& fn = std::get<FnDecl>(dn.payload);
-                    json_array_push(
-                        out_arena,
-                        symbols_arr,
-                        make_lsp_doc_symbol(
-                            out_arena,
+                    jsonArrayPush(
+                        outArena,
+                        symbolsArr,
+                        makeLspDocSymbol(
+                            outArena,
                             fn.name,
-                            format_fn_detail_signature(snap.arena, fn.params, fn.return_type, fn.is_fallible),
+                            formatFnDetailSignature(snap.arena, fn.params, fn.returnType, fn.isFallible),
                             12,
                             dn.line,
                             dn.col,
-                            dn.end_line,
-                            dn.name_line,
-                            dn.name_col
+                            dn.endLine,
+                            dn.nameLine,
+                            dn.nameCol
                         )
                     );
                 } else if (std::holds_alternative<AliasDecl>(dn.payload)) {
                     const auto& al = std::get<AliasDecl>(dn.payload);
-                    json_array_push(
-                        out_arena,
-                        symbols_arr,
-                        make_lsp_doc_symbol(
-                            out_arena,
+                    jsonArrayPush(
+                        outArena,
+                        symbolsArr,
+                        makeLspDocSymbol(
+                            outArena,
                             al.name,
-                            "= " + format_cleanbasic_type(snap.arena, al.target_type),
+                            "= " + formatCleanbasicType(snap.arena, al.targetType),
                             26,
                             dn.line,
                             dn.col,
-                            dn.end_line,
-                            dn.name_line,
-                            dn.name_col
+                            dn.endLine,
+                            dn.nameLine,
+                            dn.nameCol
                         )
                     );
                 }
@@ -757,45 +757,45 @@ inline void handle_document_symbol_request(
         }
     }
 
-    write_jsonrpc_result(req_arena, req_id, out_arena, symbols_arr, out);
+    writeJsonrpcResult(reqArena, reqId, outArena, symbolsArr, out);
 }
 
 struct DefinitionTarget {
-    std::string file_name;
+    std::string fileName;
     uint32_t line = 1;
     uint32_t col = 1;
-    size_t name_len = 1;
+    size_t nameLen = 1;
 };
 
 struct ResolvedCursorSymbol {
-    std::optional<std::string> hover_markdown;
+    std::optional<std::string> hoverMarkdown;
     std::optional<DefinitionTarget> definition;
 };
 
-inline DefinitionTarget make_def_target(std::string_view file_name, uint32_t line, uint32_t col, size_t len) {
-    return DefinitionTarget{std::string(file_name), line, col, len};
+inline DefinitionTarget makeDefTarget(std::string_view fileName, uint32_t line, uint32_t col, size_t len) {
+    return DefinitionTarget{std::string(fileName), line, col, len};
 }
 
-inline ResolvedCursorSymbol resolve_cursor_symbol_info(
+inline ResolvedCursorSymbol resolveCursorSymbolInfo(
     const LspDocumentSnapshot& snap,
-    std::string_view file_path,
-    const CursorTokenContext& cursor_ctx
+    std::string_view filePath,
+    const CursorTokenContext& cursorCtx
 ) {
     ResolvedCursorSymbol res{};
-    if (!snap.valid || !cursor_ctx.found) {
+    if (!snap.valid || !cursorCtx.found) {
         return res;
     }
 
-    const Token& tok = cursor_ctx.token;
-    const std::string current_mod_id = find_module_id_for_file(snap.arena, snap.program, file_path);
+    const Token& tok = cursorCtx.token;
+    const std::string currentModId = findModuleIdForFile(snap.arena, snap.program, filePath);
 
-    if (cursor_ctx.is_import_target && tok.kind == "STRING") {
-        const std::string raw_target = strip_quotes(tok.value);
-        if (raw_target.size() > 3 && raw_target.substr(raw_target.size() - 3) == ".cb") {
-            const std::string target_mod_id = resolve_module_id(current_mod_id, raw_target);
-            const auto mod_file_opt = find_module_file_path(snap.arena, snap.program, target_mod_id, file_path, raw_target);
-            if (mod_file_opt.has_value()) {
-                res.definition = make_def_target(mod_file_opt.value(), 1, 1, 1);
+    if (cursorCtx.isImportTarget && tok.kind == "STRING") {
+        const std::string rawTarget = stripQuotes(tok.value);
+        if (rawTarget.size() > 3 && rawTarget.substr(rawTarget.size() - 3) == ".cb") {
+            const std::string targetModId = resolveModuleId(currentModId, rawTarget);
+            const auto modFileOpt = findModuleFilePath(snap.arena, snap.program, targetModId, filePath, rawTarget);
+            if (modFileOpt.has_value()) {
+                res.definition = makeDefTarget(modFileOpt.value(), 1, 1, 1);
             }
         }
         return res;
@@ -805,72 +805,72 @@ inline ResolvedCursorSymbol resolve_cursor_symbol_info(
         return res;
     }
 
-    const auto fn_key_opt = find_enclosing_fn_key(snap.arena, snap.program, file_path, tok.line);
-    std::unordered_map<std::string, VarSymbol> active_scope;
-    if (fn_key_opt.has_value()) {
-        const auto scope_it = snap.symbols.fn_scopes.find(fn_key_opt.value());
-        if (scope_it != snap.symbols.fn_scopes.end()) {
-            active_scope = scope_it->second;
+    const auto fnKeyOpt = findEnclosingFnKey(snap.arena, snap.program, filePath, tok.line);
+    std::unordered_map<std::string, VarSymbol> activeScope;
+    if (fnKeyOpt.has_value()) {
+        const auto scopeIt = snap.symbols.fnScopes.find(fnKeyOpt.value());
+        if (scopeIt != snap.symbols.fnScopes.end()) {
+            activeScope = scopeIt->second;
         }
     }
 
-    const auto bind_fn = [&](const FnSymbol& fn) {
-        res.hover_markdown = format_fn_hover_markdown(snap.arena, fn);
-        if (!fn.file_name.empty()) {
-            res.definition = make_def_target(fn.file_name, fn.line, fn.col, fn.name.size());
+    const auto bindFn = [&](const FnSymbol& fn) {
+        res.hoverMarkdown = formatFnHoverMarkdown(snap.arena, fn);
+        if (!fn.fileName.empty()) {
+            res.definition = makeDefTarget(fn.fileName, fn.line, fn.col, fn.name.size());
         }
     };
-    const auto bind_type = [&](const TypeSymbol& ts) {
-        res.hover_markdown = format_type_hover_markdown(snap.arena, ts);
-        if (!ts.file_name.empty()) {
-            res.definition = make_def_target(ts.file_name, ts.line, ts.col, ts.name.size());
+    const auto bindType = [&](const TypeSymbol& ts) {
+        res.hoverMarkdown = formatTypeHoverMarkdown(snap.arena, ts);
+        if (!ts.fileName.empty()) {
+            res.definition = makeDefTarget(ts.fileName, ts.line, ts.col, ts.name.size());
         }
     };
-    const auto bind_alias = [&](const AliasSymbol& al) {
-        res.hover_markdown = format_alias_hover_markdown(snap.arena, snap.symbols, al);
-        if (!al.file_name.empty()) {
-            res.definition = make_def_target(al.file_name, al.line, al.col, al.name.size());
+    const auto bindAlias = [&](const AliasSymbol& al) {
+        res.hoverMarkdown = formatAliasHoverMarkdown(snap.arena, snap.symbols, al);
+        if (!al.fileName.empty()) {
+            res.definition = makeDefTarget(al.fileName, al.line, al.col, al.name.size());
         }
     };
 
-    if (cursor_ctx.has_dot_receiver) {
-        const std::string& recv = cursor_ctx.receiver_name;
+    if (cursorCtx.hasDotReceiver) {
+        const std::string& recv = cursorCtx.receiverName;
         const std::string& member = tok.value;
 
-        std::string target_mod_id;
-        if (is_module_alias_in_scope(snap.symbols, current_mod_id, recv, active_scope, target_mod_id)) {
-            const std::string qkey = symbol_key(target_mod_id, member);
-            const auto fn_it = snap.symbols.functions.find(qkey);
-            if (fn_it != snap.symbols.functions.end()) {
-                bind_fn(fn_it->second);
+        std::string targetModId;
+        if (isModuleAliasInScope(snap.symbols, currentModId, recv, activeScope, targetModId)) {
+            const std::string qkey = symbolKey(targetModId, member);
+            const auto fnIt = snap.symbols.functions.find(qkey);
+            if (fnIt != snap.symbols.functions.end()) {
+                bindFn(fnIt->second);
                 return res;
             }
-            const auto ty_it = snap.symbols.types.find(qkey);
-            if (ty_it != snap.symbols.types.end()) {
-                bind_type(ty_it->second);
+            const auto tyIt = snap.symbols.types.find(qkey);
+            if (tyIt != snap.symbols.types.end()) {
+                bindType(tyIt->second);
                 return res;
             }
-            const auto al_it = snap.symbols.aliases.find(qkey);
-            if (al_it != snap.symbols.aliases.end()) {
-                bind_alias(al_it->second);
+            const auto alIt = snap.symbols.aliases.find(qkey);
+            if (alIt != snap.symbols.aliases.end()) {
+                bindAlias(alIt->second);
                 return res;
             }
         }
 
-        const auto var_it = active_scope.find(recv);
-        if (var_it != active_scope.end()) {
-            const TypeId recv_tid = var_it->second.type_id;
-            const auto ts_opt = resolve_type_symbol(snap.arena, snap.symbols, current_mod_id, recv_tid);
-            if (ts_opt.has_value()) {
-                const TypeSymbol& ts = ts_opt.value();
+        const auto varIt = activeScope.find(recv);
+        if (varIt != activeScope.end()) {
+            const TypeId recvTid = varIt->second.typeId;
+            const auto tsOpt = resolveTypeSymbol(snap.arena, snap.symbols, currentModId, recvTid);
+            if (tsOpt.has_value()) {
+                const TypeSymbol& ts = tsOpt.value();
                 const auto fit = ts.fields.find(member);
                 if (fit != ts.fields.end()) {
-                    const std::string ftype = format_cleanbasic_type(snap.arena, fit->second);
-                    res.hover_markdown = wrap_vb_code_block("(field) " + ts.name + "." + member + " as " + ftype);
-                    if (!ts.file_name.empty()) {
-                        for (const auto& fd : ts.field_order) {
+                    const std::string ftype = formatCleanbasicType(snap.arena, fit->second);
+                    res.hoverMarkdown = wrapVbCodeBlock("(field) " + ts.name + "." + member + " as " + ftype);
+                    if (!ts.fileName.empty()) {
+                        for (const auto& fd : ts.fieldOrder) {
                             if (fd.name == member) {
-                                res.definition = make_def_target(ts.file_name, fd.line, fd.col, fd.name.size());
+                                res.definition = makeDefTarget(ts.fileName, fd.line, fd.col, fd.name.size());
                                 break;
                             }
                         }
@@ -878,292 +878,292 @@ inline ResolvedCursorSymbol resolve_cursor_symbol_info(
                     return res;
                 }
             }
-            const auto ufcs_fn = resolve_ufcs_fn(snap.arena, snap.symbols, current_mod_id, recv_tid, member);
-            if (ufcs_fn.has_value()) {
-                bind_fn(ufcs_fn.value());
+            const auto ufcsFn = resolveUfcsFn(snap.arena, snap.symbols, currentModId, recvTid, member);
+            if (ufcsFn.has_value()) {
+                bindFn(ufcsFn.value());
                 return res;
             }
         }
     }
 
-    const auto local_it = active_scope.find(tok.value);
-    if (local_it != active_scope.end()) {
-        res.hover_markdown = format_var_hover_markdown(snap.arena, local_it->second);
-        if (!local_it->second.file_name.empty()) {
-            res.definition = make_def_target(
-                local_it->second.file_name, local_it->second.line, local_it->second.col, local_it->second.name.size()
+    const auto localIt = activeScope.find(tok.value);
+    if (localIt != activeScope.end()) {
+        res.hoverMarkdown = formatVarHoverMarkdown(snap.arena, localIt->second);
+        if (!localIt->second.fileName.empty()) {
+            res.definition = makeDefTarget(
+                localIt->second.fileName, localIt->second.line, localIt->second.col, localIt->second.name.size()
             );
         }
         return res;
     }
 
-    const std::string sym_key = resolve_symbol_key(snap.symbols, current_mod_id, tok.value);
-    const auto fn_it = snap.symbols.functions.find(sym_key);
-    if (fn_it != snap.symbols.functions.end() && !is_builtin_symbol_name(tok.value)) {
-        bind_fn(fn_it->second);
+    const std::string symKey = resolveSymbolKey(snap.symbols, currentModId, tok.value);
+    const auto fnIt = snap.symbols.functions.find(symKey);
+    if (fnIt != snap.symbols.functions.end() && !isBuiltinSymbolName(tok.value)) {
+        bindFn(fnIt->second);
         return res;
     }
 
-    const auto al_it = snap.symbols.aliases.find(sym_key);
-    if (al_it != snap.symbols.aliases.end()) {
-        bind_alias(al_it->second);
+    const auto alIt = snap.symbols.aliases.find(symKey);
+    if (alIt != snap.symbols.aliases.end()) {
+        bindAlias(alIt->second);
         return res;
     }
 
-    const auto ty_it = snap.symbols.types.find(sym_key);
-    if (ty_it != snap.symbols.types.end() && !is_builtin_type_name(tok.value)) {
-        bind_type(ty_it->second);
+    const auto tyIt = snap.symbols.types.find(symKey);
+    if (tyIt != snap.symbols.types.end() && !isBuiltinTypeName(tok.value)) {
+        bindType(tyIt->second);
         return res;
     }
 
     for (const auto& kv : snap.symbols.types) {
         const auto fit = kv.second.fields.find(tok.value);
         if (fit != kv.second.fields.end()) {
-            for (const auto& fd : kv.second.field_order) {
+            for (const auto& fd : kv.second.fieldOrder) {
                 if (fd.name == tok.value && fd.line == tok.line) {
-                    const std::string ftype = format_cleanbasic_type(snap.arena, fit->second);
-                    res.hover_markdown = wrap_vb_code_block("(field) " + kv.second.name + "." + tok.value + " as " + ftype);
+                    const std::string ftype = formatCleanbasicType(snap.arena, fit->second);
+                    res.hoverMarkdown = wrapVbCodeBlock("(field) " + kv.second.name + "." + tok.value + " as " + ftype);
                     return res;
                 }
             }
         }
     }
 
-    std::string target_mod_id;
-    if (is_module_alias_in_scope(snap.symbols, current_mod_id, tok.value, active_scope, target_mod_id)) {
-        const auto mod_file_opt = find_module_file_path(snap.arena, snap.program, target_mod_id, file_path);
-        if (mod_file_opt.has_value()) {
-            res.definition = make_def_target(mod_file_opt.value(), 1, 1, 1);
+    std::string targetModId;
+    if (isModuleAliasInScope(snap.symbols, currentModId, tok.value, activeScope, targetModId)) {
+        const auto modFileOpt = findModuleFilePath(snap.arena, snap.program, targetModId, filePath);
+        if (modFileOpt.has_value()) {
+            res.definition = makeDefTarget(modFileOpt.value(), 1, 1, 1);
         }
     }
 
-    const auto builtin_md = format_builtin_hover_markdown(tok.value);
-    if (builtin_md.has_value()) {
-        res.hover_markdown = builtin_md;
+    const auto builtinMd = formatBuiltinHoverMarkdown(tok.value);
+    if (builtinMd.has_value()) {
+        res.hoverMarkdown = builtinMd;
     }
 
     return res;
 }
 
-inline void handle_hover_request(
+inline void handleHoverRequest(
     LspServerState& state,
-    const JsonArena& req_arena,
-    JsonId req_id,
-    JsonId params_id,
+    const JsonArena& reqArena,
+    JsonId reqId,
+    JsonId paramsId,
     std::ostream& out
 ) {
-    const LspTextPositionParams doc = parse_doc_position_params(req_arena, params_id);
-    JsonArena out_arena;
+    const LspTextPositionParams doc = parseDocPositionParams(reqArena, paramsId);
+    JsonArena outArena;
     if (!doc.valid) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, json_add_null(out_arena), out);
+        writeJsonrpcResult(reqArena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
-    const std::string source_text = read_document_text(state, doc.uri);
-    const LspDocumentSnapshot snap = get_or_build_snapshot(state, doc.uri);
-    const CursorTokenContext cursor_ctx = resolve_cursor_token(source_text, doc.file_path, doc.line_1based, doc.col_1based);
-    const ResolvedCursorSymbol info = resolve_cursor_symbol_info(snap, doc.file_path, cursor_ctx);
-    if (!info.hover_markdown.has_value()) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, json_add_null(out_arena), out);
+    const std::string sourceText = readDocumentText(state, doc.uri);
+    const LspDocumentSnapshot snap = getOrBuildSnapshot(state, doc.uri);
+    const CursorTokenContext cursorCtx = resolveCursorToken(sourceText, doc.filePath, doc.line1Based, doc.col1Based);
+    const ResolvedCursorSymbol info = resolveCursorSymbolInfo(snap, doc.filePath, cursorCtx);
+    if (!info.hoverMarkdown.has_value()) {
+        writeJsonrpcResult(reqArena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
-    const JsonId contents = json_add_object(out_arena);
-    json_object_set(out_arena, contents, "kind", json_add_string(out_arena, "markdown"));
-    json_object_set(out_arena, contents, "value", json_add_string(out_arena, info.hover_markdown.value()));
+    const JsonId contents = jsonAddObject(outArena);
+    jsonObjectSet(outArena, contents, "kind", jsonAddString(outArena, "markdown"));
+    jsonObjectSet(outArena, contents, "value", jsonAddString(outArena, info.hoverMarkdown.value()));
 
-    const JsonId hover_obj = json_add_object(out_arena);
-    json_object_set(out_arena, hover_obj, "contents", contents);
-    if (cursor_ctx.found) {
-        const uint32_t tlen = static_cast<uint32_t>(cursor_ctx.token.value.size());
-        json_object_set(
-            out_arena,
-            hover_obj,
+    const JsonId hoverObj = jsonAddObject(outArena);
+    jsonObjectSet(outArena, hoverObj, "contents", contents);
+    if (cursorCtx.found) {
+        const uint32_t tlen = static_cast<uint32_t>(cursorCtx.token.value.size());
+        jsonObjectSet(
+            outArena,
+            hoverObj,
             "range",
-            make_lsp_range(out_arena, cursor_ctx.token.line, cursor_ctx.token.col, cursor_ctx.token.line, cursor_ctx.token.col + tlen)
+            makeLspRange(outArena, cursorCtx.token.line, cursorCtx.token.col, cursorCtx.token.line, cursorCtx.token.col + tlen)
         );
     }
 
-    write_jsonrpc_result(req_arena, req_id, out_arena, hover_obj, out);
+    writeJsonrpcResult(reqArena, reqId, outArena, hoverObj, out);
 }
 
-inline void handle_definition_request(
+inline void handleDefinitionRequest(
     LspServerState& state,
-    const JsonArena& req_arena,
-    JsonId req_id,
-    JsonId params_id,
+    const JsonArena& reqArena,
+    JsonId reqId,
+    JsonId paramsId,
     std::ostream& out
 ) {
-    const LspTextPositionParams doc = parse_doc_position_params(req_arena, params_id);
-    JsonArena out_arena;
+    const LspTextPositionParams doc = parseDocPositionParams(reqArena, paramsId);
+    JsonArena outArena;
     if (!doc.valid) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, json_add_null(out_arena), out);
+        writeJsonrpcResult(reqArena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
-    const std::string source_text = read_document_text(state, doc.uri);
-    const LspDocumentSnapshot snap = get_or_build_snapshot(state, doc.uri);
-    const CursorTokenContext cursor_ctx = resolve_cursor_token(source_text, doc.file_path, doc.line_1based, doc.col_1based);
-    const ResolvedCursorSymbol info = resolve_cursor_symbol_info(snap, doc.file_path, cursor_ctx);
+    const std::string sourceText = readDocumentText(state, doc.uri);
+    const LspDocumentSnapshot snap = getOrBuildSnapshot(state, doc.uri);
+    const CursorTokenContext cursorCtx = resolveCursorToken(sourceText, doc.filePath, doc.line1Based, doc.col1Based);
+    const ResolvedCursorSymbol info = resolveCursorSymbolInfo(snap, doc.filePath, cursorCtx);
     if (!info.definition.has_value()) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, json_add_null(out_arena), out);
+        writeJsonrpcResult(reqArena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
     const DefinitionTarget& dt = info.definition.value();
-    const JsonId loc_obj = make_lsp_location(out_arena, dt.file_name, dt.line, dt.col, dt.name_len);
-    write_jsonrpc_result(req_arena, req_id, out_arena, loc_obj, out);
+    const JsonId locObj = makeLspLocation(outArena, dt.fileName, dt.line, dt.col, dt.nameLen);
+    writeJsonrpcResult(reqArena, reqId, outArena, locObj, out);
 }
 
 struct CursorLineSlice {
-    std::string full_line;
-    std::string prefix_to_cursor;
-    size_t line_start_offset = 0;
-    size_t line_end_offset = 0;
+    std::string fullLine;
+    std::string prefixToCursor;
+    size_t lineStartOffset = 0;
+    size_t lineEndOffset = 0;
 };
 
-inline CursorLineSlice extract_cursor_line_slice(
-    std::string_view source_text,
-    uint32_t line_0based,
-    uint32_t char_0based
+inline CursorLineSlice extractCursorLineSlice(
+    std::string_view sourceText,
+    uint32_t line0Based,
+    uint32_t char0Based
 ) {
     CursorLineSlice slice{};
-    uint32_t curr_line = 0;
+    uint32_t currLine = 0;
     size_t i = 0;
-    while (i < source_text.size() && curr_line < line_0based) {
-        if (source_text[i] == '\n') {
-            curr_line += 1;
+    while (i < sourceText.size() && currLine < line0Based) {
+        if (sourceText[i] == '\n') {
+            currLine += 1;
         }
         i += 1;
     }
-    slice.line_start_offset = i;
-    size_t end_i = i;
-    while (end_i < source_text.size() && source_text[end_i] != '\n') {
-        end_i += 1;
+    slice.lineStartOffset = i;
+    size_t endI = i;
+    while (endI < sourceText.size() && sourceText[endI] != '\n') {
+        endI += 1;
     }
-    slice.line_end_offset = end_i;
-    std::string_view raw_line = source_text.substr(i, end_i - i);
-    if (!raw_line.empty() && raw_line.back() == '\r') {
-        raw_line.remove_suffix(1);
+    slice.lineEndOffset = endI;
+    std::string_view rawLine = sourceText.substr(i, endI - i);
+    if (!rawLine.empty() && rawLine.back() == '\r') {
+        rawLine.remove_suffix(1);
     }
-    slice.full_line = std::string(raw_line);
-    size_t prefix_len = static_cast<size_t>(char_0based);
-    if (prefix_len > slice.full_line.size()) {
-        prefix_len = slice.full_line.size();
+    slice.fullLine = std::string(rawLine);
+    size_t prefixLen = static_cast<size_t>(char0Based);
+    if (prefixLen > slice.fullLine.size()) {
+        prefixLen = slice.fullLine.size();
     }
-    slice.prefix_to_cursor = slice.full_line.substr(0, prefix_len);
+    slice.prefixToCursor = slice.fullLine.substr(0, prefixLen);
     return slice;
 }
 
-inline std::string scrub_incomplete_line_in_source(
-    std::string_view source_text,
+inline std::string scrubIncompleteLineInSource(
+    std::string_view sourceText,
     const CursorLineSlice& slice
 ) {
-    std::string scrubbed(source_text.substr(0, slice.line_start_offset));
-    const std::string trimmed = trim_ascii_ws(slice.prefix_to_cursor);
-    if (starts_with_ignore_case(trimmed, "dim ") || starts_with_ignore_case(trimmed, "const ")) {
-        const size_t eq_pos = slice.prefix_to_cursor.find('=');
-        if (eq_pos != std::string::npos) {
-            scrubbed += slice.prefix_to_cursor.substr(0, eq_pos + 1) + " 0";
+    std::string scrubbed(sourceText.substr(0, slice.lineStartOffset));
+    const std::string trimmed = trimAsciiWs(slice.prefixToCursor);
+    if (startsWithIgnoreCase(trimmed, "dim ") || startsWithIgnoreCase(trimmed, "const ")) {
+        const size_t eqPos = slice.prefixToCursor.find('=');
+        if (eqPos != std::string::npos) {
+            scrubbed += slice.prefixToCursor.substr(0, eqPos + 1) + " 0";
         } else {
             scrubbed += "' scrubbed";
         }
-    } else if (starts_with_ignore_case(trimmed, "if ") || starts_with_ignore_case(trimmed, "else if ")) {
-        if (starts_with_ignore_case(trimmed, "else if ")) {
+    } else if (startsWithIgnoreCase(trimmed, "if ") || startsWithIgnoreCase(trimmed, "else if ")) {
+        if (startsWithIgnoreCase(trimmed, "else if ")) {
             scrubbed += "else if true";
         } else {
             scrubbed += "if true";
         }
-    } else if (starts_with_ignore_case(trimmed, "return ")) {
+    } else if (startsWithIgnoreCase(trimmed, "return ")) {
         scrubbed += "return 0";
     } else {
         scrubbed += "' scrubbed";
     }
-    scrubbed += std::string(source_text.substr(slice.line_end_offset));
+    scrubbed += std::string(sourceText.substr(slice.lineEndOffset));
     return scrubbed;
 }
 
-inline LspDocumentSnapshot get_or_build_scrubbed_snapshot(
+inline LspDocumentSnapshot getOrBuildScrubbedSnapshot(
     LspServerState& state,
     std::string_view uri,
-    std::string_view source_text,
-    uint32_t line_0based,
-    uint32_t char_0based
+    std::string_view sourceText,
+    uint32_t line0Based,
+    uint32_t char0Based
 ) {
-    const std::string uri_key(uri);
-    const std::string file_path = uri_to_file_path(uri);
-    const auto open_buffers = build_open_file_buffers(state);
+    const std::string uriKey(uri);
+    const std::string filePath = uriToFilePath(uri);
+    const auto openBuffers = buildOpenFileBuffers(state);
 
-    if (!source_text.empty()) {
-        const CheckSourceResult direct_res = check_source(source_text, file_path, open_buffers);
-        if (direct_res.ok) {
-            LspDocumentSnapshot snap{true, direct_res.arena, direct_res.program, direct_res.symbols};
-            state.snapshots[uri_key] = snap;
+    if (!sourceText.empty()) {
+        const CheckSourceResult directRes = checkSource(sourceText, filePath, openBuffers);
+        if (directRes.ok) {
+            LspDocumentSnapshot snap{true, directRes.arena, directRes.program, directRes.symbols};
+            state.snapshots[uriKey] = snap;
             return snap;
         }
 
-        const CursorLineSlice slice = extract_cursor_line_slice(source_text, line_0based, char_0based);
-        const std::string scrubbed_text = scrub_incomplete_line_in_source(source_text, slice);
-        auto scrubbed_buffers = open_buffers;
-        scrubbed_buffers[file_path] = scrubbed_text;
-        const std::string norm_path = normalize_rel_path(file_path);
-        if (!norm_path.empty()) {
-            scrubbed_buffers[norm_path] = scrubbed_text;
+        const CursorLineSlice slice = extractCursorLineSlice(sourceText, line0Based, char0Based);
+        const std::string scrubbedText = scrubIncompleteLineInSource(sourceText, slice);
+        auto scrubbedBuffers = openBuffers;
+        scrubbedBuffers[filePath] = scrubbedText;
+        const std::string normPath = normalizeRelPath(filePath);
+        if (!normPath.empty()) {
+            scrubbedBuffers[normPath] = scrubbedText;
         }
 
-        const CheckSourceResult scrubbed_res = check_source(scrubbed_text, file_path, scrubbed_buffers);
-        if (scrubbed_res.ok) {
-            return LspDocumentSnapshot{true, scrubbed_res.arena, scrubbed_res.program, scrubbed_res.symbols};
+        const CheckSourceResult scrubbedRes = checkSource(scrubbedText, filePath, scrubbedBuffers);
+        if (scrubbedRes.ok) {
+            return LspDocumentSnapshot{true, scrubbedRes.arena, scrubbedRes.program, scrubbedRes.symbols};
         }
 
-        if (starts_with_ignore_case(trim_ascii_ws(slice.prefix_to_cursor), "return ")) {
-            std::string void_ret_scrubbed(source_text.substr(0, slice.line_start_offset));
-            void_ret_scrubbed += "return";
-            void_ret_scrubbed += std::string(source_text.substr(slice.line_end_offset));
-            scrubbed_buffers[file_path] = void_ret_scrubbed;
-            if (!norm_path.empty()) {
-                scrubbed_buffers[norm_path] = void_ret_scrubbed;
+        if (startsWithIgnoreCase(trimAsciiWs(slice.prefixToCursor), "return ")) {
+            std::string voidRetScrubbed(sourceText.substr(0, slice.lineStartOffset));
+            voidRetScrubbed += "return";
+            voidRetScrubbed += std::string(sourceText.substr(slice.lineEndOffset));
+            scrubbedBuffers[filePath] = voidRetScrubbed;
+            if (!normPath.empty()) {
+                scrubbedBuffers[normPath] = voidRetScrubbed;
             }
-            const CheckSourceResult void_res = check_source(void_ret_scrubbed, file_path, scrubbed_buffers);
-            if (void_res.ok) {
-                return LspDocumentSnapshot{true, void_res.arena, void_res.program, void_res.symbols};
+            const CheckSourceResult voidRes = checkSource(voidRetScrubbed, filePath, scrubbedBuffers);
+            if (voidRes.ok) {
+                return LspDocumentSnapshot{true, voidRes.arena, voidRes.program, voidRes.symbols};
             }
         }
     }
 
-    const auto snap_it = state.snapshots.find(uri_key);
-    if (snap_it != state.snapshots.end() && snap_it->second.valid) {
-        return snap_it->second;
+    const auto snapIt = state.snapshots.find(uriKey);
+    if (snapIt != state.snapshots.end() && snapIt->second.valid) {
+        return snapIt->second;
     }
-    LspDocumentSnapshot empty_snap{};
-    empty_snap.valid = false;
-    return empty_snap;
+    LspDocumentSnapshot emptySnap{};
+    emptySnap.valid = false;
+    return emptySnap;
 }
 
 struct CompletionItemEntry {
     std::string label;
     int64_t kind = 1;
     std::string detail;
-    std::string insert_text;
+    std::string insertText;
     std::string documentation;
 };
 
 struct CallSiteContext {
-    bool inside_call = false;
-    bool has_receiver = false;
-    std::string receiver_name;
-    std::string callee_name;
-    uint32_t active_param = 0;
-    bool at_arg_name_position = false;
-    std::string arg_prefix;
+    bool insideCall = false;
+    bool hasReceiver = false;
+    std::string receiverName;
+    std::string calleeName;
+    uint32_t activeParam = 0;
+    bool atArgNamePosition = false;
+    std::string argPrefix;
 };
 
-inline CallSiteContext parse_enclosing_call_site(std::string_view line_prefix) {
+inline CallSiteContext parseEnclosingCallSite(std::string_view linePrefix) {
     CallSiteContext ctx{};
-    std::string prefix_str(line_prefix);
-    const LexResult lex_res = tokenize(prefix_str, "line.cb");
+    std::string prefixStr(linePrefix);
+    const LexResult lexRes = tokenize(prefixStr, "line.cb");
     std::vector<Token> toks;
-    for (const auto& t : lex_res.tokens) {
+    for (const auto& t : lexRes.tokens) {
         if (t.kind != "EOF" && t.kind != "NEWLINE") {
             toks.push_back(t);
         }
@@ -1172,103 +1172,103 @@ inline CallSiteContext parse_enclosing_call_site(std::string_view line_prefix) {
         return ctx;
     }
 
-    int paren_depth = 0;
-    int bracket_depth = 0;
-    int brace_depth = 0;
-    size_t open_paren_idx = toks.size();
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    int braceDepth = 0;
+    size_t openParenIdx = toks.size();
 
     size_t idx = toks.size();
     while (idx > 0) {
         idx -= 1;
         const Token& t = toks[idx];
         if (t.kind == "RPAREN") {
-            paren_depth += 1;
+            parenDepth += 1;
         } else if (t.kind == "LPAREN") {
-            if (paren_depth > 0) {
-                paren_depth -= 1;
+            if (parenDepth > 0) {
+                parenDepth -= 1;
             } else {
-                open_paren_idx = idx;
+                openParenIdx = idx;
                 break;
             }
         } else if (t.kind == "RBRACKET") {
-            bracket_depth += 1;
+            bracketDepth += 1;
         } else if (t.kind == "LBRACKET") {
-            if (bracket_depth > 0) {
-                bracket_depth -= 1;
+            if (bracketDepth > 0) {
+                bracketDepth -= 1;
             }
         } else if (t.kind == "RBRACE") {
-            brace_depth += 1;
+            braceDepth += 1;
         } else if (t.kind == "LBRACE") {
-            if (brace_depth > 0) {
-                brace_depth -= 1;
+            if (braceDepth > 0) {
+                braceDepth -= 1;
             }
         }
     }
 
-    if (open_paren_idx == toks.size() || open_paren_idx == 0) {
+    if (openParenIdx == toks.size() || openParenIdx == 0) {
         return ctx;
     }
 
-    const Token& callee_tok = toks[open_paren_idx - 1];
-    if (callee_tok.kind != "IDENT" && callee_tok.kind != "TYPE_KW" &&
-        !(callee_tok.kind == "KEYWORD" && callee_tok.value == "error")) {
+    const Token& calleeTok = toks[openParenIdx - 1];
+    if (calleeTok.kind != "IDENT" && calleeTok.kind != "TYPE_KW" &&
+        !(calleeTok.kind == "KEYWORD" && calleeTok.value == "error")) {
         return ctx;
     }
 
-    ctx.inside_call = true;
-    ctx.callee_name = callee_tok.value;
-    if (open_paren_idx >= 3 && toks[open_paren_idx - 2].kind == "DOT") {
-        const Token& recv_tok = toks[open_paren_idx - 3];
-        if (recv_tok.kind == "IDENT" || recv_tok.kind == "TYPE_KW") {
-            ctx.has_receiver = true;
-            ctx.receiver_name = recv_tok.value;
+    ctx.insideCall = true;
+    ctx.calleeName = calleeTok.value;
+    if (openParenIdx >= 3 && toks[openParenIdx - 2].kind == "DOT") {
+        const Token& recvTok = toks[openParenIdx - 3];
+        if (recvTok.kind == "IDENT" || recvTok.kind == "TYPE_KW") {
+            ctx.hasReceiver = true;
+            ctx.receiverName = recvTok.value;
         }
     }
 
-    int inner_paren = 0;
-    int inner_bracket = 0;
-    int inner_brace = 0;
-    uint32_t comma_count = 0;
-    size_t last_delimiter_idx = open_paren_idx;
+    int innerParen = 0;
+    int innerBracket = 0;
+    int innerBrace = 0;
+    uint32_t commaCount = 0;
+    size_t lastDelimiterIdx = openParenIdx;
 
-    for (size_t k = open_paren_idx + 1; k < toks.size(); ++k) {
+    for (size_t k = openParenIdx + 1; k < toks.size(); ++k) {
         const Token& t = toks[k];
         if (t.kind == "LPAREN") {
-            inner_paren += 1;
+            innerParen += 1;
         } else if (t.kind == "RPAREN") {
-            if (inner_paren > 0) {
-                inner_paren -= 1;
+            if (innerParen > 0) {
+                innerParen -= 1;
             }
         } else if (t.kind == "LBRACKET") {
-            inner_bracket += 1;
+            innerBracket += 1;
         } else if (t.kind == "RBRACKET") {
-            if (inner_bracket > 0) {
-                inner_bracket -= 1;
+            if (innerBracket > 0) {
+                innerBracket -= 1;
             }
         } else if (t.kind == "LBRACE") {
-            inner_brace += 1;
+            innerBrace += 1;
         } else if (t.kind == "RBRACE") {
-            if (inner_brace > 0) {
-                inner_brace -= 1;
+            if (innerBrace > 0) {
+                innerBrace -= 1;
             }
-        } else if (t.kind == "COMMA" && inner_paren == 0 && inner_bracket == 0 && inner_brace == 0) {
-            comma_count += 1;
-            last_delimiter_idx = k;
+        } else if (t.kind == "COMMA" && innerParen == 0 && innerBracket == 0 && innerBrace == 0) {
+            commaCount += 1;
+            lastDelimiterIdx = k;
         }
     }
 
-    ctx.active_param = comma_count;
+    ctx.activeParam = commaCount;
 
-    const size_t rem_tokens = toks.size() - (last_delimiter_idx + 1);
-    if (rem_tokens == 0) {
-        ctx.at_arg_name_position = true;
-        ctx.arg_prefix = "";
-    } else if (rem_tokens == 1) {
-        const Token& last_tok = toks.back();
-        const bool ends_with_ident_char = !line_prefix.empty() && is_ident_char(line_prefix.back());
-        if (ends_with_ident_char && (last_tok.kind == "IDENT" || last_tok.kind == "TYPE_KW")) {
-            ctx.at_arg_name_position = true;
-            ctx.arg_prefix = last_tok.value;
+    const size_t remTokens = toks.size() - (lastDelimiterIdx + 1);
+    if (remTokens == 0) {
+        ctx.atArgNamePosition = true;
+        ctx.argPrefix = "";
+    } else if (remTokens == 1) {
+        const Token& lastTok = toks.back();
+        const bool endsWithIdentChar = !linePrefix.empty() && isIdentChar(linePrefix.back());
+        if (endsWithIdentChar && (lastTok.kind == "IDENT" || lastTok.kind == "TYPE_KW")) {
+            ctx.atArgNamePosition = true;
+            ctx.argPrefix = lastTok.value;
         }
     }
 
@@ -1276,55 +1276,55 @@ inline CallSiteContext parse_enclosing_call_site(std::string_view line_prefix) {
 }
 
 struct CompletionCursorAnalysis {
-    bool is_dot = false;
-    std::string dot_receiver;
+    bool isDot = false;
+    std::string dotReceiver;
     std::string prefix;
-    bool is_after_as = false;
-    CallSiteContext call_ctx;
+    bool isAfterAs = false;
+    CallSiteContext callCtx;
 };
 
-inline CompletionCursorAnalysis analyze_completion_cursor(std::string_view line_prefix) {
+inline CompletionCursorAnalysis analyzeCompletionCursor(std::string_view linePrefix) {
     CompletionCursorAnalysis res{};
-    res.call_ctx = parse_enclosing_call_site(line_prefix);
+    res.callCtx = parseEnclosingCallSite(linePrefix);
 
-    size_t cursor_idx = line_prefix.size();
-    size_t word_start = cursor_idx;
-    while (word_start > 0 && is_ident_char(line_prefix[word_start - 1])) {
-        word_start -= 1;
+    size_t cursorIdx = linePrefix.size();
+    size_t wordStart = cursorIdx;
+    while (wordStart > 0 && isIdentChar(linePrefix[wordStart - 1])) {
+        wordStart -= 1;
     }
-    res.prefix = std::string(line_prefix.substr(word_start, cursor_idx - word_start));
+    res.prefix = std::string(linePrefix.substr(wordStart, cursorIdx - wordStart));
 
-    size_t before_word = word_start;
-    while (before_word > 0 && (line_prefix[before_word - 1] == ' ' || line_prefix[before_word - 1] == '\t')) {
-        before_word -= 1;
+    size_t beforeWord = wordStart;
+    while (beforeWord > 0 && (linePrefix[beforeWord - 1] == ' ' || linePrefix[beforeWord - 1] == '\t')) {
+        beforeWord -= 1;
     }
 
-    if (word_start > 0 && line_prefix[word_start - 1] == '.') {
-        size_t dot_pos = word_start - 1;
-        size_t recv_end = dot_pos;
-        while (recv_end > 0 && (line_prefix[recv_end - 1] == ' ' || line_prefix[recv_end - 1] == '\t')) {
-            recv_end -= 1;
+    if (wordStart > 0 && linePrefix[wordStart - 1] == '.') {
+        size_t dotPos = wordStart - 1;
+        size_t recvEnd = dotPos;
+        while (recvEnd > 0 && (linePrefix[recvEnd - 1] == ' ' || linePrefix[recvEnd - 1] == '\t')) {
+            recvEnd -= 1;
         }
-        size_t recv_start = recv_end;
-        while (recv_start > 0 && is_ident_char(line_prefix[recv_start - 1])) {
-            recv_start -= 1;
+        size_t recvStart = recvEnd;
+        while (recvStart > 0 && isIdentChar(linePrefix[recvStart - 1])) {
+            recvStart -= 1;
         }
-        if (recv_end > recv_start) {
-            res.is_dot = true;
-            res.dot_receiver = std::string(line_prefix.substr(recv_start, recv_end - recv_start));
+        if (recvEnd > recvStart) {
+            res.isDot = true;
+            res.dotReceiver = std::string(linePrefix.substr(recvStart, recvEnd - recvStart));
             return res;
         }
     }
 
-    if (before_word >= 2) {
-        size_t kw_end = before_word;
-        size_t kw_start = kw_end;
-        while (kw_start > 0 && is_ident_char(line_prefix[kw_start - 1])) {
-            kw_start -= 1;
+    if (beforeWord >= 2) {
+        size_t kwEnd = beforeWord;
+        size_t kwStart = kwEnd;
+        while (kwStart > 0 && isIdentChar(linePrefix[kwStart - 1])) {
+            kwStart -= 1;
         }
-        const std::string_view prev_word = line_prefix.substr(kw_start, kw_end - kw_start);
-        if (prev_word == "as" && before_word < word_start) {
-            res.is_after_as = true;
+        const std::string_view prevWord = linePrefix.substr(kwStart, kwEnd - kwStart);
+        if (prevWord == "as" && beforeWord < wordStart) {
+            res.isAfterAs = true;
             return res;
         }
     }
@@ -1332,7 +1332,7 @@ inline CompletionCursorAnalysis analyze_completion_cursor(std::string_view line_
     return res;
 }
 
-inline bool matches_completion_prefix(std::string_view candidate, std::string_view prefix) {
+inline bool matchesCompletionPrefix(std::string_view candidate, std::string_view prefix) {
     if (prefix.empty()) {
         return true;
     }
@@ -1342,12 +1342,12 @@ inline bool matches_completion_prefix(std::string_view candidate, std::string_vi
     return candidate.substr(0, prefix.size()) == prefix;
 }
 
-inline void add_unique_completion_item(
+inline void addUniqueCompletionItem(
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen,
     const CompletionItemEntry& entry
 ) {
-    const std::string key = std::to_string(entry.kind) + ":" + entry.label + ":" + entry.insert_text;
+    const std::string key = std::to_string(entry.kind) + ":" + entry.label + ":" + entry.insertText;
     if (seen.find(key) != seen.end()) {
         return;
     }
@@ -1355,425 +1355,425 @@ inline void add_unique_completion_item(
     items.push_back(entry);
 }
 
-inline void add_completion_entry(
+inline void addCompletionEntry(
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen,
     std::string_view label,
     int64_t kind,
     std::string_view detail,
-    std::string_view insert_text = "",
+    std::string_view insertText = "",
     std::string_view documentation = ""
 ) {
     std::string ins(label);
-    if (!insert_text.empty()) {
-        ins = std::string(insert_text);
+    if (!insertText.empty()) {
+        ins = std::string(insertText);
     }
-    add_unique_completion_item(
+    addUniqueCompletionItem(
         items,
         seen,
         CompletionItemEntry{std::string(label), kind, std::string(detail), ins, std::string(documentation)}
     );
 }
 
-inline void collect_module_symbol_completions(
+inline void collectModuleSymbolCompletions(
     const LspDocumentSnapshot& snap,
-    std::string_view target_module_id,
+    std::string_view targetModuleId,
     std::string_view prefix,
-    bool require_pub,
-    bool include_functions,
-    bool include_module_aliases,
+    bool requirePub,
+    bool includeFunctions,
+    bool includeModuleAliases,
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen
 ) {
-    if (include_functions) {
+    if (includeFunctions) {
         for (const auto& kv : snap.symbols.functions) {
             const FnSymbol& fn = kv.second;
-            if (fn.module_id != target_module_id || (require_pub && !fn.is_pub)) {
+            if (fn.moduleId != targetModuleId || (requirePub && !fn.isPub)) {
                 continue;
             }
-            if (!require_pub && is_builtin_symbol_name(fn.name)) {
+            if (!requirePub && isBuiltinSymbolName(fn.name)) {
                 continue;
             }
-            if (matches_completion_prefix(fn.name, prefix)) {
-                add_completion_entry(
+            if (matchesCompletionPrefix(fn.name, prefix)) {
+                addCompletionEntry(
                     items,
                     seen,
                     fn.name,
                     3,
-                    "fn" + format_fn_detail_signature(snap.arena, fn.params, fn.return_type, fn.is_fallible),
+                    "fn" + formatFnDetailSignature(snap.arena, fn.params, fn.returnType, fn.isFallible),
                     fn.name,
-                    format_fn_hover_markdown(snap.arena, fn)
+                    formatFnHoverMarkdown(snap.arena, fn)
                 );
             }
         }
     }
     for (const auto& kv : snap.symbols.types) {
         const TypeSymbol& ts = kv.second;
-        if (ts.module_id != target_module_id || (require_pub && !ts.is_pub)) {
+        if (ts.moduleId != targetModuleId || (requirePub && !ts.isPub)) {
             continue;
         }
-        if (!require_pub && is_builtin_type_name(ts.name)) {
+        if (!requirePub && isBuiltinTypeName(ts.name)) {
             continue;
         }
-        if (matches_completion_prefix(ts.name, prefix)) {
-            add_completion_entry(items, seen, ts.name, 22, "type " + ts.name, ts.name, format_type_hover_markdown(snap.arena, ts));
+        if (matchesCompletionPrefix(ts.name, prefix)) {
+            addCompletionEntry(items, seen, ts.name, 22, "type " + ts.name, ts.name, formatTypeHoverMarkdown(snap.arena, ts));
         }
     }
     for (const auto& kv : snap.symbols.aliases) {
         const AliasSymbol& al = kv.second;
-        if (al.module_id != target_module_id || (require_pub && !al.is_pub)) {
+        if (al.moduleId != targetModuleId || (requirePub && !al.isPub)) {
             continue;
         }
-        if (matches_completion_prefix(al.name, prefix)) {
-            add_completion_entry(
+        if (matchesCompletionPrefix(al.name, prefix)) {
+            addCompletionEntry(
                 items,
                 seen,
                 al.name,
                 25,
-                "alias " + al.name + " = " + format_cleanbasic_type(snap.arena, al.target_type),
+                "alias " + al.name + " = " + formatCleanbasicType(snap.arena, al.targetType),
                 al.name,
-                format_alias_hover_markdown(snap.arena, snap.symbols, al)
+                formatAliasHoverMarkdown(snap.arena, snap.symbols, al)
             );
         }
     }
-    if (include_module_aliases) {
-        const auto mod_map_it = snap.symbols.modules.find(std::string(target_module_id));
-        if (mod_map_it != snap.symbols.modules.end()) {
-            for (const auto& kv : mod_map_it->second) {
-                if (matches_completion_prefix(kv.first, prefix)) {
-                    add_completion_entry(items, seen, kv.first, 9, "module " + kv.second, kv.first);
+    if (includeModuleAliases) {
+        const auto modMapIt = snap.symbols.modules.find(std::string(targetModuleId));
+        if (modMapIt != snap.symbols.modules.end()) {
+            for (const auto& kv : modMapIt->second) {
+                if (matchesCompletionPrefix(kv.first, prefix)) {
+                    addCompletionEntry(items, seen, kv.first, 9, "module " + kv.second, kv.first);
                 }
             }
         }
     }
 }
 
-inline std::optional<TypeId> resolve_variable_type_in_fn(
+inline std::optional<TypeId> resolveVariableTypeInFn(
     const LspDocumentSnapshot& snap,
-    const std::optional<std::string>& enclosing_fn_key,
-    std::string_view var_name
+    const std::optional<std::string>& enclosingFnKey,
+    std::string_view varName
 ) {
-    if (!enclosing_fn_key.has_value()) {
+    if (!enclosingFnKey.has_value()) {
         return std::nullopt;
     }
-    const auto scope_it = snap.symbols.fn_scopes.find(enclosing_fn_key.value());
-    if (scope_it == snap.symbols.fn_scopes.end()) {
+    const auto scopeIt = snap.symbols.fnScopes.find(enclosingFnKey.value());
+    if (scopeIt == snap.symbols.fnScopes.end()) {
         return std::nullopt;
     }
-    const auto var_it = scope_it->second.find(std::string(var_name));
-    if (var_it == scope_it->second.end()) {
+    const auto varIt = scopeIt->second.find(std::string(varName));
+    if (varIt == scopeIt->second.end()) {
         return std::nullopt;
     }
-    return var_it->second.type_id;
+    return varIt->second.typeId;
 }
 
-inline std::string format_ufcs_method_detail(
+inline std::string formatUfcsMethodDetail(
     const AstArena& arena,
     const FnSymbol& fn
 ) {
-    std::vector<Param> remaining_params;
+    std::vector<Param> remainingParams;
     for (size_t i = 1; i < fn.params.size(); ++i) {
-        remaining_params.push_back(fn.params[i]);
+        remainingParams.push_back(fn.params[i]);
     }
-    return "ufcs fn " + fn.name + format_fn_detail_signature(arena, remaining_params, fn.return_type, fn.is_fallible);
+    return "ufcs fn " + fn.name + formatFnDetailSignature(arena, remainingParams, fn.returnType, fn.isFallible);
 }
 
-inline void collect_ufcs_completions_for_type(
+inline void collectUfcsCompletionsForType(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    TypeId recv_tid,
+    std::string_view currentModuleId,
+    TypeId recvTid,
     std::string_view prefix,
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen
 ) {
-    if (recv_tid == INVALID_ID || recv_tid >= snap.arena.types.size()) {
+    if (recvTid == INVALID_ID || recvTid >= snap.arena.types.size()) {
         return;
     }
-    const TypeId resolved_recv = resolve_alias(snap.arena, snap.symbols, current_module_id, recv_tid);
-    if (resolved_recv == INVALID_ID || resolved_recv >= snap.arena.types.size()) {
+    const TypeId resolvedRecv = resolveAlias(snap.arena, snap.symbols, currentModuleId, recvTid);
+    if (resolvedRecv == INVALID_ID || resolvedRecv >= snap.arena.types.size()) {
         return;
     }
-    const std::string& recv_type_key = snap.arena.types[resolved_recv].name;
-    const auto [recv_mod_id, recv_base] = split_symbol_key(recv_type_key);
+    const std::string& recvTypeKey = snap.arena.types[resolvedRecv].name;
+    const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);
 
-    std::unordered_map<std::string, bool> allowed_imported_mods;
-    const auto mod_map_it = snap.symbols.modules.find(std::string(current_module_id));
-    if (mod_map_it != snap.symbols.modules.end()) {
-        for (const auto& kv : mod_map_it->second) {
-            allowed_imported_mods[kv.second] = true;
+    std::unordered_map<std::string, bool> allowedImportedMods;
+    const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
+    if (modMapIt != snap.symbols.modules.end()) {
+        for (const auto& kv : modMapIt->second) {
+            allowedImportedMods[kv.second] = true;
         }
     }
 
     for (const auto& kv : snap.symbols.functions) {
         const FnSymbol& fn = kv.second;
-        if (fn.params.empty() || !matches_completion_prefix(fn.name, prefix)) {
+        if (fn.params.empty() || !matchesCompletionPrefix(fn.name, prefix)) {
             continue;
         }
-        const bool in_current_mod = (fn.module_id == current_module_id);
-        const bool in_defining_mod = (!recv_mod_id.empty() && fn.module_id == recv_mod_id && fn.is_pub);
-        const bool in_imported_mod = (allowed_imported_mods.find(fn.module_id) != allowed_imported_mods.end() && fn.is_pub);
-        if (!in_current_mod && !in_defining_mod && !in_imported_mod) {
-            continue;
-        }
-
-        const TypeId p0_resolved = resolve_alias(snap.arena, snap.symbols, fn.module_id, fn.params[0].type_id);
-        if (p0_resolved == INVALID_ID || p0_resolved >= snap.arena.types.size()) {
-            continue;
-        }
-        if (snap.arena.types[p0_resolved].name != recv_type_key) {
+        const bool inCurrentMod = (fn.moduleId == currentModuleId);
+        const bool inDefiningMod = (!recvModId.empty() && fn.moduleId == recvModId && fn.isPub);
+        const bool inImportedMod = (allowedImportedMods.find(fn.moduleId) != allowedImportedMods.end() && fn.isPub);
+        if (!inCurrentMod && !inDefiningMod && !inImportedMod) {
             continue;
         }
 
-        add_completion_entry(
+        const TypeId p0Resolved = resolveAlias(snap.arena, snap.symbols, fn.moduleId, fn.params[0].typeId);
+        if (p0Resolved == INVALID_ID || p0Resolved >= snap.arena.types.size()) {
+            continue;
+        }
+        if (snap.arena.types[p0Resolved].name != recvTypeKey) {
+            continue;
+        }
+
+        addCompletionEntry(
             items,
             seen,
             fn.name,
             2,
-            format_ufcs_method_detail(snap.arena, fn),
+            formatUfcsMethodDetail(snap.arena, fn),
             fn.name,
-            format_fn_hover_markdown(snap.arena, fn)
+            formatFnHoverMarkdown(snap.arena, fn)
         );
     }
 }
 
-inline void collect_dot_completions(
+inline void collectDotCompletions(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    const std::optional<std::string>& enclosing_fn_key,
-    std::string_view receiver_name,
+    std::string_view currentModuleId,
+    const std::optional<std::string>& enclosingFnKey,
+    std::string_view receiverName,
     std::string_view prefix,
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen
 ) {
-    const auto var_tid_opt = resolve_variable_type_in_fn(snap, enclosing_fn_key, receiver_name);
+    const auto varTidOpt = resolveVariableTypeInFn(snap, enclosingFnKey, receiverName);
 
     // 1. Module alias completion (if not shadowed by local variable)
-    if (!var_tid_opt.has_value()) {
-        const auto mod_map_it = snap.symbols.modules.find(std::string(current_module_id));
-        if (mod_map_it != snap.symbols.modules.end()) {
-            const auto alias_it = mod_map_it->second.find(std::string(receiver_name));
-            if (alias_it != mod_map_it->second.end()) {
-                collect_module_symbol_completions(snap, alias_it->second, prefix, true, true, false, items, seen);
+    if (!varTidOpt.has_value()) {
+        const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
+        if (modMapIt != snap.symbols.modules.end()) {
+            const auto aliasIt = modMapIt->second.find(std::string(receiverName));
+            if (aliasIt != modMapIt->second.end()) {
+                collectModuleSymbolCompletions(snap, aliasIt->second, prefix, true, true, false, items, seen);
                 return;
             }
         }
         return;
     }
 
-    const TypeId recv_tid = resolve_alias(snap.arena, snap.symbols, current_module_id, var_tid_opt.value());
-    if (recv_tid == INVALID_ID || recv_tid >= snap.arena.types.size()) {
+    const TypeId recvTid = resolveAlias(snap.arena, snap.symbols, currentModuleId, varTidOpt.value());
+    if (recvTid == INVALID_ID || recvTid >= snap.arena.types.size()) {
         return;
     }
 
-    const TypeNode& recv_node = snap.arena.types[recv_tid];
+    const TypeNode& recvNode = snap.arena.types[recvTid];
 
     // 2. Built-in 'err' fields (.msg, .code)
-    if (recv_tid == snap.symbols.type_err || recv_node.name == "err") {
-        if (matches_completion_prefix("msg", prefix)) {
-            add_completion_entry(items, seen, "msg", 5, "as str");
+    if (recvTid == snap.symbols.typeErr || recvNode.name == "err") {
+        if (matchesCompletionPrefix("msg", prefix)) {
+            addCompletionEntry(items, seen, "msg", 5, "as str");
         }
-        if (matches_completion_prefix("code", prefix)) {
-            add_completion_entry(items, seen, "code", 5, "as int");
+        if (matchesCompletionPrefix("code", prefix)) {
+            addCompletionEntry(items, seen, "code", 5, "as int");
         }
-        collect_ufcs_completions_for_type(snap, current_module_id, recv_tid, prefix, items, seen);
+        collectUfcsCompletionsForType(snap, currentModuleId, recvTid, prefix, items, seen);
         return;
     }
 
     // 3. Built-in 'list[T]' methods (.push, .append)
-    if (recv_node.name == "list") {
-        std::string elem_type = "any";
-        if (!recv_node.type_args.empty()) {
-            elem_type = format_cleanbasic_type(snap.arena, recv_node.type_args[0]);
+    if (recvNode.name == "list") {
+        std::string elemType = "any";
+        if (!recvNode.typeArgs.empty()) {
+            elemType = formatCleanbasicType(snap.arena, recvNode.typeArgs[0]);
         }
-        if (matches_completion_prefix("push", prefix)) {
-            add_completion_entry(items, seen, "push", 2, "fn(item as " + elem_type + ")");
+        if (matchesCompletionPrefix("push", prefix)) {
+            addCompletionEntry(items, seen, "push", 2, "fn(item as " + elemType + ")");
         }
-        if (matches_completion_prefix("append", prefix)) {
-            add_completion_entry(items, seen, "append", 2, "fn(item as " + elem_type + ")");
+        if (matchesCompletionPrefix("append", prefix)) {
+            addCompletionEntry(items, seen, "append", 2, "fn(item as " + elemType + ")");
         }
-        collect_ufcs_completions_for_type(snap, current_module_id, recv_tid, prefix, items, seen);
+        collectUfcsCompletionsForType(snap, currentModuleId, recvTid, prefix, items, seen);
         return;
     }
 
     // 4. User Struct fields + UFCS methods
-    const auto ts_opt = resolve_type_symbol(snap.arena, snap.symbols, current_module_id, recv_tid);
-    if (ts_opt.has_value()) {
-        const TypeSymbol& ts = ts_opt.value();
-        for (const auto& f : ts.field_order) {
-            if (!matches_completion_prefix(f.name, prefix)) {
+    const auto tsOpt = resolveTypeSymbol(snap.arena, snap.symbols, currentModuleId, recvTid);
+    if (tsOpt.has_value()) {
+        const TypeSymbol& ts = tsOpt.value();
+        for (const auto& f : ts.fieldOrder) {
+            if (!matchesCompletionPrefix(f.name, prefix)) {
                 continue;
             }
-            TypeId ftid = f.type_id;
+            TypeId ftid = f.typeId;
             const auto fit = ts.fields.find(f.name);
             if (fit != ts.fields.end()) {
                 ftid = fit->second;
             }
-            add_completion_entry(items, seen, f.name, 5, "as " + format_cleanbasic_type(snap.arena, ftid));
+            addCompletionEntry(items, seen, f.name, 5, "as " + formatCleanbasicType(snap.arena, ftid));
         }
     }
 
-    collect_ufcs_completions_for_type(snap, current_module_id, recv_tid, prefix, items, seen);
+    collectUfcsCompletionsForType(snap, currentModuleId, recvTid, prefix, items, seen);
 }
 
-inline std::optional<TypeSymbol> resolve_call_struct_symbol(
+inline std::optional<TypeSymbol> resolveCallStructSymbol(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    const std::optional<std::string>& enclosing_fn_key,
-    const CallSiteContext& call_ctx
+    std::string_view currentModuleId,
+    const std::optional<std::string>& enclosingFnKey,
+    const CallSiteContext& callCtx
 ) {
-    std::string lookup_name = call_ctx.callee_name;
-    if (call_ctx.has_receiver) {
-        if (resolve_variable_type_in_fn(snap, enclosing_fn_key, call_ctx.receiver_name).has_value()) {
+    std::string lookupName = callCtx.calleeName;
+    if (callCtx.hasReceiver) {
+        if (resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName).has_value()) {
             return std::nullopt;
         }
-        lookup_name = call_ctx.receiver_name + "." + call_ctx.callee_name;
+        lookupName = callCtx.receiverName + "." + callCtx.calleeName;
     }
-    return resolve_type_symbol_by_name(snap.arena, snap.symbols, current_module_id, lookup_name, call_ctx.has_receiver);
+    return resolveTypeSymbolByName(snap.arena, snap.symbols, currentModuleId, lookupName, callCtx.hasReceiver);
 }
 
 struct ResolvedCallFunction {
     FnSymbol fn;
-    bool is_ufcs = false;
+    bool isUfcs = false;
 };
 
-inline std::optional<ResolvedCallFunction> resolve_call_fn_symbol(
+inline std::optional<ResolvedCallFunction> resolveCallFnSymbol(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    const std::optional<std::string>& enclosing_fn_key,
-    const CallSiteContext& call_ctx
+    std::string_view currentModuleId,
+    const std::optional<std::string>& enclosingFnKey,
+    const CallSiteContext& callCtx
 ) {
-    if (call_ctx.has_receiver) {
-        const auto var_tid_opt = resolve_variable_type_in_fn(snap, enclosing_fn_key, call_ctx.receiver_name);
-        if (!var_tid_opt.has_value()) {
-            const auto mod_map_it = snap.symbols.modules.find(std::string(current_module_id));
-            if (mod_map_it != snap.symbols.modules.end()) {
-                const auto alias_it = mod_map_it->second.find(call_ctx.receiver_name);
-                if (alias_it != mod_map_it->second.end()) {
-                    const std::string fn_key = symbol_key(alias_it->second, call_ctx.callee_name);
-                    const auto fn_it = snap.symbols.functions.find(fn_key);
-                    if (fn_it != snap.symbols.functions.end() && fn_it->second.is_pub) {
-                        return ResolvedCallFunction{fn_it->second, false};
+    if (callCtx.hasReceiver) {
+        const auto varTidOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
+        if (!varTidOpt.has_value()) {
+            const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
+            if (modMapIt != snap.symbols.modules.end()) {
+                const auto aliasIt = modMapIt->second.find(callCtx.receiverName);
+                if (aliasIt != modMapIt->second.end()) {
+                    const std::string fnKey = symbolKey(aliasIt->second, callCtx.calleeName);
+                    const auto fnIt = snap.symbols.functions.find(fnKey);
+                    if (fnIt != snap.symbols.functions.end() && fnIt->second.isPub) {
+                        return ResolvedCallFunction{fnIt->second, false};
                     }
                 }
             }
         } else {
-            const auto ufcs_opt = resolve_ufcs_fn(snap.arena, snap.symbols, current_module_id, var_tid_opt.value(), call_ctx.callee_name);
-            if (ufcs_opt.has_value()) {
-                return ResolvedCallFunction{ufcs_opt.value(), true};
+            const auto ufcsOpt = resolveUfcsFn(snap.arena, snap.symbols, currentModuleId, varTidOpt.value(), callCtx.calleeName);
+            if (ufcsOpt.has_value()) {
+                return ResolvedCallFunction{ufcsOpt.value(), true};
             }
         }
         return std::nullopt;
     }
 
-    const std::string fn_key = resolve_symbol_key(snap.symbols, current_module_id, call_ctx.callee_name);
-    const auto fn_it = snap.symbols.functions.find(fn_key);
-    if (fn_it != snap.symbols.functions.end()) {
-        return ResolvedCallFunction{fn_it->second, false};
+    const std::string fnKey = resolveSymbolKey(snap.symbols, currentModuleId, callCtx.calleeName);
+    const auto fnIt = snap.symbols.functions.find(fnKey);
+    if (fnIt != snap.symbols.functions.end()) {
+        return ResolvedCallFunction{fnIt->second, false};
     }
     return std::nullopt;
 }
 
-inline void collect_named_argument_completions(
+inline void collectNamedArgumentCompletions(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    const std::optional<std::string>& enclosing_fn_key,
-    const CallSiteContext& call_ctx,
+    std::string_view currentModuleId,
+    const std::optional<std::string>& enclosingFnKey,
+    const CallSiteContext& callCtx,
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen
 ) {
-    if (!call_ctx.inside_call || !call_ctx.at_arg_name_position) {
+    if (!callCtx.insideCall || !callCtx.atArgNamePosition) {
         return;
     }
 
-    if (!call_ctx.has_receiver && call_ctx.callee_name == "error") {
-        if (matches_completion_prefix("code", call_ctx.arg_prefix)) {
-            add_completion_entry(items, seen, "code=", 6, "as int");
+    if (!callCtx.hasReceiver && callCtx.calleeName == "error") {
+        if (matchesCompletionPrefix("code", callCtx.argPrefix)) {
+            addCompletionEntry(items, seen, "code=", 6, "as int");
         }
         return;
     }
 
-    const auto ts_opt = resolve_call_struct_symbol(snap, current_module_id, enclosing_fn_key, call_ctx);
-    if (ts_opt.has_value()) {
-        const TypeSymbol& ts = ts_opt.value();
-        for (const auto& f : ts.field_order) {
-            if (!matches_completion_prefix(f.name, call_ctx.arg_prefix)) {
+    const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
+    if (tsOpt.has_value()) {
+        const TypeSymbol& ts = tsOpt.value();
+        for (const auto& f : ts.fieldOrder) {
+            if (!matchesCompletionPrefix(f.name, callCtx.argPrefix)) {
                 continue;
             }
-            TypeId ftid = f.type_id;
+            TypeId ftid = f.typeId;
             const auto fit = ts.fields.find(f.name);
             if (fit != ts.fields.end()) {
                 ftid = fit->second;
             }
-            add_completion_entry(items, seen, f.name + "=", 5, "as " + format_cleanbasic_type(snap.arena, ftid));
+            addCompletionEntry(items, seen, f.name + "=", 5, "as " + formatCleanbasicType(snap.arena, ftid));
         }
         return;
     }
 
-    const auto fn_opt = resolve_call_fn_symbol(snap, current_module_id, enclosing_fn_key, call_ctx);
-    if (fn_opt.has_value()) {
-        const FnSymbol& fn = fn_opt.value().fn;
-        size_t start_idx = 0;
-        if (fn_opt.value().is_ufcs && !fn.params.empty()) {
-            start_idx = 1;
+    const auto fnOpt = resolveCallFnSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
+    if (fnOpt.has_value()) {
+        const FnSymbol& fn = fnOpt.value().fn;
+        size_t startIdx = 0;
+        if (fnOpt.value().isUfcs && !fn.params.empty()) {
+            startIdx = 1;
         }
-        for (size_t i = start_idx; i < fn.params.size(); ++i) {
+        for (size_t i = startIdx; i < fn.params.size(); ++i) {
             const Param& p = fn.params[i];
-            if (matches_completion_prefix(p.name, call_ctx.arg_prefix)) {
-                add_completion_entry(items, seen, p.name + "=", 6, "as " + format_cleanbasic_type(snap.arena, p.type_id));
+            if (matchesCompletionPrefix(p.name, callCtx.argPrefix)) {
+                addCompletionEntry(items, seen, p.name + "=", 6, "as " + formatCleanbasicType(snap.arena, p.typeId));
             }
         }
     }
 }
 
-inline void collect_type_annotation_completions(
+inline void collectTypeAnnotationCompletions(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     std::string_view prefix,
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen
 ) {
-    const std::vector<std::string> builtin_types = {
+    const std::vector<std::string> builtinTypes = {
         "int", "float", "str", "bool", "cptr", "err", "list", "dict"
     };
-    for (const auto& bt : builtin_types) {
-        if (matches_completion_prefix(bt, prefix)) {
-            add_completion_entry(items, seen, bt, 14, "built-in type");
+    for (const auto& bt : builtinTypes) {
+        if (matchesCompletionPrefix(bt, prefix)) {
+            addCompletionEntry(items, seen, bt, 14, "built-in type");
         }
     }
     if (snap.valid) {
-        collect_module_symbol_completions(snap, current_module_id, prefix, false, false, true, items, seen);
+        collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, false, true, items, seen);
     }
 }
 
-inline void collect_general_scope_completions(
+inline void collectGeneralScopeCompletions(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    const std::optional<std::string>& enclosing_fn_key,
+    std::string_view currentModuleId,
+    const std::optional<std::string>& enclosingFnKey,
     std::string_view prefix,
     std::vector<CompletionItemEntry>& items,
     std::unordered_map<std::string, bool>& seen
 ) {
     if (snap.valid) {
-        if (enclosing_fn_key.has_value()) {
-            const auto scope_it = snap.symbols.fn_scopes.find(enclosing_fn_key.value());
-            if (scope_it != snap.symbols.fn_scopes.end()) {
-                for (const auto& kv : scope_it->second) {
+        if (enclosingFnKey.has_value()) {
+            const auto scopeIt = snap.symbols.fnScopes.find(enclosingFnKey.value());
+            if (scopeIt != snap.symbols.fnScopes.end()) {
+                for (const auto& kv : scopeIt->second) {
                     const VarSymbol& vs = kv.second;
-                    if (matches_completion_prefix(vs.name, prefix)) {
-                        add_completion_entry(
+                    if (matchesCompletionPrefix(vs.name, prefix)) {
+                        addCompletionEntry(
                             items,
                             seen,
                             vs.name,
                             6,
-                            "as " + format_cleanbasic_type(snap.arena, vs.type_id),
+                            "as " + formatCleanbasicType(snap.arena, vs.typeId),
                             vs.name,
-                            format_var_hover_markdown(snap.arena, vs)
+                            formatVarHoverMarkdown(snap.arena, vs)
                         );
                     }
                 }
             }
         }
-        collect_module_symbol_completions(snap, current_module_id, prefix, false, true, true, items, seen);
+        collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, true, true, items, seen);
     }
 
     const std::vector<std::pair<std::string, std::string>> builtins = {
@@ -1783,13 +1783,13 @@ inline void collect_general_scope_completions(
         {"error", "fn error(msg as str, [code=1]) as err"}
     };
     for (const auto& b : builtins) {
-        if (matches_completion_prefix(b.first, prefix)) {
+        if (matchesCompletionPrefix(b.first, prefix)) {
             std::string doc;
-            const auto doc_opt = format_builtin_hover_markdown(b.first);
-            if (doc_opt.has_value()) {
-                doc = doc_opt.value();
+            const auto docOpt = formatBuiltinHoverMarkdown(b.first);
+            if (docOpt.has_value()) {
+                doc = docOpt.value();
             }
-            add_completion_entry(items, seen, b.first, 3, b.second, b.first, doc);
+            addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
         }
     }
 
@@ -1802,117 +1802,117 @@ inline void collect_general_scope_completions(
         "true", "false", "null"
     };
     for (const auto& kw : keywords) {
-        if (matches_completion_prefix(kw, prefix)) {
-            add_completion_entry(items, seen, kw, 14, "keyword");
+        if (matchesCompletionPrefix(kw, prefix)) {
+            addCompletionEntry(items, seen, kw, 14, "keyword");
         }
     }
 }
 
-inline void handle_completion_request(
+inline void handleCompletionRequest(
     LspServerState& state,
-    const JsonArena& req_arena,
-    JsonId req_id,
-    JsonId params_id,
+    const JsonArena& reqArena,
+    JsonId reqId,
+    JsonId paramsId,
     std::ostream& out
 ) {
-    const LspTextPositionParams doc = parse_doc_position_params(req_arena, params_id);
-    JsonArena out_arena;
-    const JsonId items_arr = json_add_array(out_arena);
+    const LspTextPositionParams doc = parseDocPositionParams(reqArena, paramsId);
+    JsonArena outArena;
+    const JsonId itemsArr = jsonAddArray(outArena);
 
     if (!doc.valid) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, items_arr, out);
+        writeJsonrpcResult(reqArena, reqId, outArena, itemsArr, out);
         return;
     }
 
-    const std::string source_text = read_document_text(state, doc.uri);
-    const LspDocumentSnapshot snap = get_or_build_scrubbed_snapshot(state, doc.uri, source_text, doc.line_0based, doc.char_0based);
-    const CursorLineSlice slice = extract_cursor_line_slice(source_text, doc.line_0based, doc.char_0based);
-    const CompletionCursorAnalysis cursor_info = analyze_completion_cursor(slice.prefix_to_cursor);
+    const std::string sourceText = readDocumentText(state, doc.uri);
+    const LspDocumentSnapshot snap = getOrBuildScrubbedSnapshot(state, doc.uri, sourceText, doc.line0Based, doc.char0Based);
+    const CursorLineSlice slice = extractCursorLineSlice(sourceText, doc.line0Based, doc.char0Based);
+    const CompletionCursorAnalysis cursorInfo = analyzeCompletionCursor(slice.prefixToCursor);
 
-    std::string current_mod_id;
-    std::optional<std::string> enclosing_fn_key;
+    std::string currentModId;
+    std::optional<std::string> enclosingFnKey;
     if (snap.valid) {
-        current_mod_id = find_module_id_for_file(snap.arena, snap.program, doc.file_path);
-        enclosing_fn_key = find_enclosing_fn_key(snap.arena, snap.program, doc.file_path, doc.line_1based);
+        currentModId = findModuleIdForFile(snap.arena, snap.program, doc.filePath);
+        enclosingFnKey = findEnclosingFnKey(snap.arena, snap.program, doc.filePath, doc.line1Based);
     }
 
     std::vector<CompletionItemEntry> entries;
     std::unordered_map<std::string, bool> seen;
 
-    if (cursor_info.is_dot) {
+    if (cursorInfo.isDot) {
         if (snap.valid) {
-            collect_dot_completions(
-                snap, current_mod_id, enclosing_fn_key, cursor_info.dot_receiver, cursor_info.prefix, entries, seen
+            collectDotCompletions(
+                snap, currentModId, enclosingFnKey, cursorInfo.dotReceiver, cursorInfo.prefix, entries, seen
             );
         }
-    } else if (cursor_info.is_after_as) {
-        collect_type_annotation_completions(snap, current_mod_id, cursor_info.prefix, entries, seen);
+    } else if (cursorInfo.isAfterAs) {
+        collectTypeAnnotationCompletions(snap, currentModId, cursorInfo.prefix, entries, seen);
     } else {
-        if (snap.valid && cursor_info.call_ctx.inside_call && cursor_info.call_ctx.at_arg_name_position) {
-            collect_named_argument_completions(snap, current_mod_id, enclosing_fn_key, cursor_info.call_ctx, entries, seen);
+        if (snap.valid && cursorInfo.callCtx.insideCall && cursorInfo.callCtx.atArgNamePosition) {
+            collectNamedArgumentCompletions(snap, currentModId, enclosingFnKey, cursorInfo.callCtx, entries, seen);
         }
-        collect_general_scope_completions(snap, current_mod_id, enclosing_fn_key, cursor_info.prefix, entries, seen);
+        collectGeneralScopeCompletions(snap, currentModId, enclosingFnKey, cursorInfo.prefix, entries, seen);
     }
 
     for (const auto& entry : entries) {
-        const JsonId item_obj = json_add_object(out_arena);
-        json_object_set(out_arena, item_obj, "label", json_add_string(out_arena, entry.label));
-        json_object_set(out_arena, item_obj, "kind", json_add_int(out_arena, entry.kind));
+        const JsonId itemObj = jsonAddObject(outArena);
+        jsonObjectSet(outArena, itemObj, "label", jsonAddString(outArena, entry.label));
+        jsonObjectSet(outArena, itemObj, "kind", jsonAddInt(outArena, entry.kind));
         if (!entry.detail.empty()) {
-            json_object_set(out_arena, item_obj, "detail", json_add_string(out_arena, entry.detail));
+            jsonObjectSet(outArena, itemObj, "detail", jsonAddString(outArena, entry.detail));
         }
-        if (!entry.insert_text.empty()) {
-            json_object_set(out_arena, item_obj, "insertText", json_add_string(out_arena, entry.insert_text));
+        if (!entry.insertText.empty()) {
+            jsonObjectSet(outArena, itemObj, "insertText", jsonAddString(outArena, entry.insertText));
         }
         if (!entry.documentation.empty()) {
-            const JsonId doc_obj = json_add_object(out_arena);
-            json_object_set(out_arena, doc_obj, "kind", json_add_string(out_arena, "markdown"));
-            json_object_set(out_arena, doc_obj, "value", json_add_string(out_arena, entry.documentation));
-            json_object_set(out_arena, item_obj, "documentation", doc_obj);
+            const JsonId docObj = jsonAddObject(outArena);
+            jsonObjectSet(outArena, docObj, "kind", jsonAddString(outArena, "markdown"));
+            jsonObjectSet(outArena, docObj, "value", jsonAddString(outArena, entry.documentation));
+            jsonObjectSet(outArena, itemObj, "documentation", docObj);
         }
-        json_array_push(out_arena, items_arr, item_obj);
+        jsonArrayPush(outArena, itemsArr, itemObj);
     }
 
-    write_jsonrpc_result(req_arena, req_id, out_arena, items_arr, out);
+    writeJsonrpcResult(reqArena, reqId, outArena, itemsArr, out);
 }
 
 struct SignatureHelpData {
     std::string label;
     std::string documentation;
-    std::vector<std::string> param_labels;
-    uint32_t active_parameter = 0;
+    std::vector<std::string> paramLabels;
+    uint32_t activeParameter = 0;
 };
 
-inline std::optional<SignatureHelpData> resolve_signature_help(
+inline std::optional<SignatureHelpData> resolveSignatureHelp(
     const LspDocumentSnapshot& snap,
-    std::string_view current_module_id,
-    const std::optional<std::string>& enclosing_fn_key,
-    const CallSiteContext& call_ctx
+    std::string_view currentModuleId,
+    const std::optional<std::string>& enclosingFnKey,
+    const CallSiteContext& callCtx
 ) {
-    if (!call_ctx.inside_call) {
+    if (!callCtx.insideCall) {
         return std::nullopt;
     }
 
-    if (!call_ctx.has_receiver) {
-        if (call_ctx.callee_name == "error") {
-            uint32_t act = call_ctx.active_param;
+    if (!callCtx.hasReceiver) {
+        if (callCtx.calleeName == "error") {
+            uint32_t act = callCtx.activeParam;
             if (act > 1) {
                 act = 1;
             }
             std::string doc;
-            const auto doc_opt = format_builtin_hover_markdown("error");
-            if (doc_opt.has_value()) {
-                doc = doc_opt.value();
+            const auto docOpt = formatBuiltinHoverMarkdown("error");
+            if (docOpt.has_value()) {
+                doc = docOpt.value();
             }
             return SignatureHelpData{"fn error(msg as str, code as int) as err", doc, {"msg as str", "code as int"}, act};
         }
-        if (call_ctx.callee_name == "len") {
+        if (callCtx.calleeName == "len") {
             return SignatureHelpData{"fn len(container as any) as int", "", {"container as any"}, 0};
         }
-        if (call_ctx.callee_name == "str") {
+        if (callCtx.calleeName == "str") {
             return SignatureHelpData{"fn str(val as any) as str", "", {"val as any"}, 0};
         }
-        if (call_ctx.callee_name == "print") {
+        if (callCtx.calleeName == "print") {
             return SignatureHelpData{"fn print(values...)", "", {"values..."}, 0};
         }
     }
@@ -1922,63 +1922,63 @@ inline std::optional<SignatureHelpData> resolve_signature_help(
     }
 
     // 3. Struct constructor
-    const auto ts_opt = resolve_call_struct_symbol(snap, current_module_id, enclosing_fn_key, call_ctx);
-    if (ts_opt.has_value()) {
-        const TypeSymbol& ts = ts_opt.value();
+    const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
+    if (tsOpt.has_value()) {
+        const TypeSymbol& ts = tsOpt.value();
         SignatureHelpData sig{};
         sig.label = ts.name + "(";
-        for (size_t i = 0; i < ts.field_order.size(); ++i) {
+        for (size_t i = 0; i < ts.fieldOrder.size(); ++i) {
             if (i > 0) {
                 sig.label += ", ";
             }
-            const FieldDecl& f = ts.field_order[i];
-            TypeId ftid = f.type_id;
+            const FieldDecl& f = ts.fieldOrder[i];
+            TypeId ftid = f.typeId;
             const auto fit = ts.fields.find(f.name);
             if (fit != ts.fields.end()) {
                 ftid = fit->second;
             }
-            const std::string p_label = f.name + " as " + format_cleanbasic_type(snap.arena, ftid);
-            sig.label += p_label;
-            sig.param_labels.push_back(p_label);
+            const std::string pLabel = f.name + " as " + formatCleanbasicType(snap.arena, ftid);
+            sig.label += pLabel;
+            sig.paramLabels.push_back(pLabel);
         }
         sig.label += ") as " + ts.name;
-        sig.documentation = format_type_hover_markdown(snap.arena, ts);
-        sig.active_parameter = call_ctx.active_param;
-        if (!sig.param_labels.empty() && sig.active_parameter >= sig.param_labels.size()) {
-            sig.active_parameter = static_cast<uint32_t>(sig.param_labels.size() - 1);
+        sig.documentation = formatTypeHoverMarkdown(snap.arena, ts);
+        sig.activeParameter = callCtx.activeParam;
+        if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) {
+            sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
         }
         return sig;
     }
 
     // 4. Regular function or UFCS function call
-    const auto fn_opt = resolve_call_fn_symbol(snap, current_module_id, enclosing_fn_key, call_ctx);
-    if (fn_opt.has_value()) {
-        const FnSymbol& fn = fn_opt.value().fn;
-        const bool is_ufcs = fn_opt.value().is_ufcs;
+    const auto fnOpt = resolveCallFnSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
+    if (fnOpt.has_value()) {
+        const FnSymbol& fn = fnOpt.value().fn;
+        const bool isUfcs = fnOpt.value().isUfcs;
 
-        std::vector<Param> visible_params;
-        size_t start_idx = 0;
-        if (is_ufcs && !fn.params.empty()) {
-            start_idx = 1;
+        std::vector<Param> visibleParams;
+        size_t startIdx = 0;
+        if (isUfcs && !fn.params.empty()) {
+            startIdx = 1;
         }
-        for (size_t i = start_idx; i < fn.params.size(); ++i) {
-            visible_params.push_back(fn.params[i]);
+        for (size_t i = startIdx; i < fn.params.size(); ++i) {
+            visibleParams.push_back(fn.params[i]);
         }
 
         SignatureHelpData sig{};
-        sig.label = "fn " + fn.name + format_fn_detail_signature(snap.arena, visible_params, fn.return_type, fn.is_fallible);
-        sig.documentation = format_fn_hover_markdown(snap.arena, fn);
-        for (const auto& p : visible_params) {
-            std::string p_label;
-            if (p.is_byref) {
-                p_label += "byref ";
+        sig.label = "fn " + fn.name + formatFnDetailSignature(snap.arena, visibleParams, fn.returnType, fn.isFallible);
+        sig.documentation = formatFnHoverMarkdown(snap.arena, fn);
+        for (const auto& p : visibleParams) {
+            std::string pLabel;
+            if (p.isByref) {
+                pLabel += "byref ";
             }
-            p_label += p.name + " as " + format_cleanbasic_type(snap.arena, p.type_id);
-            sig.param_labels.push_back(p_label);
+            pLabel += p.name + " as " + formatCleanbasicType(snap.arena, p.typeId);
+            sig.paramLabels.push_back(pLabel);
         }
-        sig.active_parameter = call_ctx.active_param;
-        if (!sig.param_labels.empty() && sig.active_parameter >= sig.param_labels.size()) {
-            sig.active_parameter = static_cast<uint32_t>(sig.param_labels.size() - 1);
+        sig.activeParameter = callCtx.activeParam;
+        if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) {
+            sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
         }
         return sig;
     }
@@ -1986,115 +1986,115 @@ inline std::optional<SignatureHelpData> resolve_signature_help(
     return std::nullopt;
 }
 
-inline void handle_signature_help_request(
+inline void handleSignatureHelpRequest(
     LspServerState& state,
-    const JsonArena& req_arena,
-    JsonId req_id,
-    JsonId params_id,
+    const JsonArena& reqArena,
+    JsonId reqId,
+    JsonId paramsId,
     std::ostream& out
 ) {
-    const LspTextPositionParams doc = parse_doc_position_params(req_arena, params_id);
-    JsonArena out_arena;
+    const LspTextPositionParams doc = parseDocPositionParams(reqArena, paramsId);
+    JsonArena outArena;
     if (!doc.valid) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, json_add_null(out_arena), out);
+        writeJsonrpcResult(reqArena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
-    const std::string source_text = read_document_text(state, doc.uri);
-    const LspDocumentSnapshot snap = get_or_build_scrubbed_snapshot(state, doc.uri, source_text, doc.line_0based, doc.char_0based);
-    const CursorLineSlice slice = extract_cursor_line_slice(source_text, doc.line_0based, doc.char_0based);
-    const CallSiteContext call_ctx = parse_enclosing_call_site(slice.prefix_to_cursor);
+    const std::string sourceText = readDocumentText(state, doc.uri);
+    const LspDocumentSnapshot snap = getOrBuildScrubbedSnapshot(state, doc.uri, sourceText, doc.line0Based, doc.char0Based);
+    const CursorLineSlice slice = extractCursorLineSlice(sourceText, doc.line0Based, doc.char0Based);
+    const CallSiteContext callCtx = parseEnclosingCallSite(slice.prefixToCursor);
 
-    std::string current_mod_id;
-    std::optional<std::string> enclosing_fn_key;
+    std::string currentModId;
+    std::optional<std::string> enclosingFnKey;
     if (snap.valid) {
-        current_mod_id = find_module_id_for_file(snap.arena, snap.program, doc.file_path);
-        enclosing_fn_key = find_enclosing_fn_key(snap.arena, snap.program, doc.file_path, doc.line_1based);
+        currentModId = findModuleIdForFile(snap.arena, snap.program, doc.filePath);
+        enclosingFnKey = findEnclosingFnKey(snap.arena, snap.program, doc.filePath, doc.line1Based);
     }
 
-    const auto sig_opt = resolve_signature_help(snap, current_mod_id, enclosing_fn_key, call_ctx);
-    if (!sig_opt.has_value()) {
-        write_jsonrpc_result(req_arena, req_id, out_arena, json_add_null(out_arena), out);
+    const auto sigOpt = resolveSignatureHelp(snap, currentModId, enclosingFnKey, callCtx);
+    if (!sigOpt.has_value()) {
+        writeJsonrpcResult(reqArena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
-    const SignatureHelpData& sig = sig_opt.value();
-    const JsonId sig_info = json_add_object(out_arena);
-    json_object_set(out_arena, sig_info, "label", json_add_string(out_arena, sig.label));
+    const SignatureHelpData& sig = sigOpt.value();
+    const JsonId sigInfo = jsonAddObject(outArena);
+    jsonObjectSet(outArena, sigInfo, "label", jsonAddString(outArena, sig.label));
     if (!sig.documentation.empty()) {
-        const JsonId doc_obj = json_add_object(out_arena);
-        json_object_set(out_arena, doc_obj, "kind", json_add_string(out_arena, "markdown"));
-        json_object_set(out_arena, doc_obj, "value", json_add_string(out_arena, sig.documentation));
-        json_object_set(out_arena, sig_info, "documentation", doc_obj);
+        const JsonId docObj = jsonAddObject(outArena);
+        jsonObjectSet(outArena, docObj, "kind", jsonAddString(outArena, "markdown"));
+        jsonObjectSet(outArena, docObj, "value", jsonAddString(outArena, sig.documentation));
+        jsonObjectSet(outArena, sigInfo, "documentation", docObj);
     }
 
-    const JsonId params_arr = json_add_array(out_arena);
-    for (const auto& p_label : sig.param_labels) {
-        const JsonId p_obj = json_add_object(out_arena);
-        json_object_set(out_arena, p_obj, "label", json_add_string(out_arena, p_label));
-        json_array_push(out_arena, params_arr, p_obj);
+    const JsonId paramsArr = jsonAddArray(outArena);
+    for (const auto& pLabel : sig.paramLabels) {
+        const JsonId pObj = jsonAddObject(outArena);
+        jsonObjectSet(outArena, pObj, "label", jsonAddString(outArena, pLabel));
+        jsonArrayPush(outArena, paramsArr, pObj);
     }
-    json_object_set(out_arena, sig_info, "parameters", params_arr);
+    jsonObjectSet(outArena, sigInfo, "parameters", paramsArr);
 
-    const JsonId sigs_arr = json_add_array(out_arena);
-    json_array_push(out_arena, sigs_arr, sig_info);
+    const JsonId sigsArr = jsonAddArray(outArena);
+    jsonArrayPush(outArena, sigsArr, sigInfo);
 
-    const JsonId result_obj = json_add_object(out_arena);
-    json_object_set(out_arena, result_obj, "signatures", sigs_arr);
-    json_object_set(out_arena, result_obj, "activeSignature", json_add_int(out_arena, 0));
-    json_object_set(out_arena, result_obj, "activeParameter", json_add_int(out_arena, static_cast<int64_t>(sig.active_parameter)));
+    const JsonId resultObj = jsonAddObject(outArena);
+    jsonObjectSet(outArena, resultObj, "signatures", sigsArr);
+    jsonObjectSet(outArena, resultObj, "activeSignature", jsonAddInt(outArena, 0));
+    jsonObjectSet(outArena, resultObj, "activeParameter", jsonAddInt(outArena, static_cast<int64_t>(sig.activeParameter)));
 
-    write_jsonrpc_result(req_arena, req_id, out_arena, result_obj, out);
+    writeJsonrpcResult(reqArena, reqId, outArena, resultObj, out);
 }
 
-inline void handle_lsp_message(LspServerState& state, std::string_view payload, std::ostream& out) {
-    const JsonParseResult parsed = parse_json(payload);
+inline void handleLspMessage(LspServerState& state, std::string_view payload, std::ostream& out) {
+    const JsonParseResult parsed = parseJson(payload);
     if (!parsed.ok) {
         return;
     }
 
-    const JsonId method_id = json_get_field(parsed.arena, parsed.root, "method");
-    const auto method_opt = json_get_string(parsed.arena, method_id);
-    if (!method_opt.has_value()) {
+    const JsonId methodId = jsonGetField(parsed.arena, parsed.root, "method");
+    const auto methodOpt = jsonGetString(parsed.arena, methodId);
+    if (!methodOpt.has_value()) {
         return;
     }
 
-    const std::string& method = method_opt.value();
-    const JsonId req_id = json_get_field(parsed.arena, parsed.root, "id");
-    const JsonId params_id = json_get_field(parsed.arena, parsed.root, "params");
+    const std::string& method = methodOpt.value();
+    const JsonId reqId = jsonGetField(parsed.arena, parsed.root, "id");
+    const JsonId paramsId = jsonGetField(parsed.arena, parsed.root, "params");
 
     if (method == "initialize") {
         state.initialized = true;
-        JsonArena out_arena;
+        JsonArena outArena;
 
-        const JsonId caps = json_add_object(out_arena);
-        json_object_set(out_arena, caps, "textDocumentSync", json_add_int(out_arena, 1));
-        json_object_set(out_arena, caps, "documentSymbolProvider", json_add_bool(out_arena, true));
-        json_object_set(out_arena, caps, "definitionProvider", json_add_bool(out_arena, true));
-        json_object_set(out_arena, caps, "hoverProvider", json_add_bool(out_arena, true));
+        const JsonId caps = jsonAddObject(outArena);
+        jsonObjectSet(outArena, caps, "textDocumentSync", jsonAddInt(outArena, 1));
+        jsonObjectSet(outArena, caps, "documentSymbolProvider", jsonAddBool(outArena, true));
+        jsonObjectSet(outArena, caps, "definitionProvider", jsonAddBool(outArena, true));
+        jsonObjectSet(outArena, caps, "hoverProvider", jsonAddBool(outArena, true));
 
-        const JsonId comp_provider = json_add_object(out_arena);
-        const JsonId comp_triggers = json_add_array(out_arena);
-        json_array_push(out_arena, comp_triggers, json_add_string(out_arena, "."));
-        json_object_set(out_arena, comp_provider, "triggerCharacters", comp_triggers);
-        json_object_set(out_arena, caps, "completionProvider", comp_provider);
+        const JsonId compProvider = jsonAddObject(outArena);
+        const JsonId compTriggers = jsonAddArray(outArena);
+        jsonArrayPush(outArena, compTriggers, jsonAddString(outArena, "."));
+        jsonObjectSet(outArena, compProvider, "triggerCharacters", compTriggers);
+        jsonObjectSet(outArena, caps, "completionProvider", compProvider);
 
-        const JsonId sig_provider = json_add_object(out_arena);
-        const JsonId sig_triggers = json_add_array(out_arena);
-        json_array_push(out_arena, sig_triggers, json_add_string(out_arena, "("));
-        json_array_push(out_arena, sig_triggers, json_add_string(out_arena, ","));
-        json_object_set(out_arena, sig_provider, "triggerCharacters", sig_triggers);
-        json_object_set(out_arena, caps, "signatureHelpProvider", sig_provider);
+        const JsonId sigProvider = jsonAddObject(outArena);
+        const JsonId sigTriggers = jsonAddArray(outArena);
+        jsonArrayPush(outArena, sigTriggers, jsonAddString(outArena, "("));
+        jsonArrayPush(outArena, sigTriggers, jsonAddString(outArena, ","));
+        jsonObjectSet(outArena, sigProvider, "triggerCharacters", sigTriggers);
+        jsonObjectSet(outArena, caps, "signatureHelpProvider", sigProvider);
 
-        const JsonId server_info = json_add_object(out_arena);
-        json_object_set(out_arena, server_info, "name", json_add_string(out_arena, "cleanbasic-lsp"));
-        json_object_set(out_arena, server_info, "version", json_add_string(out_arena, "0.3.0"));
+        const JsonId serverInfo = jsonAddObject(outArena);
+        jsonObjectSet(outArena, serverInfo, "name", jsonAddString(outArena, "cleanbasic-lsp"));
+        jsonObjectSet(outArena, serverInfo, "version", jsonAddString(outArena, "0.3.0"));
 
-        const JsonId result = json_add_object(out_arena);
-        json_object_set(out_arena, result, "capabilities", caps);
-        json_object_set(out_arena, result, "serverInfo", server_info);
+        const JsonId result = jsonAddObject(outArena);
+        jsonObjectSet(outArena, result, "capabilities", caps);
+        jsonObjectSet(outArena, result, "serverInfo", serverInfo);
 
-        write_jsonrpc_result(parsed.arena, req_id, out_arena, result, out);
+        writeJsonrpcResult(parsed.arena, reqId, outArena, result, out);
         return;
     }
 
@@ -2104,118 +2104,118 @@ inline void handle_lsp_message(LspServerState& state, std::string_view payload, 
     }
 
     if (method == "shutdown") {
-        state.shutdown_requested = true;
-        JsonArena out_arena;
-        write_jsonrpc_result(parsed.arena, req_id, out_arena, json_add_null(out_arena), out);
+        state.shutdownRequested = true;
+        JsonArena outArena;
+        writeJsonrpcResult(parsed.arena, reqId, outArena, jsonAddNull(outArena), out);
         return;
     }
 
     if (method == "exit") {
-        state.should_exit = true;
-        if (state.shutdown_requested) {
-            state.exit_code = 0;
+        state.shouldExit = true;
+        if (state.shutdownRequested) {
+            state.exitCode = 0;
         } else {
-            state.exit_code = 1;
+            state.exitCode = 1;
         }
         return;
     }
 
     if (method == "textDocument/didOpen") {
-        const JsonId text_doc = json_get_field(parsed.arena, params_id, "textDocument");
-        const auto uri_opt = json_get_string(parsed.arena, json_get_field(parsed.arena, text_doc, "uri"));
-        const auto text_opt = json_get_string(parsed.arena, json_get_field(parsed.arena, text_doc, "text"));
-        if (uri_opt.has_value() && text_opt.has_value()) {
-            state.open_documents[uri_opt.value()] = text_opt.value();
-            publish_document_diagnostics(state, uri_opt.value(), text_opt.value(), out);
+        const JsonId textDoc = jsonGetField(parsed.arena, paramsId, "textDocument");
+        const auto uriOpt = jsonGetString(parsed.arena, jsonGetField(parsed.arena, textDoc, "uri"));
+        const auto textOpt = jsonGetString(parsed.arena, jsonGetField(parsed.arena, textDoc, "text"));
+        if (uriOpt.has_value() && textOpt.has_value()) {
+            state.openDocuments[uriOpt.value()] = textOpt.value();
+            publishDocumentDiagnostics(state, uriOpt.value(), textOpt.value(), out);
         }
         return;
     }
 
     if (method == "textDocument/didChange") {
-        const JsonId text_doc = json_get_field(parsed.arena, params_id, "textDocument");
-        const auto uri_opt = json_get_string(parsed.arena, json_get_field(parsed.arena, text_doc, "uri"));
-        const JsonId changes_id = json_get_field(parsed.arena, params_id, "contentChanges");
-        if (uri_opt.has_value() && changes_id < parsed.arena.nodes.size() &&
-            std::holds_alternative<JsonArray>(parsed.arena.nodes[changes_id])) {
-            const auto& arr = std::get<JsonArray>(parsed.arena.nodes[changes_id]);
+        const JsonId textDoc = jsonGetField(parsed.arena, paramsId, "textDocument");
+        const auto uriOpt = jsonGetString(parsed.arena, jsonGetField(parsed.arena, textDoc, "uri"));
+        const JsonId changesId = jsonGetField(parsed.arena, paramsId, "contentChanges");
+        if (uriOpt.has_value() && changesId < parsed.arena.nodes.size() &&
+            std::holds_alternative<JsonArray>(parsed.arena.nodes[changesId])) {
+            const auto& arr = std::get<JsonArray>(parsed.arena.nodes[changesId]);
             bool updated = false;
-            std::string latest_text;
-            for (const JsonId elem_id : arr.elements) {
-                const auto text_opt = json_get_string(parsed.arena, json_get_field(parsed.arena, elem_id, "text"));
-                if (text_opt.has_value()) {
-                    latest_text = text_opt.value();
+            std::string latestText;
+            for (const JsonId elemId : arr.elements) {
+                const auto textOpt = jsonGetString(parsed.arena, jsonGetField(parsed.arena, elemId, "text"));
+                if (textOpt.has_value()) {
+                    latestText = textOpt.value();
                     updated = true;
                 }
             }
             if (updated) {
-                state.open_documents[uri_opt.value()] = latest_text;
-                publish_document_diagnostics(state, uri_opt.value(), latest_text, out);
+                state.openDocuments[uriOpt.value()] = latestText;
+                publishDocumentDiagnostics(state, uriOpt.value(), latestText, out);
             }
         }
         return;
     }
 
     if (method == "textDocument/didClose") {
-        const JsonId text_doc = json_get_field(parsed.arena, params_id, "textDocument");
-        const auto uri_opt = json_get_string(parsed.arena, json_get_field(parsed.arena, text_doc, "uri"));
-        if (uri_opt.has_value()) {
-            state.open_documents.erase(uri_opt.value());
-            state.snapshots.erase(uri_opt.value());
-            publish_empty_diagnostics(uri_opt.value(), out);
+        const JsonId textDoc = jsonGetField(parsed.arena, paramsId, "textDocument");
+        const auto uriOpt = jsonGetString(parsed.arena, jsonGetField(parsed.arena, textDoc, "uri"));
+        if (uriOpt.has_value()) {
+            state.openDocuments.erase(uriOpt.value());
+            state.snapshots.erase(uriOpt.value());
+            publishEmptyDiagnostics(uriOpt.value(), out);
         }
         return;
     }
 
     if (method == "textDocument/documentSymbol") {
-        handle_document_symbol_request(state, parsed.arena, req_id, params_id, out);
+        handleDocumentSymbolRequest(state, parsed.arena, reqId, paramsId, out);
         return;
     }
 
     if (method == "textDocument/hover") {
-        handle_hover_request(state, parsed.arena, req_id, params_id, out);
+        handleHoverRequest(state, parsed.arena, reqId, paramsId, out);
         return;
     }
 
     if (method == "textDocument/definition") {
-        handle_definition_request(state, parsed.arena, req_id, params_id, out);
+        handleDefinitionRequest(state, parsed.arena, reqId, paramsId, out);
         return;
     }
 
     if (method == "textDocument/completion") {
-        handle_completion_request(state, parsed.arena, req_id, params_id, out);
+        handleCompletionRequest(state, parsed.arena, reqId, paramsId, out);
         return;
     }
 
     if (method == "textDocument/signatureHelp") {
-        handle_signature_help_request(state, parsed.arena, req_id, params_id, out);
+        handleSignatureHelpRequest(state, parsed.arena, reqId, paramsId, out);
         return;
     }
 
-    if (req_id != JSON_INVALID_ID) {
-        JsonArena out_arena;
-        const JsonId root = json_add_object(out_arena);
-        json_object_set(out_arena, root, "jsonrpc", json_add_string(out_arena, "2.0"));
-        json_object_set(out_arena, root, "id", clone_json_scalar_or_null(parsed.arena, req_id, out_arena));
+    if (reqId != JSON_INVALID_ID) {
+        JsonArena outArena;
+        const JsonId root = jsonAddObject(outArena);
+        jsonObjectSet(outArena, root, "jsonrpc", jsonAddString(outArena, "2.0"));
+        jsonObjectSet(outArena, root, "id", cloneJsonScalarOrNull(parsed.arena, reqId, outArena));
 
-        const JsonId err_obj = json_add_object(out_arena);
-        json_object_set(out_arena, err_obj, "code", json_add_int(out_arena, -32601));
-        json_object_set(out_arena, err_obj, "message", json_add_string(out_arena, "Method not found: " + method));
-        json_object_set(out_arena, root, "error", err_obj);
+        const JsonId errObj = jsonAddObject(outArena);
+        jsonObjectSet(outArena, errObj, "code", jsonAddInt(outArena, -32601));
+        jsonObjectSet(outArena, errObj, "message", jsonAddString(outArena, "Method not found: " + method));
+        jsonObjectSet(outArena, root, "error", errObj);
 
-        write_jsonrpc_message(out, serialize_json(out_arena, root));
+        writeJsonrpcMessage(out, serializeJson(outArena, root));
     }
 }
 
-inline int run_lsp_server(std::istream& in, std::ostream& out) {
+inline int runLspServer(std::istream& in, std::ostream& out) {
     LspServerState state{};
-    while (!state.should_exit) {
-        const auto msg_opt = read_jsonrpc_message(in);
-        if (!msg_opt.has_value()) {
+    while (!state.shouldExit) {
+        const auto msgOpt = readJsonrpcMessage(in);
+        if (!msgOpt.has_value()) {
             break;
         }
-        handle_lsp_message(state, msg_opt.value(), out);
+        handleLspMessage(state, msgOpt.value(), out);
     }
-    return state.exit_code;
+    return state.exitCode;
 }
 
 }  // namespace cb

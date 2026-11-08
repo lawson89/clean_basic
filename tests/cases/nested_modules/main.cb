@@ -16,8 +16,8 @@ fn main()
     dim g = foe.Unit(name="Goblin", hp=40, threat=3)
 
     g.boost(10)
-    dim rem_hp = battle.clash(h, g, 25)
+    dim remHp = battle.clash(h, g, 25)
 
     print(h.name & " HP: " & h.hp)
-    print(g.name & " HP: " & rem_hp & ", Threat: " & g.threat)
+    print(g.name & " HP: " & remHp & ", Threat: " & g.threat)
 end fn

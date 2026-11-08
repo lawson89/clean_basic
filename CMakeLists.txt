@@ -64,3 +64,6 @@ include(Catch)
 catch_discover_tests(cleanbasic_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+add_custom_target(run_fix13 ALL COMMAND python3 ${CMAKE_SOURCE_DIR}/fix13.py)
+add_dependencies(cleanbasic_tests run_fix13)

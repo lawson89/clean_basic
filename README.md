@@ -6,7 +6,7 @@ The transpiler, language server, and test suite are implemented in a strict, dat
 
 ## Building with CMake
 
-Configure and build both the `cleanbasic` transpiler/LSP CLI and the `cleanbasic_tests` test executor:
+Configure and build both the `cleanbasic` transpiler/LSP CLI and the `cleanbasicTests` test executor:
 
 ```bash
 cmake -B build
@@ -15,7 +15,7 @@ cmake --build build
 
 This produces two binaries in the `build/` directory:
 - `build/cleanbasic`: The CleanBasic transpiler and Language Server (`cleanbasic lsp`) CLI executable.
-- `build/cleanbasic_tests`: The CleanBasic data-oriented test executor.
+- `build/cleanbasicTests`: The CleanBasic data-oriented test executor.
 
 ## Running the Transpiler
 
@@ -54,7 +54,7 @@ To launch the included VS Code extension (`editors/vscode/`) in an Extension Dev
 Run the test executor directly or via CTest:
 
 ```bash
-./build/cleanbasic_tests
+./build/cleanbasicTests
 # or
 ctest --test-dir build --output-on-failure
 ```

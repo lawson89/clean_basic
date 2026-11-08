@@ -19,57 +19,57 @@ namespace cb {
 
 struct TypeSymbol {
     std::string name;
-    std::string module_id;
+    std::string moduleId;
     std::string key;
     std::unordered_map<std::string, TypeId> fields;
-    std::vector<FieldDecl> field_order;
-    bool is_pub = false;
-    bool is_extern = false;
-    std::string cpp_name;
-    std::string file_name = "main.cb";
+    std::vector<FieldDecl> fieldOrder;
+    bool isPub = false;
+    bool isExtern = false;
+    std::string cppName;
+    std::string fileName = "main.cb";
     uint32_t line = 1;
     uint32_t col = 1;
-    uint32_t end_line = 1;
+    uint32_t endLine = 1;
 };
 
 struct FnSymbol {
     std::string name;
-    std::string module_id;
+    std::string moduleId;
     std::string key;
     std::vector<Param> params;
-    TypeId return_type = INVALID_ID;
-    bool is_fallible = false;
-    bool is_pub = false;
-    bool is_extern = false;
-    std::string cpp_name;
-    std::string file_name = "main.cb";
+    TypeId returnType = INVALID_ID;
+    bool isFallible = false;
+    bool isPub = false;
+    bool isExtern = false;
+    std::string cppName;
+    std::string fileName = "main.cb";
     uint32_t line = 1;
     uint32_t col = 1;
-    uint32_t end_line = 1;
+    uint32_t endLine = 1;
 };
 
 struct AliasSymbol {
     std::string name;
-    std::string module_id;
+    std::string moduleId;
     std::string key;
-    TypeId target_type;
-    bool is_pub = false;
-    std::string cpp_name;
-    std::string file_name = "main.cb";
+    TypeId targetType;
+    bool isPub = false;
+    std::string cppName;
+    std::string fileName = "main.cb";
     uint32_t line = 1;
     uint32_t col = 1;
-    uint32_t end_line = 1;
+    uint32_t endLine = 1;
 };
 
 struct VarSymbol {
     std::string name;
-    TypeId type_id = INVALID_ID;
-    bool is_byref = false;
-    bool is_const = false;
-    std::string file_name = "main.cb";
+    TypeId typeId = INVALID_ID;
+    bool isByref = false;
+    bool isConst = false;
+    std::string fileName = "main.cb";
     uint32_t line = 1;
     uint32_t col = 1;
-    uint32_t end_line = 1;
+    uint32_t endLine = 1;
 };
 
 struct GlobalSymbolTable {
@@ -77,19 +77,19 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, FnSymbol> functions;
     std::vector<std::string> headers;
-    std::vector<std::string> link_libs;
+    std::vector<std::string> linkLibs;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> modules;
-    std::unordered_map<std::string, std::unordered_map<std::string, VarSymbol>> fn_scopes;
-    TypeId type_int = INVALID_ID;
-    TypeId type_float = INVALID_ID;
-    TypeId type_str = INVALID_ID;
-    TypeId type_bool = INVALID_ID;
-    TypeId type_void = INVALID_ID;
-    TypeId type_auto = INVALID_ID;
-    TypeId type_null = INVALID_ID;
-    TypeId type_any = INVALID_ID;
-    TypeId type_err = INVALID_ID;
-    TypeId type_cptr = INVALID_ID;
+    std::unordered_map<std::string, std::unordered_map<std::string, VarSymbol>> fnScopes;
+    TypeId typeInt = INVALID_ID;
+    TypeId typeFloat = INVALID_ID;
+    TypeId typeStr = INVALID_ID;
+    TypeId typeBool = INVALID_ID;
+    TypeId typeVoid = INVALID_ID;
+    TypeId typeAuto = INVALID_ID;
+    TypeId typeNull = INVALID_ID;
+    TypeId typeAny = INVALID_ID;
+    TypeId typeErr = INVALID_ID;
+    TypeId typeCptr = INVALID_ID;
 };
 
 struct AnalysisResult {
@@ -98,183 +98,183 @@ struct AnalysisResult {
     DiagnosticError error;
 };
 
-inline void register_builtins(AstArena& arena, GlobalSymbolTable& symbols) {
-    const TypeId int_t = find_or_add_type(arena, "int");
-    const TypeId float_t = find_or_add_type(arena, "float");
-    const TypeId str_t = find_or_add_type(arena, "str");
-    const TypeId bool_t = find_or_add_type(arena, "bool");
-    const TypeId void_t = find_or_add_type(arena, "void");
-    const TypeId auto_t = find_or_add_type(arena, "auto");
-    const TypeId null_t = find_or_add_type(arena, "null");
-    const TypeId any_t = find_or_add_type(arena, "any");
-    const TypeId err_t = find_or_add_type(arena, "err");
-    const TypeId cptr_t = find_or_add_type(arena, "cptr");
+inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
+    const TypeId intT = findOrAddType(arena, "int");
+    const TypeId floatT = findOrAddType(arena, "float");
+    const TypeId strT = findOrAddType(arena, "str");
+    const TypeId boolT = findOrAddType(arena, "bool");
+    const TypeId voidT = findOrAddType(arena, "void");
+    const TypeId autoT = findOrAddType(arena, "auto");
+    const TypeId nullT = findOrAddType(arena, "null");
+    const TypeId anyT = findOrAddType(arena, "any");
+    const TypeId errT = findOrAddType(arena, "err");
+    const TypeId cptrT = findOrAddType(arena, "cptr");
 
-    symbols.type_int = int_t;
-    symbols.type_float = float_t;
-    symbols.type_str = str_t;
-    symbols.type_bool = bool_t;
-    symbols.type_void = void_t;
-    symbols.type_auto = auto_t;
-    symbols.type_null = null_t;
-    symbols.type_any = any_t;
-    symbols.type_err = err_t;
-    symbols.type_cptr = cptr_t;
+    symbols.typeInt = intT;
+    symbols.typeFloat = floatT;
+    symbols.typeStr = strT;
+    symbols.typeBool = boolT;
+    symbols.typeVoid = voidT;
+    symbols.typeAuto = autoT;
+    symbols.typeNull = nullT;
+    symbols.typeAny = anyT;
+    symbols.typeErr = errT;
+    symbols.typeCptr = cptrT;
 
-    TypeSymbol err_type{};
-    err_type.name = "err";
-    err_type.module_id = "";
-    err_type.key = symbol_key("", "err");
-    err_type.is_pub = true;
-    err_type.fields["msg"] = str_t;
-    err_type.fields["code"] = int_t;
-    err_type.field_order.push_back(FieldDecl{1, 1, "msg", str_t});
-    err_type.field_order.push_back(FieldDecl{1, 1, "code", int_t});
-    err_type.cpp_name = "cb_err";
-    symbols.types[err_type.key] = std::move(err_type);
+    TypeSymbol errType{};
+    errType.name = "err";
+    errType.moduleId = "";
+    errType.key = symbolKey("", "err");
+    errType.isPub = true;
+    errType.fields["msg"] = strT;
+    errType.fields["code"] = intT;
+    errType.fieldOrder.push_back(FieldDecl{1, 1, "msg", strT});
+    errType.fieldOrder.push_back(FieldDecl{1, 1, "code", intT});
+    errType.cppName = "cbErr";
+    symbols.types[errType.key] = std::move(errType);
 
-    FnSymbol print_fn{};
-    print_fn.name = "print";
-    print_fn.module_id = "";
-    print_fn.key = symbol_key("", "print");
-    print_fn.is_pub = true;
-    print_fn.is_fallible = false;
-    print_fn.cpp_name = "cb_print";
-    symbols.functions[print_fn.key] = std::move(print_fn);
+    FnSymbol printFn{};
+    printFn.name = "print";
+    printFn.moduleId = "";
+    printFn.key = symbolKey("", "print");
+    printFn.isPub = true;
+    printFn.isFallible = false;
+    printFn.cppName = "cbPrint";
+    symbols.functions[printFn.key] = std::move(printFn);
 
-    FnSymbol len_fn{};
-    len_fn.name = "len";
-    len_fn.module_id = "";
-    len_fn.key = symbol_key("", "len");
-    len_fn.is_pub = true;
-    len_fn.params.push_back(Param{1, 1, "container", any_t, false});
-    len_fn.return_type = int_t;
-    len_fn.cpp_name = "cb_len";
-    symbols.functions[len_fn.key] = std::move(len_fn);
+    FnSymbol lenFn{};
+    lenFn.name = "len";
+    lenFn.moduleId = "";
+    lenFn.key = symbolKey("", "len");
+    lenFn.isPub = true;
+    lenFn.params.push_back(Param{1, 1, "container", anyT, false});
+    lenFn.returnType = intT;
+    lenFn.cppName = "cbLen";
+    symbols.functions[lenFn.key] = std::move(lenFn);
 
-    FnSymbol str_fn{};
-    str_fn.name = "str";
-    str_fn.module_id = "";
-    str_fn.key = symbol_key("", "str");
-    str_fn.is_pub = true;
-    str_fn.params.push_back(Param{1, 1, "val", any_t, false});
-    str_fn.return_type = str_t;
-    str_fn.cpp_name = "cb_str";
-    symbols.functions[str_fn.key] = std::move(str_fn);
+    FnSymbol strFn{};
+    strFn.name = "str";
+    strFn.moduleId = "";
+    strFn.key = symbolKey("", "str");
+    strFn.isPub = true;
+    strFn.params.push_back(Param{1, 1, "val", anyT, false});
+    strFn.returnType = strT;
+    strFn.cppName = "cbStr";
+    symbols.functions[strFn.key] = std::move(strFn);
 }
 
-inline bool is_builtin_type_name(std::string_view name) {
+inline bool isBuiltinTypeName(std::string_view name) {
     return name == "int" || name == "float" || name == "str" || name == "bool" ||
            name == "void" || name == "auto" || name == "null" || name == "any" ||
            name == "err" || name == "list" || name == "dict" || name == "cptr";
 }
 
-inline bool is_builtin_symbol_name(std::string_view name) {
+inline bool isBuiltinSymbolName(std::string_view name) {
     return name == "err" || name == "print" || name == "len" || name == "str";
 }
 
-inline bool is_module_alias_in_scope(
+inline bool isModuleAliasInScope(
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
-    std::string_view ident_name,
+    std::string_view currentModuleId,
+    std::string_view identName,
     const std::unordered_map<std::string, VarSymbol>& scope,
-    std::string& out_target_module_id
+    std::string& outTargetModuleId
 ) {
-    if (scope.find(std::string(ident_name)) != scope.end()) {
+    if (scope.find(std::string(identName)) != scope.end()) {
         return false;
     }
-    const auto mod_it = symbols.modules.find(std::string(current_module_id));
-    if (mod_it == symbols.modules.end()) {
+    const auto modIt = symbols.modules.find(std::string(currentModuleId));
+    if (modIt == symbols.modules.end()) {
         return false;
     }
-    const auto alias_it = mod_it->second.find(std::string(ident_name));
-    if (alias_it == mod_it->second.end()) {
+    const auto aliasIt = modIt->second.find(std::string(identName));
+    if (aliasIt == modIt->second.end()) {
         return false;
     }
-    out_target_module_id = alias_it->second;
+    outTargetModuleId = aliasIt->second;
     return true;
 }
 
-inline std::string resolve_symbol_key(
+inline std::string resolveSymbolKey(
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     std::string_view name
 ) {
     if (name.find("::") != std::string_view::npos) {
         return std::string(name);
     }
-    const size_t dot_idx = name.find('.');
-    if (dot_idx != std::string_view::npos) {
-        const std::string prefix = std::string(name.substr(0, dot_idx));
-        const std::string sym = std::string(name.substr(dot_idx + 1));
-        const auto mod_it = symbols.modules.find(std::string(current_module_id));
-        if (mod_it != symbols.modules.end()) {
-            const auto alias_it = mod_it->second.find(prefix);
-            if (alias_it != mod_it->second.end()) {
-                return symbol_key(alias_it->second, sym);
+    const size_t dotIdx = name.find('.');
+    if (dotIdx != std::string_view::npos) {
+        const std::string prefix = std::string(name.substr(0, dotIdx));
+        const std::string sym = std::string(name.substr(dotIdx + 1));
+        const auto modIt = symbols.modules.find(std::string(currentModuleId));
+        if (modIt != symbols.modules.end()) {
+            const auto aliasIt = modIt->second.find(prefix);
+            if (aliasIt != modIt->second.end()) {
+                return symbolKey(aliasIt->second, sym);
             }
         }
-        return symbol_key(prefix, sym);
+        return symbolKey(prefix, sym);
     }
 
-    const std::string key = symbol_key(current_module_id, name);
+    const std::string key = symbolKey(currentModuleId, name);
     if (symbols.types.count(key) > 0 || symbols.aliases.count(key) > 0 || symbols.functions.count(key) > 0) {
         return key;
     }
-    if (is_builtin_symbol_name(name)) {
-        return symbol_key("", name);
+    if (isBuiltinSymbolName(name)) {
+        return symbolKey("", name);
     }
     return key;
 }
 
-inline TypeId resolve_alias(
+inline TypeId resolveAlias(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     TypeId tid
 );
 
-inline TypeId infer_expr_type(
+inline TypeId inferExprType(
     const AstArena& arena,
-    ExprId expr_id,
+    ExprId exprId,
     const GlobalSymbolTable& symbols,
     const std::unordered_map<std::string, VarSymbol>& scope,
-    std::string_view current_module_id
+    std::string_view currentModuleId
 );
 
-inline std::optional<TypeSymbol> resolve_type_symbol_by_name(
+inline std::optional<TypeSymbol> resolveTypeSymbolByName(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
-    std::string_view raw_name,
-    bool require_first_hop_pub = false
+    std::string_view currentModuleId,
+    std::string_view rawName,
+    bool requireFirstHopPub = false
 ) {
-    std::string key = resolve_symbol_key(symbols, current_module_id, raw_name);
+    std::string key = resolveSymbolKey(symbols, currentModuleId, rawName);
     if (symbols.functions.find(key) != symbols.functions.end()) {
         return std::nullopt;
     }
     std::unordered_set<std::string> seen;
-    std::string active_mod(current_module_id);
-    bool first_hop = true;
+    std::string activeMod(currentModuleId);
+    bool firstHop = true;
     while (symbols.aliases.find(key) != symbols.aliases.end()) {
         if (seen.find(key) != seen.end()) {
             break;
         }
         seen.insert(key);
         const auto& asym = symbols.aliases.at(key);
-        if (first_hop && require_first_hop_pub && !asym.is_pub && asym.module_id != current_module_id) {
+        if (firstHop && requireFirstHopPub && !asym.isPub && asym.moduleId != currentModuleId) {
             return std::nullopt;
         }
-        first_hop = false;
-        active_mod = asym.module_id;
-        if (asym.target_type >= arena.types.size()) {
+        firstHop = false;
+        activeMod = asym.moduleId;
+        if (asym.targetType >= arena.types.size()) {
             break;
         }
-        key = resolve_symbol_key(symbols, active_mod, arena.types[asym.target_type].name);
+        key = resolveSymbolKey(symbols, activeMod, arena.types[asym.targetType].name);
     }
     const auto it = symbols.types.find(key);
     if (it != symbols.types.end()) {
-        if (first_hop && require_first_hop_pub && !it->second.is_pub && it->second.module_id != current_module_id) {
+        if (firstHop && requireFirstHopPub && !it->second.isPub && it->second.moduleId != currentModuleId) {
             return std::nullopt;
         }
         return it->second;
@@ -282,121 +282,121 @@ inline std::optional<TypeSymbol> resolve_type_symbol_by_name(
     return std::nullopt;
 }
 
-inline std::optional<TypeSymbol> resolve_type_symbol(
+inline std::optional<TypeSymbol> resolveTypeSymbol(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     TypeId tid
 ) {
     if (tid == INVALID_ID || tid >= arena.types.size()) {
         return std::nullopt;
     }
-    const TypeId resolved_tid = resolve_alias(arena, symbols, current_module_id, tid);
-    if (resolved_tid == INVALID_ID || resolved_tid >= arena.types.size()) {
+    const TypeId resolvedTid = resolveAlias(arena, symbols, currentModuleId, tid);
+    if (resolvedTid == INVALID_ID || resolvedTid >= arena.types.size()) {
         return std::nullopt;
     }
-    const std::string& tname = arena.types[resolved_tid].name;
-    const auto direct_it = symbols.types.find(tname);
-    if (direct_it != symbols.types.end()) {
-        return direct_it->second;
+    const std::string& tname = arena.types[resolvedTid].name;
+    const auto directIt = symbols.types.find(tname);
+    if (directIt != symbols.types.end()) {
+        return directIt->second;
     }
-    const std::string key = resolve_symbol_key(symbols, current_module_id, tname);
-    const auto resolved_it = symbols.types.find(key);
-    if (resolved_it != symbols.types.end()) {
-        return resolved_it->second;
+    const std::string key = resolveSymbolKey(symbols, currentModuleId, tname);
+    const auto resolvedIt = symbols.types.find(key);
+    if (resolvedIt != symbols.types.end()) {
+        return resolvedIt->second;
     }
     return std::nullopt;
 }
 
-inline std::optional<FnSymbol> resolve_ufcs_fn(
+inline std::optional<FnSymbol> resolveUfcsFn(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
-    TypeId recv_tid,
-    std::string_view method_name
+    std::string_view currentModuleId,
+    TypeId recvTid,
+    std::string_view methodName
 ) {
     // UFCS Step 1: Current module
-    const std::string local_key = symbol_key(current_module_id, method_name);
-    const auto local_it = symbols.functions.find(local_key);
-    if (local_it != symbols.functions.end()) {
-        return local_it->second;
+    const std::string localKey = symbolKey(currentModuleId, methodName);
+    const auto localIt = symbols.functions.find(localKey);
+    if (localIt != symbols.functions.end()) {
+        return localIt->second;
     }
 
     // UFCS Step 2: Receiver's defining module
-    const TypeId resolved_recv = resolve_alias(arena, symbols, current_module_id, recv_tid);
-    std::string recv_type_key;
-    if (resolved_recv != INVALID_ID && resolved_recv < arena.types.size()) {
-        recv_type_key = resolve_symbol_key(symbols, current_module_id, arena.types[resolved_recv].name);
-        const auto [recv_mod_id, recv_base] = split_symbol_key(recv_type_key);
-        if (!recv_mod_id.empty()) {
-            const std::string recv_fn_key = symbol_key(recv_mod_id, method_name);
-            const auto recv_fn_it = symbols.functions.find(recv_fn_key);
-            if (recv_fn_it != symbols.functions.end()) {
-                if (recv_fn_it->second.is_pub) {
-                    return recv_fn_it->second;
+    const TypeId resolvedRecv = resolveAlias(arena, symbols, currentModuleId, recvTid);
+    std::string recvTypeKey;
+    if (resolvedRecv != INVALID_ID && resolvedRecv < arena.types.size()) {
+        recvTypeKey = resolveSymbolKey(symbols, currentModuleId, arena.types[resolvedRecv].name);
+        const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);
+        if (!recvModId.empty()) {
+            const std::string recvFnKey = symbolKey(recvModId, methodName);
+            const auto recvFnIt = symbols.functions.find(recvFnKey);
+            if (recvFnIt != symbols.functions.end()) {
+                if (recvFnIt->second.isPub) {
+                    return recvFnIt->second;
                 }
                 return std::nullopt;
             }
         }
     }
 
-    // UFCS Step 3: Directly imported modules of current_module_id
-    const auto mod_it = symbols.modules.find(std::string(current_module_id));
-    if (mod_it != symbols.modules.end()) {
-        std::vector<FnSymbol> pub_candidates;
-        std::unordered_set<std::string> seen_keys;
-        for (const auto& [alias_name, imported_mod_id] : mod_it->second) {
-            const std::string cand_key = symbol_key(imported_mod_id, method_name);
-            if (seen_keys.find(cand_key) != seen_keys.end()) {
+    // UFCS Step 3: Directly imported modules of currentModuleId
+    const auto modIt = symbols.modules.find(std::string(currentModuleId));
+    if (modIt != symbols.modules.end()) {
+        std::vector<FnSymbol> pubCandidates;
+        std::unordered_set<std::string> seenKeys;
+        for (const auto& [aliasName, importedModId] : modIt->second) {
+            const std::string candKey = symbolKey(importedModId, methodName);
+            if (seenKeys.find(candKey) != seenKeys.end()) {
                 continue;
             }
-            seen_keys.insert(cand_key);
-            const auto cand_it = symbols.functions.find(cand_key);
-            if (cand_it != symbols.functions.end() && cand_it->second.is_pub) {
-                pub_candidates.push_back(cand_it->second);
+            seenKeys.insert(candKey);
+            const auto candIt = symbols.functions.find(candKey);
+            if (candIt != symbols.functions.end() && candIt->second.isPub) {
+                pubCandidates.push_back(candIt->second);
             }
         }
-        if (pub_candidates.size() == 1) {
-            return pub_candidates[0];
+        if (pubCandidates.size() == 1) {
+            return pubCandidates[0];
         }
-        if (pub_candidates.size() > 1 && !recv_type_key.empty()) {
-            std::vector<FnSymbol> type_matched;
-            for (const auto& cand : pub_candidates) {
-                if (!cand.params.empty() && cand.params[0].type_id < arena.types.size()) {
-                    const std::string param_key = resolve_symbol_key(
-                        symbols, cand.module_id, arena.types[cand.params[0].type_id].name
+        if (pubCandidates.size() > 1 && !recvTypeKey.empty()) {
+            std::vector<FnSymbol> typeMatched;
+            for (const auto& cand : pubCandidates) {
+                if (!cand.params.empty() && cand.params[0].typeId < arena.types.size()) {
+                    const std::string paramKey = resolveSymbolKey(
+                        symbols, cand.moduleId, arena.types[cand.params[0].typeId].name
                     );
-                    if (param_key == recv_type_key) {
-                        type_matched.push_back(cand);
+                    if (paramKey == recvTypeKey) {
+                        typeMatched.push_back(cand);
                     }
                 }
             }
-            if (type_matched.size() == 1) {
-                return type_matched[0];
+            if (typeMatched.size() == 1) {
+                return typeMatched[0];
             }
         }
     }
     return std::nullopt;
 }
 
-inline std::optional<FnSymbol> resolve_func_call(
+inline std::optional<FnSymbol> resolveFuncCall(
     const AstArena& arena,
     const FuncCall& call,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     const std::unordered_map<std::string, VarSymbol>& scope = {}
 ) {
     if (call.callee >= arena.exprs.size()) {
         return std::nullopt;
     }
-    const auto& callee_node = arena.exprs[call.callee];
+    const auto& calleeNode = arena.exprs[call.callee];
 
-    if (std::holds_alternative<Identifier>(callee_node.payload)) {
-        const auto& ident = std::get<Identifier>(callee_node.payload);
-        const std::string key = resolve_symbol_key(symbols, current_module_id, ident.name);
+    if (std::holds_alternative<Identifier>(calleeNode.payload)) {
+        const auto& ident = std::get<Identifier>(calleeNode.payload);
+        const std::string key = resolveSymbolKey(symbols, currentModuleId, ident.name);
         const auto it = symbols.functions.find(key);
         if (it != symbols.functions.end()) {
-            if (ident.name.find('.') != std::string::npos && !it->second.is_pub) {
+            if (ident.name.find('.') != std::string::npos && !it->second.isPub) {
                 return std::nullopt;
             }
             return it->second;
@@ -404,56 +404,56 @@ inline std::optional<FnSymbol> resolve_func_call(
         return std::nullopt;
     }
 
-    if (std::holds_alternative<FieldAccess>(callee_node.payload)) {
-        const auto& access = std::get<FieldAccess>(callee_node.payload);
+    if (std::holds_alternative<FieldAccess>(calleeNode.payload)) {
+        const auto& access = std::get<FieldAccess>(calleeNode.payload);
         if (access.target < arena.exprs.size() &&
             std::holds_alternative<Identifier>(arena.exprs[access.target].payload)) {
-            const auto& tgt_ident = std::get<Identifier>(arena.exprs[access.target].payload);
-            std::string target_mod_id;
-            if (is_module_alias_in_scope(symbols, current_module_id, tgt_ident.name, scope, target_mod_id)) {
-                const std::string key = symbol_key(target_mod_id, access.field_name);
+            const auto& tgtIdent = std::get<Identifier>(arena.exprs[access.target].payload);
+            std::string targetModId;
+            if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent.name, scope, targetModId)) {
+                const std::string key = symbolKey(targetModId, access.fieldName);
                 const auto it = symbols.functions.find(key);
-                if (it != symbols.functions.end() && it->second.is_pub) {
+                if (it != symbols.functions.end() && it->second.isPub) {
                     return it->second;
                 }
                 return std::nullopt;
             }
         }
-        const TypeId recv_tid = infer_expr_type(arena, access.target, symbols, scope, current_module_id);
-        return resolve_ufcs_fn(arena, symbols, current_module_id, recv_tid, access.field_name);
+        const TypeId recvTid = inferExprType(arena, access.target, symbols, scope, currentModuleId);
+        return resolveUfcsFn(arena, symbols, currentModuleId, recvTid, access.fieldName);
     }
 
     return std::nullopt;
 }
 
-inline std::optional<TypeSymbol> resolve_struct_constructor(
+inline std::optional<TypeSymbol> resolveStructConstructor(
     const AstArena& arena,
     const FuncCall& call,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     const std::unordered_map<std::string, VarSymbol>& scope = {}
 ) {
     if (call.callee >= arena.exprs.size()) {
         return std::nullopt;
     }
-    const auto& callee_node = arena.exprs[call.callee];
+    const auto& calleeNode = arena.exprs[call.callee];
 
-    if (std::holds_alternative<Identifier>(callee_node.payload)) {
-        const auto& ident = std::get<Identifier>(callee_node.payload);
-        const bool require_pub = (ident.name.find('.') != std::string::npos);
-        return resolve_type_symbol_by_name(arena, symbols, current_module_id, ident.name, require_pub);
+    if (std::holds_alternative<Identifier>(calleeNode.payload)) {
+        const auto& ident = std::get<Identifier>(calleeNode.payload);
+        const bool requirePub = (ident.name.find('.') != std::string::npos);
+        return resolveTypeSymbolByName(arena, symbols, currentModuleId, ident.name, requirePub);
     }
 
-    if (std::holds_alternative<FieldAccess>(callee_node.payload)) {
-        const auto& access = std::get<FieldAccess>(callee_node.payload);
+    if (std::holds_alternative<FieldAccess>(calleeNode.payload)) {
+        const auto& access = std::get<FieldAccess>(calleeNode.payload);
         if (access.target < arena.exprs.size() &&
             std::holds_alternative<Identifier>(arena.exprs[access.target].payload)) {
-            const auto& mod_ident = std::get<Identifier>(arena.exprs[access.target].payload);
-            std::string target_mod_id;
-            if (!is_module_alias_in_scope(symbols, current_module_id, mod_ident.name, scope, target_mod_id)) {
+            const auto& modIdent = std::get<Identifier>(arena.exprs[access.target].payload);
+            std::string targetModId;
+            if (!isModuleAliasInScope(symbols, currentModuleId, modIdent.name, scope, targetModId)) {
                 return std::nullopt;
             }
-            return resolve_type_symbol_by_name(arena, symbols, target_mod_id, access.field_name, true);
+            return resolveTypeSymbolByName(arena, symbols, targetModId, access.fieldName, true);
         }
         return std::nullopt;
     }
@@ -461,10 +461,10 @@ inline std::optional<TypeSymbol> resolve_struct_constructor(
     return std::nullopt;
 }
 
-inline TypeNode resolve_alias_node(
+inline TypeNode resolveAliasNode(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     TypeId tid
 ) {
     if (tid >= arena.types.size()) {
@@ -473,41 +473,41 @@ inline TypeNode resolve_alias_node(
 
     std::unordered_set<std::string> seen;
     TypeNode curr = arena.types[tid];
-    std::string active_mod_id(current_module_id);
+    std::string activeModId(currentModuleId);
 
     while (!curr.name.empty()) {
-        const std::string key = resolve_symbol_key(symbols, active_mod_id, curr.name);
+        const std::string key = resolveSymbolKey(symbols, activeModId, curr.name);
         const auto it = symbols.aliases.find(key);
         if (it == symbols.aliases.end()) {
             break;
         }
-        if (curr.name.find('.') != std::string::npos && !it->second.is_pub) {
+        if (curr.name.find('.') != std::string::npos && !it->second.isPub) {
             break;
         }
         if (seen.find(key) != seen.end()) {
             break;
         }
         seen.insert(key);
-        active_mod_id = it->second.module_id;
-        const TypeId aliased_id = it->second.target_type;
-        if (aliased_id >= arena.types.size()) {
+        activeModId = it->second.moduleId;
+        const TypeId aliasedId = it->second.targetType;
+        if (aliasedId >= arena.types.size()) {
             break;
         }
-        const TypeNode& aliased = arena.types[aliased_id];
+        const TypeNode& aliased = arena.types[aliasedId];
 
-        TypeNode next_node{};
-        next_node.line = curr.line;
-        next_node.col = curr.col;
-        next_node.name = aliased.name;
-        next_node.type_args = aliased.type_args;
-        curr = std::move(next_node);
+        TypeNode nextNode{};
+        nextNode.line = curr.line;
+        nextNode.col = curr.col;
+        nextNode.name = aliased.name;
+        nextNode.typeArgs = aliased.typeArgs;
+        curr = std::move(nextNode);
     }
 
-    if (!curr.name.empty() && !is_builtin_type_name(curr.name)) {
-        const std::string type_key = resolve_symbol_key(symbols, active_mod_id, curr.name);
-        const auto tit = symbols.types.find(type_key);
+    if (!curr.name.empty() && !isBuiltinTypeName(curr.name)) {
+        const std::string typeKey = resolveSymbolKey(symbols, activeModId, curr.name);
+        const auto tit = symbols.types.find(typeKey);
         if (tit != symbols.types.end()) {
-            if (curr.name.find('.') == std::string::npos || tit->second.is_pub) {
+            if (curr.name.find('.') == std::string::npos || tit->second.isPub) {
                 curr.name = tit->second.key;
             }
         }
@@ -516,145 +516,145 @@ inline TypeNode resolve_alias_node(
     return curr;
 }
 
-inline TypeId resolve_alias(
+inline TypeId resolveAlias(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
-    std::string_view current_module_id,
+    std::string_view currentModuleId,
     TypeId tid
 ) {
     if (tid >= arena.types.size()) {
         return tid;
     }
-    const TypeNode resolved_node = resolve_alias_node(arena, symbols, current_module_id, tid);
-    const TypeId found = find_type(arena, resolved_node.name, resolved_node.type_args);
+    const TypeNode resolvedNode = resolveAliasNode(arena, symbols, currentModuleId, tid);
+    const TypeId found = findType(arena, resolvedNode.name, resolvedNode.typeArgs);
     if (found != INVALID_ID) {
         return found;
     }
     return tid;
 }
 
-inline TypeId infer_expr_type(
+inline TypeId inferExprType(
     const AstArena& arena,
-    ExprId expr_id,
+    ExprId exprId,
     const GlobalSymbolTable& symbols,
     const std::unordered_map<std::string, VarSymbol>& scope,
-    std::string_view current_module_id
+    std::string_view currentModuleId
 ) {
-    if (expr_id >= arena.exprs.size()) {
-        return symbols.type_auto;
+    if (exprId >= arena.exprs.size()) {
+        return symbols.typeAuto;
     }
 
-    const auto& expr_node = arena.exprs[expr_id];
-    const auto& payload = expr_node.payload;
+    const auto& exprNode = arena.exprs[exprId];
+    const auto& payload = exprNode.payload;
 
     if (std::holds_alternative<NumberLiteral>(payload)) {
         const auto& lit = std::get<NumberLiteral>(payload);
-        if (lit.is_float) {
-            return symbols.type_float;
+        if (lit.isFloat) {
+            return symbols.typeFloat;
         }
-        return symbols.type_int;
+        return symbols.typeInt;
     }
 
     if (std::holds_alternative<StringLiteral>(payload)) {
-        return symbols.type_str;
+        return symbols.typeStr;
     }
 
     if (std::holds_alternative<BoolLiteral>(payload)) {
-        return symbols.type_bool;
+        return symbols.typeBool;
     }
 
     if (std::holds_alternative<NullLiteral>(payload)) {
-        return symbols.type_null;
+        return symbols.typeNull;
     }
 
     if (std::holds_alternative<Identifier>(payload)) {
         const auto& ident = std::get<Identifier>(payload);
         const auto it = scope.find(ident.name);
         if (it != scope.end()) {
-            return it->second.type_id;
+            return it->second.typeId;
         }
-        return symbols.type_auto;
+        return symbols.typeAuto;
     }
 
 
     if (std::holds_alternative<ListLiteral>(payload)) {
         const auto& llit = std::get<ListLiteral>(payload);
-        TypeId elem_type = symbols.type_int;
+        TypeId elemType = symbols.typeInt;
         if (!llit.elements.empty()) {
-            elem_type = infer_expr_type(arena, llit.elements[0], symbols, scope, current_module_id);
+            elemType = inferExprType(arena, llit.elements[0], symbols, scope, currentModuleId);
         }
-        const TypeId list_tid = find_type(arena, "list", {elem_type});
-        if (list_tid != INVALID_ID) {
-            return list_tid;
+        const TypeId listTid = findType(arena, "list", {elemType});
+        if (listTid != INVALID_ID) {
+            return listTid;
         }
-        return symbols.type_auto;
+        return symbols.typeAuto;
     }
 
     if (std::holds_alternative<DictLiteral>(payload)) {
         const auto& dlit = std::get<DictLiteral>(payload);
-        TypeId k_type = symbols.type_str;
-        TypeId v_type = symbols.type_int;
+        TypeId kType = symbols.typeStr;
+        TypeId vType = symbols.typeInt;
         if (!dlit.entries.empty()) {
-            k_type = infer_expr_type(arena, dlit.entries[0].key, symbols, scope, current_module_id);
-            v_type = infer_expr_type(arena, dlit.entries[0].value, symbols, scope, current_module_id);
+            kType = inferExprType(arena, dlit.entries[0].key, symbols, scope, currentModuleId);
+            vType = inferExprType(arena, dlit.entries[0].value, symbols, scope, currentModuleId);
         }
-        const TypeId dict_tid = find_type(arena, "dict", {k_type, v_type});
-        if (dict_tid != INVALID_ID) {
-            return dict_tid;
+        const TypeId dictTid = findType(arena, "dict", {kType, vType});
+        if (dictTid != INVALID_ID) {
+            return dictTid;
         }
-        return symbols.type_auto;
+        return symbols.typeAuto;
     }
 
     if (std::holds_alternative<FieldAccess>(payload)) {
         const auto& faccess = std::get<FieldAccess>(payload);
-        const TypeId target_tid = infer_expr_type(arena, faccess.target, symbols, scope, current_module_id);
-        const auto ts_opt = resolve_type_symbol(arena, symbols, current_module_id, target_tid);
-        if (ts_opt.has_value()) {
-            const auto fit = ts_opt->fields.find(faccess.field_name);
-            if (fit != ts_opt->fields.end()) {
+        const TypeId targetTid = inferExprType(arena, faccess.target, symbols, scope, currentModuleId);
+        const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
+        if (tsOpt.has_value()) {
+            const auto fit = tsOpt->fields.find(faccess.fieldName);
+            if (fit != tsOpt->fields.end()) {
                 return fit->second;
             }
         }
-        return symbols.type_auto;
+        return symbols.typeAuto;
     }
 
     if (std::holds_alternative<IndexAccess>(payload)) {
         const auto& iaccess = std::get<IndexAccess>(payload);
-        const TypeId target_tid = infer_expr_type(arena, iaccess.target, symbols, scope, current_module_id);
-        if (target_tid < arena.types.size()) {
-            const auto& tnode = arena.types[target_tid];
-            if (tnode.name == "list" && !tnode.type_args.empty()) {
-                return tnode.type_args[0];
+        const TypeId targetTid = inferExprType(arena, iaccess.target, symbols, scope, currentModuleId);
+        if (targetTid < arena.types.size()) {
+            const auto& tnode = arena.types[targetTid];
+            if (tnode.name == "list" && !tnode.typeArgs.empty()) {
+                return tnode.typeArgs[0];
             }
-            if (tnode.name == "dict" && tnode.type_args.size() == 2) {
-                return tnode.type_args[1];
+            if (tnode.name == "dict" && tnode.typeArgs.size() == 2) {
+                return tnode.typeArgs[1];
             }
         }
-        return symbols.type_auto;
+        return symbols.typeAuto;
     }
 
     if (std::holds_alternative<FuncCall>(payload)) {
         const auto& call = std::get<FuncCall>(payload);
-        const auto fn_opt = resolve_func_call(arena, call, symbols, current_module_id, scope);
-        if (fn_opt.has_value() && fn_opt->return_type != INVALID_ID) {
-            return resolve_alias(arena, symbols, fn_opt->module_id, fn_opt->return_type);
+        const auto fnOpt = resolveFuncCall(arena, call, symbols, currentModuleId, scope);
+        if (fnOpt.has_value() && fnOpt->returnType != INVALID_ID) {
+            return resolveAlias(arena, symbols, fnOpt->moduleId, fnOpt->returnType);
         }
-        const auto struct_opt = resolve_struct_constructor(arena, call, symbols, current_module_id, scope);
-        if (struct_opt.has_value()) {
-            const TypeId raw_tid = find_type(arena, struct_opt->key, {});
-            if (raw_tid != INVALID_ID) {
-                return raw_tid;
+        const auto structOpt = resolveStructConstructor(arena, call, symbols, currentModuleId, scope);
+        if (structOpt.has_value()) {
+            const TypeId rawTid = findType(arena, structOpt->key, {});
+            if (rawTid != INVALID_ID) {
+                return rawTid;
             }
         }
-        return symbols.type_void;
+        return symbols.typeVoid;
     }
 
     if (std::holds_alternative<UnaryOp>(payload)) {
         const auto& uop = std::get<UnaryOp>(payload);
         if (uop.op == "not") {
-            return symbols.type_bool;
+            return symbols.typeBool;
         }
-        return infer_expr_type(arena, uop.operand, symbols, scope, current_module_id);
+        return inferExprType(arena, uop.operand, symbols, scope, currentModuleId);
     }
 
     if (std::holds_alternative<BinaryOp>(payload)) {
@@ -663,82 +663,82 @@ inline TypeId infer_expr_type(
             bop.op == "==" || bop.op == "!=" ||
             bop.op == "<" || bop.op == ">" ||
             bop.op == "<=" || bop.op == ">=") {
-            return symbols.type_bool;
+            return symbols.typeBool;
         }
         if (bop.op == "&") {
-            return symbols.type_str;
+            return symbols.typeStr;
         }
-        const TypeId left_tid = infer_expr_type(arena, bop.left, symbols, scope, current_module_id);
-        const TypeId right_tid = infer_expr_type(arena, bop.right, symbols, scope, current_module_id);
-        std::string_view left_name = "";
-        if (left_tid < arena.types.size()) {
-            left_name = arena.types[left_tid].name;
+        const TypeId leftTid = inferExprType(arena, bop.left, symbols, scope, currentModuleId);
+        const TypeId rightTid = inferExprType(arena, bop.right, symbols, scope, currentModuleId);
+        std::string_view leftName = "";
+        if (leftTid < arena.types.size()) {
+            leftName = arena.types[leftTid].name;
         }
-        std::string_view right_name = "";
-        if (right_tid < arena.types.size()) {
-            right_name = arena.types[right_tid].name;
+        std::string_view rightName = "";
+        if (rightTid < arena.types.size()) {
+            rightName = arena.types[rightTid].name;
         }
 
-        if (left_name == "str" || right_name == "str") {
-            return symbols.type_str;
+        if (leftName == "str" || rightName == "str") {
+            return symbols.typeStr;
         }
-        if (left_name == "float" || right_name == "float") {
-            return symbols.type_float;
+        if (leftName == "float" || rightName == "float") {
+            return symbols.typeFloat;
         }
-        return left_tid;
+        return leftTid;
     }
 
-    return symbols.type_auto;
+    return symbols.typeAuto;
 }
 
 struct AnalyzerState {
-    std::string file_name = "main.cb";
-    std::string module_id = "";
+    std::string fileName = "main.cb";
+    std::string moduleId = "";
     DiagnosticError error;
-    bool has_error = false;
+    bool hasError = false;
 };
 
-inline void set_analyzer_error(
+inline void setAnalyzerError(
     AnalyzerState& state,
     uint32_t line,
     uint32_t col,
     std::string_view msg
 ) {
-    if (!state.has_error) {
-        state.has_error = true;
-        state.error = make_error("AnalyzerError", std::string(msg), state.file_name, line, col);
+    if (!state.hasError) {
+        state.hasError = true;
+        state.error = makeError("AnalyzerError", std::string(msg), state.fileName, line, col);
     }
 }
 
-inline void check_fallible_usage(
+inline void checkFallibleUsage(
     AnalyzerState& state,
     const AstArena& arena,
     const FnDecl& fn,
-    ExprId expr_id,
-    bool has_active_on_error,
+    ExprId exprId,
+    bool hasActiveOnError,
     const GlobalSymbolTable& symbols,
-    bool& out_implicit_bubble
+    bool& outImplicitBubble
 ) {
-    out_implicit_bubble = false;
-    if (expr_id >= arena.exprs.size()) {
+    outImplicitBubble = false;
+    if (exprId >= arena.exprs.size()) {
         return;
     }
-    const auto& expr_node = arena.exprs[expr_id];
-    if (std::holds_alternative<FuncCall>(expr_node.payload)) {
-        const auto& call = std::get<FuncCall>(expr_node.payload);
-        const auto fn_sym_opt = resolve_func_call(arena, call, symbols, state.module_id);
-        if (fn_sym_opt.has_value()) {
-            const auto& fn_sym = fn_sym_opt.value();
-            const bool callee_fallible = fn_sym.is_fallible;
-            const bool caller_fallible = fn.is_fallible;
-            if (callee_fallible) {
-                if (!has_active_on_error) {
-                    if (caller_fallible) {
-                        out_implicit_bubble = true;
+    const auto& exprNode = arena.exprs[exprId];
+    if (std::holds_alternative<FuncCall>(exprNode.payload)) {
+        const auto& call = std::get<FuncCall>(exprNode.payload);
+        const auto fnSymOpt = resolveFuncCall(arena, call, symbols, state.moduleId);
+        if (fnSymOpt.has_value()) {
+            const auto& fnSym = fnSymOpt.value();
+            const bool calleeFallible = fnSym.isFallible;
+            const bool callerFallible = fn.isFallible;
+            if (calleeFallible) {
+                if (!hasActiveOnError) {
+                    if (callerFallible) {
+                        outImplicitBubble = true;
                     } else {
                         std::string msg = "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function '" +
-                            fn.name + "' calls fallible function '" + fn_sym.name + "').";
-                        set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                            fn.name + "' calls fallible function '" + fnSym.name + "').";
+                        setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                         return;
                     }
                 }
@@ -747,28 +747,28 @@ inline void check_fallible_usage(
     }
 }
 
-inline bool is_error_builtin_call(const AstArena& arena, const FuncCall& call);
+inline bool isErrorBuiltinCall(const AstArena& arena, const FuncCall& call);
 
-inline bool stmt_list_has_exit(const AstArena& arena, const std::vector<StmtId>& stmts) {
+inline bool stmtListHasExit(const AstArena& arena, const std::vector<StmtId>& stmts) {
     if (stmts.empty()) {
         return false;
     }
-    const StmtId last_sid = stmts.back();
-    if (last_sid >= arena.stmts.size()) {
+    const StmtId lastSid = stmts.back();
+    if (lastSid >= arena.stmts.size()) {
         return false;
     }
-    const auto& last_payload = arena.stmts[last_sid].payload;
-    if (std::holds_alternative<ReturnStmt>(last_payload)) {
+    const auto& lastPayload = arena.stmts[lastSid].payload;
+    if (std::holds_alternative<ReturnStmt>(lastPayload)) {
         return true;
     }
-    if (std::holds_alternative<BreakStmt>(last_payload)) {
+    if (std::holds_alternative<BreakStmt>(lastPayload)) {
         return true;
     }
-    if (std::holds_alternative<ExprStmt>(last_payload)) {
-        const auto& estmt = std::get<ExprStmt>(last_payload);
+    if (std::holds_alternative<ExprStmt>(lastPayload)) {
+        const auto& estmt = std::get<ExprStmt>(lastPayload);
         if (estmt.expr < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[estmt.expr].payload)) {
             const auto& call = std::get<FuncCall>(arena.exprs[estmt.expr].payload);
-            if (is_error_builtin_call(arena, call)) {
+            if (isErrorBuiltinCall(arena, call)) {
                 return true;
             }
         }
@@ -776,141 +776,141 @@ inline bool stmt_list_has_exit(const AstArena& arena, const std::vector<StmtId>&
     return false;
 }
 
-inline bool is_error_builtin_call(const AstArena& arena, const FuncCall& call) {
+inline bool isErrorBuiltinCall(const AstArena& arena, const FuncCall& call) {
     if (call.callee >= arena.exprs.size()) {
         return false;
     }
-    const auto& callee_node = arena.exprs[call.callee];
-    if (std::holds_alternative<Identifier>(callee_node.payload)) {
-        return std::get<Identifier>(callee_node.payload).name == "error";
+    const auto& calleeNode = arena.exprs[call.callee];
+    if (std::holds_alternative<Identifier>(calleeNode.payload)) {
+        return std::get<Identifier>(calleeNode.payload).name == "error";
     }
     return false;
 }
 
-inline void validate_expr_calls(
+inline void validateExprCalls(
     AnalyzerState& state,
     const AstArena& arena,
     const FnDecl& fn,
-    ExprId expr_id,
+    ExprId exprId,
     const GlobalSymbolTable& symbols,
     const std::unordered_map<std::string, VarSymbol>& scope,
-    bool allow_top_level_fallible
+    bool allowTopLevelFallible
 ) {
-    if (expr_id >= arena.exprs.size() || state.has_error) {
+    if (exprId >= arena.exprs.size() || state.hasError) {
         return;
     }
 
-    const auto& expr_node = arena.exprs[expr_id];
-    const auto& payload = expr_node.payload;
+    const auto& exprNode = arena.exprs[exprId];
+    const auto& payload = exprNode.payload;
 
     if (std::holds_alternative<FuncCall>(payload)) {
         const auto& call = std::get<FuncCall>(payload);
-        if (is_error_builtin_call(arena, call)) {
-            const bool caller_fallible = fn.is_fallible;
-            if (!caller_fallible) {
+        if (isErrorBuiltinCall(arena, call)) {
+            const bool callerFallible = fn.isFallible;
+            if (!callerFallible) {
                 std::string msg = "Cannot call 'error(...)' inside infallible function '" + fn.name +
                     "'; add 'can error' to the function signature.";
-                set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                 return;
             }
             if (call.args.empty()) {
-                set_analyzer_error(state, expr_node.line, expr_node.col, "'error(...)' requires at least one message argument.");
+                setAnalyzerError(state, exprNode.line, exprNode.col, "'error(...)' requires at least one message argument.");
                 return;
             }
-            for (const auto& named_arg : call.named_args) {
-                if (named_arg.name != "code") {
-                    std::string msg = "Unknown named argument '" + named_arg.name +
+            for (const auto& namedArg : call.namedArgs) {
+                if (namedArg.name != "code") {
+                    std::string msg = "Unknown named argument '" + namedArg.name +
                         "' in 'error(...)'; only 'code=' is supported.";
-                    set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                    setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                     return;
                 }
             }
         }
-        const auto fn_sym_opt = resolve_func_call(arena, call, symbols, state.module_id, scope);
-        if (fn_sym_opt.has_value() && fn_sym_opt->is_fallible && !allow_top_level_fallible) {
-            if (!fn.is_fallible) {
-                std::string msg = "Function '" + fn.name + "' calls fallible function '" + fn_sym_opt->name +
+        const auto fnSymOpt = resolveFuncCall(arena, call, symbols, state.moduleId, scope);
+        if (fnSymOpt.has_value() && fnSymOpt->isFallible && !allowTopLevelFallible) {
+            if (!fn.isFallible) {
+                std::string msg = "Function '" + fn.name + "' calls fallible function '" + fnSymOpt->name +
                     "' without an 'on error' block, but '" + fn.name + "' does not declare 'can error' in its signature.";
-                set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                 return;
             }
         }
         if (call.callee < arena.exprs.size() && std::holds_alternative<FieldAccess>(arena.exprs[call.callee].payload)) {
-            const auto& callee_fa = std::get<FieldAccess>(arena.exprs[call.callee].payload);
-            if (callee_fa.target < arena.exprs.size()) {
-                const auto& tgt_node = arena.exprs[callee_fa.target];
-                if (std::holds_alternative<Identifier>(tgt_node.payload)) {
-                    const auto& tgt_ident = std::get<Identifier>(tgt_node.payload);
-                    std::string target_mod_id;
-                    if (is_module_alias_in_scope(symbols, state.module_id, tgt_ident.name, scope, target_mod_id)) {
-                        const std::string sym_key = symbol_key(target_mod_id, callee_fa.field_name);
-                        const auto fit = symbols.functions.find(sym_key);
-                        if (fit != symbols.functions.end() && !fit->second.is_pub) {
-                            std::string msg = "Function '" + callee_fa.field_name + "' is private to module '" + target_mod_id + "' (missing 'pub').";
-                            set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+            const auto& calleeFa = std::get<FieldAccess>(arena.exprs[call.callee].payload);
+            if (calleeFa.target < arena.exprs.size()) {
+                const auto& tgtNode = arena.exprs[calleeFa.target];
+                if (std::holds_alternative<Identifier>(tgtNode.payload)) {
+                    const auto& tgtIdent = std::get<Identifier>(tgtNode.payload);
+                    std::string targetModId;
+                    if (isModuleAliasInScope(symbols, state.moduleId, tgtIdent.name, scope, targetModId)) {
+                        const std::string symKey = symbolKey(targetModId, calleeFa.fieldName);
+                        const auto fit = symbols.functions.find(symKey);
+                        if (fit != symbols.functions.end() && !fit->second.isPub) {
+                            std::string msg = "Function '" + calleeFa.fieldName + "' is private to module '" + targetModId + "' (missing 'pub').";
+                            setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                             return;
                         }
-                        const auto tit = symbols.types.find(sym_key);
-                        if (tit != symbols.types.end() && !tit->second.is_pub) {
-                            std::string msg = "Type '" + callee_fa.field_name + "' is private to module '" + target_mod_id + "' (missing 'pub').";
-                            set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                        const auto tit = symbols.types.find(symKey);
+                        if (tit != symbols.types.end() && !tit->second.isPub) {
+                            std::string msg = "Type '" + calleeFa.fieldName + "' is private to module '" + targetModId + "' (missing 'pub').";
+                            setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                             return;
                         }
-                        const auto ait = symbols.aliases.find(sym_key);
-                        if (ait != symbols.aliases.end() && !ait->second.is_pub) {
-                            std::string msg = "Alias '" + callee_fa.field_name + "' is private to module '" + target_mod_id + "' (missing 'pub').";
-                            set_analyzer_error(state, expr_node.line, expr_node.col, msg);
+                        const auto ait = symbols.aliases.find(symKey);
+                        if (ait != symbols.aliases.end() && !ait->second.isPub) {
+                            std::string msg = "Alias '" + calleeFa.fieldName + "' is private to module '" + targetModId + "' (missing 'pub').";
+                            setAnalyzerError(state, exprNode.line, exprNode.col, msg);
                             return;
                         }
                     }
                 } else {
-                    validate_expr_calls(state, arena, fn, callee_fa.target, symbols, scope, false);
-                    if (state.has_error) {
+                    validateExprCalls(state, arena, fn, calleeFa.target, symbols, scope, false);
+                    if (state.hasError) {
                         return;
                     }
                 }
             }
         }
-        for (const ExprId arg_id : call.args) {
-            validate_expr_calls(state, arena, fn, arg_id, symbols, scope, false);
+        for (const ExprId argId : call.args) {
+            validateExprCalls(state, arena, fn, argId, symbols, scope, false);
         }
-        for (const auto& named_arg : call.named_args) {
-            validate_expr_calls(state, arena, fn, named_arg.value, symbols, scope, false);
+        for (const auto& namedArg : call.namedArgs) {
+            validateExprCalls(state, arena, fn, namedArg.value, symbols, scope, false);
         }
         return;
     }
 
     if (std::holds_alternative<BinaryOp>(payload)) {
         const auto& bop = std::get<BinaryOp>(payload);
-        validate_expr_calls(state, arena, fn, bop.left, symbols, scope, false);
-        validate_expr_calls(state, arena, fn, bop.right, symbols, scope, false);
+        validateExprCalls(state, arena, fn, bop.left, symbols, scope, false);
+        validateExprCalls(state, arena, fn, bop.right, symbols, scope, false);
         return;
     }
 
     if (std::holds_alternative<UnaryOp>(payload)) {
         const auto& uop = std::get<UnaryOp>(payload);
-        validate_expr_calls(state, arena, fn, uop.operand, symbols, scope, false);
+        validateExprCalls(state, arena, fn, uop.operand, symbols, scope, false);
         return;
     }
 
     if (std::holds_alternative<FieldAccess>(payload)) {
         const auto& faccess = std::get<FieldAccess>(payload);
-        validate_expr_calls(state, arena, fn, faccess.target, symbols, scope, false);
+        validateExprCalls(state, arena, fn, faccess.target, symbols, scope, false);
         return;
     }
 
     if (std::holds_alternative<IndexAccess>(payload)) {
         const auto& iaccess = std::get<IndexAccess>(payload);
-        validate_expr_calls(state, arena, fn, iaccess.target, symbols, scope, false);
-        validate_expr_calls(state, arena, fn, iaccess.index, symbols, scope, false);
+        validateExprCalls(state, arena, fn, iaccess.target, symbols, scope, false);
+        validateExprCalls(state, arena, fn, iaccess.index, symbols, scope, false);
         return;
     }
 
 
     if (std::holds_alternative<ListLiteral>(payload)) {
         const auto& llit = std::get<ListLiteral>(payload);
-        for (const ExprId el_id : llit.elements) {
-            validate_expr_calls(state, arena, fn, el_id, symbols, scope, false);
+        for (const ExprId elId : llit.elements) {
+            validateExprCalls(state, arena, fn, elId, symbols, scope, false);
         }
         return;
     }
@@ -918,234 +918,234 @@ inline void validate_expr_calls(
     if (std::holds_alternative<DictLiteral>(payload)) {
         const auto& dlit = std::get<DictLiteral>(payload);
         for (const auto& ent : dlit.entries) {
-            validate_expr_calls(state, arena, fn, ent.key, symbols, scope, false);
-            validate_expr_calls(state, arena, fn, ent.value, symbols, scope, false);
+            validateExprCalls(state, arena, fn, ent.key, symbols, scope, false);
+            validateExprCalls(state, arena, fn, ent.value, symbols, scope, false);
         }
         return;
     }
 }
 
-inline void analyze_block(
+inline void analyzeBlock(
     AnalyzerState& state,
     AstArena& arena,
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
     GlobalSymbolTable& symbols,
     std::unordered_map<std::string, VarSymbol>& scope,
-    bool inherited_on_error = false
+    bool inheritedOnError = false
 );
 
-inline void bind_local_var(
+inline void bindLocalVar(
     std::unordered_map<std::string, VarSymbol>& scope,
     const AnalyzerState& state,
     const std::string& name,
     TypeId tid,
-    bool is_byref,
-    bool is_const,
+    bool isByref,
+    bool isConst,
     uint32_t line,
     uint32_t col
 ) {
-    scope[name] = VarSymbol{name, tid, is_byref, is_const, state.file_name, line, col, line};
+    scope[name] = VarSymbol{name, tid, isByref, isConst, state.fileName, line, col, line};
 }
 
-inline void analyze_stmt(
+inline void analyzeStmt(
     AnalyzerState& state,
     AstArena& arena,
     const FnDecl& fn,
-    StmtId stmt_id,
+    StmtId stmtId,
     GlobalSymbolTable& symbols,
     std::unordered_map<std::string, VarSymbol>& scope,
-    bool& has_active_on_error
+    bool& hasActiveOnError
 ) {
-    if (stmt_id >= arena.stmts.size() || state.has_error) {
+    if (stmtId >= arena.stmts.size() || state.hasError) {
         return;
     }
 
-    const auto& stmt_node = arena.stmts[stmt_id];
-    const auto& payload = stmt_node.payload;
+    const auto& stmtNode = arena.stmts[stmtId];
+    const auto& payload = stmtNode.payload;
 
     if (std::holds_alternative<VarAssignment>(payload)) {
-        auto& vassign = std::get<VarAssignment>(arena.stmts[stmt_id].payload);
-        check_fallible_usage(state, arena, fn, vassign.value, has_active_on_error, symbols, vassign.implicit_bubble);
-        if (state.has_error) return;
+        auto& vassign = std::get<VarAssignment>(arena.stmts[stmtId].payload);
+        checkFallibleUsage(state, arena, fn, vassign.value, hasActiveOnError, symbols, vassign.implicitBubble);
+        if (state.hasError) return;
 
-        const TypeId val_type = infer_expr_type(arena, vassign.value, symbols, scope, state.module_id);
+        const TypeId valType = inferExprType(arena, vassign.value, symbols, scope, state.moduleId);
         if (vassign.target < arena.exprs.size() && std::holds_alternative<Identifier>(arena.exprs[vassign.target].payload)) {
-            const auto& tgt_node = arena.exprs[vassign.target];
-            const auto& ident = std::get<Identifier>(tgt_node.payload);
-            if (vassign.is_dim || vassign.is_const) {
-                TypeId var_tid = symbols.type_int;
-                if (vassign.has_declared_type) {
-                    var_tid = resolve_alias(arena, symbols, state.module_id, vassign.declared_type);
-                } else if (val_type != INVALID_ID) {
-                    var_tid = val_type;
+            const auto& tgtNode = arena.exprs[vassign.target];
+            const auto& ident = std::get<Identifier>(tgtNode.payload);
+            if (vassign.isDim || vassign.isConst) {
+                TypeId varTid = symbols.typeInt;
+                if (vassign.hasDeclaredType) {
+                    varTid = resolveAlias(arena, symbols, state.moduleId, vassign.declaredType);
+                } else if (valType != INVALID_ID) {
+                    varTid = valType;
                 }
-                bind_local_var(scope, state, ident.name, var_tid, false, vassign.is_const, tgt_node.line, tgt_node.col);
+                bindLocalVar(scope, state, ident.name, varTid, false, vassign.isConst, tgtNode.line, tgtNode.col);
             } else {
                 const auto existing = scope.find(ident.name);
                 if (existing == scope.end()) {
                     std::string msg = "Undeclared variable '" + ident.name + "'. Use 'dim' or 'const' to declare variables.";
-                    set_analyzer_error(state, tgt_node.line, tgt_node.col, msg);
+                    setAnalyzerError(state, tgtNode.line, tgtNode.col, msg);
                     return;
                 }
-                if (existing->second.is_const) {
+                if (existing->second.isConst) {
                     std::string msg = "Cannot reassign const variable '" + ident.name + "'.";
-                    set_analyzer_error(state, tgt_node.line, tgt_node.col, msg);
+                    setAnalyzerError(state, tgtNode.line, tgtNode.col, msg);
                     return;
                 }
             }
         }
 
-        validate_expr_calls(state, arena, fn, vassign.value, symbols, scope, true);
+        validateExprCalls(state, arena, fn, vassign.value, symbols, scope, true);
         return;
     }
 
     if (std::holds_alternative<ExprStmt>(payload)) {
-        auto& estmt = std::get<ExprStmt>(arena.stmts[stmt_id].payload);
-        check_fallible_usage(state, arena, fn, estmt.expr, has_active_on_error, symbols, estmt.implicit_bubble);
-        if (state.has_error) return;
+        auto& estmt = std::get<ExprStmt>(arena.stmts[stmtId].payload);
+        checkFallibleUsage(state, arena, fn, estmt.expr, hasActiveOnError, symbols, estmt.implicitBubble);
+        if (state.hasError) return;
 
-        validate_expr_calls(state, arena, fn, estmt.expr, symbols, scope, true);
+        validateExprCalls(state, arena, fn, estmt.expr, symbols, scope, true);
         return;
     }
 
     if (std::holds_alternative<ErrorBlock>(payload)) {
-        const auto& err_block = std::get<ErrorBlock>(payload);
-        TypeId err_t = symbols.type_err;
-        if (err_t == INVALID_ID) {
-            err_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "err", {}});
+        const auto& errBlock = std::get<ErrorBlock>(payload);
+        TypeId errT = symbols.typeErr;
+        if (errT == INVALID_ID) {
+            errT = addType(arena, TypeNode{stmtNode.line, stmtNode.col, "err", {}});
         }
-        bind_local_var(scope, state, err_block.err_var, err_t, false, false, stmt_node.line, stmt_node.col);
-        auto err_scope = scope;
-        analyze_block(state, arena, fn, err_block.body, symbols, err_scope, false);
-        if (state.has_error) return;
+        bindLocalVar(scope, state, errBlock.errVar, errT, false, false, stmtNode.line, stmtNode.col);
+        auto errScope = scope;
+        analyzeBlock(state, arena, fn, errBlock.body, symbols, errScope, false);
+        if (state.hasError) return;
 
-        if (!stmt_list_has_exit(arena, err_block.body)) {
+        if (!stmtListHasExit(arena, errBlock.body)) {
             std::string msg = "'on error' block must terminate with an explicit control-flow exit ('return', 'error(...)', or 'break').";
-            set_analyzer_error(state, stmt_node.line, stmt_node.col, msg);
+            setAnalyzerError(state, stmtNode.line, stmtNode.col, msg);
             return;
         }
 
-        has_active_on_error = true;
+        hasActiveOnError = true;
         return;
     }
 
     if (std::holds_alternative<IfStmt>(payload)) {
-        const auto& if_stmt = std::get<IfStmt>(payload);
-        validate_expr_calls(state, arena, fn, if_stmt.condition, symbols, scope, false);
-        if (state.has_error) return;
-        analyze_block(state, arena, fn, if_stmt.then_body, symbols, scope, has_active_on_error);
-        if (state.has_error) return;
+        const auto& ifStmt = std::get<IfStmt>(payload);
+        validateExprCalls(state, arena, fn, ifStmt.condition, symbols, scope, false);
+        if (state.hasError) return;
+        analyzeBlock(state, arena, fn, ifStmt.thenBody, symbols, scope, hasActiveOnError);
+        if (state.hasError) return;
 
-        for (const auto& branch : if_stmt.elif_branches) {
-            validate_expr_calls(state, arena, fn, branch.condition, symbols, scope, false);
-            if (state.has_error) return;
-            analyze_block(state, arena, fn, branch.body, symbols, scope, has_active_on_error);
-            if (state.has_error) return;
+        for (const auto& branch : ifStmt.elifBranches) {
+            validateExprCalls(state, arena, fn, branch.condition, symbols, scope, false);
+            if (state.hasError) return;
+            analyzeBlock(state, arena, fn, branch.body, symbols, scope, hasActiveOnError);
+            if (state.hasError) return;
         }
 
-        if (if_stmt.has_else) {
-            analyze_block(state, arena, fn, if_stmt.else_body, symbols, scope, has_active_on_error);
+        if (ifStmt.hasElse) {
+            analyzeBlock(state, arena, fn, ifStmt.elseBody, symbols, scope, hasActiveOnError);
         }
         return;
     }
 
     if (std::holds_alternative<ForStmt>(payload)) {
-        const auto& for_stmt = std::get<ForStmt>(payload);
-        if (for_stmt.range_spec.has_range) {
-            validate_expr_calls(state, arena, fn, for_stmt.range_spec.start, symbols, scope, false);
-            validate_expr_calls(state, arena, fn, for_stmt.range_spec.end, symbols, scope, false);
-            if (for_stmt.range_spec.has_step) {
-                validate_expr_calls(state, arena, fn, for_stmt.range_spec.step, symbols, scope, false);
+        const auto& forStmt = std::get<ForStmt>(payload);
+        if (forStmt.rangeSpec.hasRange) {
+            validateExprCalls(state, arena, fn, forStmt.rangeSpec.start, symbols, scope, false);
+            validateExprCalls(state, arena, fn, forStmt.rangeSpec.end, symbols, scope, false);
+            if (forStmt.rangeSpec.hasStep) {
+                validateExprCalls(state, arena, fn, forStmt.rangeSpec.step, symbols, scope, false);
             }
-            if (!for_stmt.loop_vars.empty()) {
-                const TypeId int_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "int", {}});
-                bind_local_var(scope, state, for_stmt.loop_vars[0], int_t, false, false, stmt_node.line, stmt_node.col);
+            if (!forStmt.loopVars.empty()) {
+                const TypeId intT = addType(arena, TypeNode{stmtNode.line, stmtNode.col, "int", {}});
+                bindLocalVar(scope, state, forStmt.loopVars[0], intT, false, false, stmtNode.line, stmtNode.col);
             }
-        } else if (for_stmt.has_iterable) {
-            validate_expr_calls(state, arena, fn, for_stmt.iterable, symbols, scope, false);
-            const TypeId iter_tid = infer_expr_type(arena, for_stmt.iterable, symbols, scope, state.module_id);
-            if (iter_tid < arena.types.size()) {
-                const auto& iter_t = arena.types[iter_tid];
-                if (iter_t.name == "list" && !iter_t.type_args.empty() && !for_stmt.loop_vars.empty()) {
-                    bind_local_var(scope, state, for_stmt.loop_vars[0], iter_t.type_args[0], false, false, stmt_node.line, stmt_node.col);
-                } else if (iter_t.name == "dict" && iter_t.type_args.size() == 2) {
-                    if (for_stmt.loop_vars.size() >= 1) {
-                        bind_local_var(scope, state, for_stmt.loop_vars[0], iter_t.type_args[0], false, false, stmt_node.line, stmt_node.col);
+        } else if (forStmt.hasIterable) {
+            validateExprCalls(state, arena, fn, forStmt.iterable, symbols, scope, false);
+            const TypeId iterTid = inferExprType(arena, forStmt.iterable, symbols, scope, state.moduleId);
+            if (iterTid < arena.types.size()) {
+                const auto& iterT = arena.types[iterTid];
+                if (iterT.name == "list" && !iterT.typeArgs.empty() && !forStmt.loopVars.empty()) {
+                    bindLocalVar(scope, state, forStmt.loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                } else if (iterT.name == "dict" && iterT.typeArgs.size() == 2) {
+                    if (forStmt.loopVars.size() >= 1) {
+                        bindLocalVar(scope, state, forStmt.loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
                     }
-                    if (for_stmt.loop_vars.size() >= 2) {
-                        bind_local_var(scope, state, for_stmt.loop_vars[1], iter_t.type_args[1], false, false, stmt_node.line, stmt_node.col);
+                    if (forStmt.loopVars.size() >= 2) {
+                        bindLocalVar(scope, state, forStmt.loopVars[1], iterT.typeArgs[1], false, false, stmtNode.line, stmtNode.col);
                     }
                 } else {
-                    const TypeId auto_t = add_type(arena, TypeNode{stmt_node.line, stmt_node.col, "auto", {}});
-                    for (const auto& lv : for_stmt.loop_vars) {
-                        bind_local_var(scope, state, lv, auto_t, false, false, stmt_node.line, stmt_node.col);
+                    const TypeId autoT = addType(arena, TypeNode{stmtNode.line, stmtNode.col, "auto", {}});
+                    for (const auto& lv : forStmt.loopVars) {
+                        bindLocalVar(scope, state, lv, autoT, false, false, stmtNode.line, stmtNode.col);
                     }
                 }
             }
         }
-        if (state.has_error) return;
-        analyze_block(state, arena, fn, for_stmt.body, symbols, scope, has_active_on_error);
+        if (state.hasError) return;
+        analyzeBlock(state, arena, fn, forStmt.body, symbols, scope, hasActiveOnError);
         return;
     }
 
     if (std::holds_alternative<SelectStmt>(payload)) {
-        const auto& sel_stmt = std::get<SelectStmt>(payload);
-        validate_expr_calls(state, arena, fn, sel_stmt.target, symbols, scope, false);
-        if (state.has_error) return;
+        const auto& selStmt = std::get<SelectStmt>(payload);
+        validateExprCalls(state, arena, fn, selStmt.target, symbols, scope, false);
+        if (state.hasError) return;
 
-        const TypeId target_tid = infer_expr_type(arena, sel_stmt.target, symbols, scope, state.module_id);
-        if (target_tid != symbols.type_int && target_tid != symbols.type_bool) {
-            set_analyzer_error(state, stmt_node.line, stmt_node.col, "select case expression must be of type 'int' or 'bool'");
+        const TypeId targetTid = inferExprType(arena, selStmt.target, symbols, scope, state.moduleId);
+        if (targetTid != symbols.typeInt && targetTid != symbols.typeBool) {
+            setAnalyzerError(state, stmtNode.line, stmtNode.col, "select case expression must be of type 'int' or 'bool'");
             return;
         }
 
-        for (const auto& scase : sel_stmt.cases) {
-            validate_expr_calls(state, arena, fn, scase.match_expr, symbols, scope, false);
-            if (state.has_error) return;
-            analyze_block(state, arena, fn, scase.body, symbols, scope, has_active_on_error);
-            if (state.has_error) return;
+        for (const auto& scase : selStmt.cases) {
+            validateExprCalls(state, arena, fn, scase.matchExpr, symbols, scope, false);
+            if (state.hasError) return;
+            analyzeBlock(state, arena, fn, scase.body, symbols, scope, hasActiveOnError);
+            if (state.hasError) return;
         }
 
-        if (sel_stmt.has_case_else) {
-            analyze_block(state, arena, fn, sel_stmt.case_else, symbols, scope, has_active_on_error);
+        if (selStmt.hasCaseElse) {
+            analyzeBlock(state, arena, fn, selStmt.caseElse, symbols, scope, hasActiveOnError);
         }
         return;
     }
 
     if (std::holds_alternative<DeferStmt>(payload)) {
         const auto& dstmt = std::get<DeferStmt>(payload);
-        analyze_block(state, arena, fn, dstmt.body, symbols, scope, false);
+        analyzeBlock(state, arena, fn, dstmt.body, symbols, scope, false);
         return;
     }
 
 
 
     if (std::holds_alternative<ReturnStmt>(payload)) {
-        const auto& ret_stmt = std::get<ReturnStmt>(payload);
-        if (ret_stmt.has_value) {
-            validate_expr_calls(state, arena, fn, ret_stmt.value, symbols, scope, false);
-            if (state.has_error) return;
+        const auto& retStmt = std::get<ReturnStmt>(payload);
+        if (retStmt.has_value) {
+            validateExprCalls(state, arena, fn, retStmt.value, symbols, scope, false);
+            if (state.hasError) return;
         }
-        bool is_return_error_call = false;
-        if (ret_stmt.has_value) {
-            const ExprId first_id = ret_stmt.value;
-            if (first_id < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[first_id].payload)) {
-                const auto& call = std::get<FuncCall>(arena.exprs[first_id].payload);
-                if (is_error_builtin_call(arena, call)) {
-                    is_return_error_call = true;
+        bool isReturnErrorCall = false;
+        if (retStmt.has_value) {
+            const ExprId firstId = retStmt.value;
+            if (firstId < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[firstId].payload)) {
+                const auto& call = std::get<FuncCall>(arena.exprs[firstId].payload);
+                if (isErrorBuiltinCall(arena, call)) {
+                    isReturnErrorCall = true;
                 }
             }
         }
-        if (!is_return_error_call) {
-            const bool expected_has_value = (fn.return_type != INVALID_ID && !is_void_type(arena, fn.return_type));
-            if (ret_stmt.has_value && !expected_has_value) {
+        if (!isReturnErrorCall) {
+            const bool expectedHasValue = (fn.returnType != INVALID_ID && !isVoidType(arena, fn.returnType));
+            if (retStmt.has_value && !expectedHasValue) {
                 std::string msg = "Function '" + fn.name + "' returns void, but a value was returned.";
-                set_analyzer_error(state, stmt_node.line, stmt_node.col, msg);
+                setAnalyzerError(state, stmtNode.line, stmtNode.col, msg);
                 return;
-            } else if (!ret_stmt.has_value && expected_has_value) {
+            } else if (!retStmt.has_value && expectedHasValue) {
                 std::string msg = "Function '" + fn.name + "' expects a return value, but none was provided.";
-                set_analyzer_error(state, stmt_node.line, stmt_node.col, msg);
+                setAnalyzerError(state, stmtNode.line, stmtNode.col, msg);
                 return;
             }
         }
@@ -1153,25 +1153,25 @@ inline void analyze_stmt(
     }
 }
 
-inline void analyze_block(
+inline void analyzeBlock(
     AnalyzerState& state,
     AstArena& arena,
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
     GlobalSymbolTable& symbols,
     std::unordered_map<std::string, VarSymbol>& scope,
-    bool inherited_on_error
+    bool inheritedOnError
 ) {
-    bool active_on_error = inherited_on_error;
+    bool activeOnError = inheritedOnError;
     for (const StmtId sid : stmts) {
-        if (state.has_error) {
+        if (state.hasError) {
             return;
         }
-        analyze_stmt(state, arena, fn, sid, symbols, scope, active_on_error);
+        analyzeStmt(state, arena, fn, sid, symbols, scope, activeOnError);
     }
 }
 
-inline void analyze_fn(
+inline void analyzeFn(
     AnalyzerState& state,
     AstArena& arena,
     const FnDecl& fn,
@@ -1179,152 +1179,152 @@ inline void analyze_fn(
 ) {
     std::unordered_map<std::string, VarSymbol> scope;
     for (const auto& param : fn.params) {
-        const TypeId resolved_tid = resolve_alias(arena, symbols, state.module_id, param.type_id);
-        bind_local_var(scope, state, param.name, resolved_tid, param.is_byref, false, param.line, param.col);
+        const TypeId resolvedTid = resolveAlias(arena, symbols, state.moduleId, param.typeId);
+        bindLocalVar(scope, state, param.name, resolvedTid, param.isByref, false, param.line, param.col);
     }
 
-    analyze_block(state, arena, fn, fn.body, symbols, scope, false);
-    symbols.fn_scopes[symbol_key(state.module_id, fn.name)] = std::move(scope);
+    analyzeBlock(state, arena, fn, fn.body, symbols, scope, false);
+    symbols.fnScopes[symbolKey(state.moduleId, fn.name)] = std::move(scope);
 }
 
-inline AnalysisResult analyze_program(
+inline AnalysisResult analyzeProgram(
     AstArena& arena,
     const Program& program,
-    std::optional<GlobalSymbolTable> initial_symbols = std::nullopt
+    std::optional<GlobalSymbolTable> initialSymbols = std::nullopt
 ) {
     AnalysisResult result{};
     result.ok = true;
-    if (initial_symbols.has_value()) {
-        result.symbols = std::move(initial_symbols.value());
+    if (initialSymbols.has_value()) {
+        result.symbols = std::move(initialSymbols.value());
     } else {
-        register_builtins(arena, result.symbols);
+        registerBuiltins(arena, result.symbols);
     }
 
     AnalyzerState state{};
-    state.file_name = program.file_name;
+    state.fileName = program.fileName;
 
     // Pass 1a: Register module imports, aliases, and type declarations
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
-        const auto& decl_node = arena.decls[did];
-        const auto& payload = decl_node.payload;
+        const auto& declNode = arena.decls[did];
+        const auto& payload = declNode.payload;
 
         if (std::holds_alternative<ImportDecl>(payload)) {
             const auto& imp = std::get<ImportDecl>(payload);
             if (imp.kind == "header") {
-                std::string header_path = imp.target;
-                if (!decl_node.file_name.empty()) {
-                    const std::string mod_dir = parent_dir_of(decl_node.file_name);
-                    if (mod_dir != "." && !header_path.empty() && header_path[0] != '/') {
-                        const std::string rel_candidate = mod_dir + "/" + header_path;
-                        std::ifstream h_in(rel_candidate);
-                        if (h_in.is_open()) {
-                            h_in.close();
-                            header_path = rel_candidate;
+                std::string headerPath = imp.target;
+                if (!declNode.fileName.empty()) {
+                    const std::string modDir = parentDirOf(declNode.fileName);
+                    if (modDir != "." && !headerPath.empty() && headerPath[0] != '/') {
+                        const std::string relCandidate = modDir + "/" + headerPath;
+                        std::ifstream hIn(relCandidate);
+                        if (hIn.is_open()) {
+                            hIn.close();
+                            headerPath = relCandidate;
                         }
                     }
                 }
                 bool found = false;
                 for (const auto& h : result.symbols.headers) {
-                    if (h == header_path) { found = true; break; }
+                    if (h == headerPath) { found = true; break; }
                 }
                 if (!found) {
-                    result.symbols.headers.push_back(header_path);
+                    result.symbols.headers.push_back(headerPath);
                 }
             } else if (imp.kind == "link") {
                 bool found = false;
-                for (const auto& l : result.symbols.link_libs) {
+                for (const auto& l : result.symbols.linkLibs) {
                     if (l == imp.target) { found = true; break; }
                 }
                 if (!found) {
-                    result.symbols.link_libs.push_back(imp.target);
+                    result.symbols.linkLibs.push_back(imp.target);
                 }
             } else if (imp.kind == "module") {
-                std::string alias = default_import_alias(imp.target);
-                if (imp.has_alias) {
+                std::string alias = defaultImportAlias(imp.target);
+                if (imp.hasAlias) {
                     alias = imp.alias;
                 }
-                if (result.symbols.modules[decl_node.module_id].count(alias) > 0) {
+                if (result.symbols.modules[declNode.moduleId].count(alias) > 0) {
                     result.ok = false;
-                    result.error = make_error("AnalyzerError", "Duplicate module import alias '" + alias + "'.", decl_node.file_name, decl_node.line, decl_node.col);
+                    result.error = makeError("AnalyzerError", "Duplicate module import alias '" + alias + "'.", declNode.fileName, declNode.line, declNode.col);
                     return result;
                 }
-                std::string resolved_mod = imp.resolved_module_id;
-                if (resolved_mod.empty()) {
-                    resolved_mod = resolve_module_id(decl_node.module_id, imp.target);
+                std::string resolvedMod = imp.resolvedModuleId;
+                if (resolvedMod.empty()) {
+                    resolvedMod = resolveModuleId(declNode.moduleId, imp.target);
                 }
-                result.symbols.modules[decl_node.module_id][alias] = resolved_mod;
+                result.symbols.modules[declNode.moduleId][alias] = resolvedMod;
             }
         } else if (std::holds_alternative<AliasDecl>(payload)) {
             const auto& adecl = std::get<AliasDecl>(payload);
             AliasSymbol asym{};
             asym.name = adecl.name;
-            asym.module_id = decl_node.module_id;
-            asym.key = symbol_key(decl_node.module_id, adecl.name);
-            asym.target_type = adecl.target_type;
-            asym.is_pub = adecl.is_pub;
-            asym.cpp_name = make_cpp_type_name(decl_node.module_id, adecl.name, false);
-            asym.file_name = decl_node.file_name;
-            asym.line = decl_node.name_line;
-            asym.col = decl_node.name_col;
-            asym.end_line = decl_node.end_line;
+            asym.moduleId = declNode.moduleId;
+            asym.key = symbolKey(declNode.moduleId, adecl.name);
+            asym.targetType = adecl.targetType;
+            asym.isPub = adecl.isPub;
+            asym.cppName = makeCppTypeName(declNode.moduleId, adecl.name, false);
+            asym.fileName = declNode.fileName;
+            asym.line = declNode.nameLine;
+            asym.col = declNode.nameCol;
+            asym.endLine = declNode.endLine;
             result.symbols.aliases[asym.key] = std::move(asym);
         } else if (std::holds_alternative<TypeDecl>(payload)) {
             const auto& tdecl = std::get<TypeDecl>(payload);
             TypeSymbol tsym{};
             tsym.name = tdecl.name;
-            tsym.module_id = decl_node.module_id;
-            tsym.key = symbol_key(decl_node.module_id, tdecl.name);
-            tsym.is_pub = tdecl.is_pub;
-            tsym.is_extern = tdecl.is_extern;
-            tsym.cpp_name = make_cpp_type_name(decl_node.module_id, tdecl.name, tdecl.is_extern);
-            tsym.field_order = tdecl.fields;
-            tsym.file_name = decl_node.file_name;
-            tsym.line = decl_node.name_line;
-            tsym.col = decl_node.name_col;
-            tsym.end_line = decl_node.end_line;
-            const std::string key_copy = tsym.key;
-            result.symbols.types[key_copy] = std::move(tsym);
+            tsym.moduleId = declNode.moduleId;
+            tsym.key = symbolKey(declNode.moduleId, tdecl.name);
+            tsym.isPub = tdecl.isPub;
+            tsym.isExtern = tdecl.isExtern;
+            tsym.cppName = makeCppTypeName(declNode.moduleId, tdecl.name, tdecl.isExtern);
+            tsym.fieldOrder = tdecl.fields;
+            tsym.fileName = declNode.fileName;
+            tsym.line = declNode.nameLine;
+            tsym.col = declNode.nameCol;
+            tsym.endLine = declNode.endLine;
+            const std::string keyCopy = tsym.key;
+            result.symbols.types[keyCopy] = std::move(tsym);
             // Pre-register canonical struct types in the arena
-            find_or_add_type(arena, key_copy, {});
+            findOrAddType(arena, keyCopy, {});
         }
     }
 
     // Pass 1b: Resolve struct field types and register function signatures now that all types and aliases are registered
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
-        const auto& decl_node = arena.decls[did];
-        const auto& payload = decl_node.payload;
+        const auto& declNode = arena.decls[did];
+        const auto& payload = declNode.payload;
 
         if (std::holds_alternative<TypeDecl>(payload)) {
             const auto& tdecl = std::get<TypeDecl>(payload);
-            const std::string key = symbol_key(decl_node.module_id, tdecl.name);
+            const std::string key = symbolKey(declNode.moduleId, tdecl.name);
             auto& tsym = result.symbols.types[key];
             for (const auto& fld : tdecl.fields) {
-                tsym.fields[fld.name] = resolve_alias(arena, result.symbols, decl_node.module_id, fld.type_id);
+                tsym.fields[fld.name] = resolveAlias(arena, result.symbols, declNode.moduleId, fld.typeId);
             }
         } else if (std::holds_alternative<FnDecl>(payload)) {
             const auto& fdecl = std::get<FnDecl>(payload);
             FnSymbol fsym{};
             fsym.name = fdecl.name;
-            fsym.module_id = decl_node.module_id;
-            fsym.key = symbol_key(decl_node.module_id, fdecl.name);
-            fsym.is_pub = fdecl.is_pub;
-            fsym.is_extern = fdecl.is_extern;
-            fsym.is_fallible = fdecl.is_fallible;
-            fsym.cpp_name = make_cpp_fn_name(decl_node.module_id, fdecl.name, fdecl.is_extern);
-            fsym.file_name = decl_node.file_name;
-            fsym.line = decl_node.name_line;
-            fsym.col = decl_node.name_col;
-            fsym.end_line = decl_node.end_line;
+            fsym.moduleId = declNode.moduleId;
+            fsym.key = symbolKey(declNode.moduleId, fdecl.name);
+            fsym.isPub = fdecl.isPub;
+            fsym.isExtern = fdecl.isExtern;
+            fsym.isFallible = fdecl.isFallible;
+            fsym.cppName = makeCppFnName(declNode.moduleId, fdecl.name, fdecl.isExtern);
+            fsym.fileName = declNode.fileName;
+            fsym.line = declNode.nameLine;
+            fsym.col = declNode.nameCol;
+            fsym.endLine = declNode.endLine;
             fsym.params.reserve(fdecl.params.size());
             for (const auto& p : fdecl.params) {
-                Param resolved_p = p;
-                resolved_p.type_id = resolve_alias(arena, result.symbols, decl_node.module_id, p.type_id);
-                fsym.params.push_back(std::move(resolved_p));
+                Param resolvedP = p;
+                resolvedP.typeId = resolveAlias(arena, result.symbols, declNode.moduleId, p.typeId);
+                fsym.params.push_back(std::move(resolvedP));
             }
-            if (fdecl.return_type != INVALID_ID) {
-                fsym.return_type = resolve_alias(arena, result.symbols, decl_node.module_id, fdecl.return_type);
+            if (fdecl.returnType != INVALID_ID) {
+                fsym.returnType = resolveAlias(arena, result.symbols, declNode.moduleId, fdecl.returnType);
             }
             result.symbols.functions[fsym.key] = std::move(fsym);
         }
@@ -1333,14 +1333,14 @@ inline AnalysisResult analyze_program(
     // Step 2: Validate function bodies, infer local variable types, and enforce static error rules
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
-        const auto& decl_node = arena.decls[did];
-        if (std::holds_alternative<FnDecl>(decl_node.payload)) {
-            const auto& fdecl = std::get<FnDecl>(decl_node.payload);
-            if (!fdecl.is_extern) {
-                state.file_name = decl_node.file_name;
-                state.module_id = decl_node.module_id;
-                analyze_fn(state, arena, fdecl, result.symbols);
-                if (state.has_error) {
+        const auto& declNode = arena.decls[did];
+        if (std::holds_alternative<FnDecl>(declNode.payload)) {
+            const auto& fdecl = std::get<FnDecl>(declNode.payload);
+            if (!fdecl.isExtern) {
+                state.fileName = declNode.fileName;
+                state.moduleId = declNode.moduleId;
+                analyzeFn(state, arena, fdecl, result.symbols);
+                if (state.hasError) {
                     result.ok = false;
                     result.error = state.error;
                     return result;

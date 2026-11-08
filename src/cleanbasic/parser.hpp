@@ -17,10 +17,10 @@ namespace cb {
 
 struct ParserState {
     size_t pos = 0;
-    std::string file_name = "main.cb";
+    std::string fileName = "main.cb";
     AstArena arena;
     DiagnosticError error;
-    bool has_error = false;
+    bool hasError = false;
 };
 
 struct ParseResult {
@@ -34,18 +34,18 @@ struct ParseResult {
 // Error and Token Navigation Helpers
 // ==========================================
 
-inline void set_parse_error(ParserState& state, const Token& tok, std::string_view msg) {
-    if (!state.has_error) {
-        state.has_error = true;
-        std::string full_msg = std::string(msg) + " (got " + tok.kind + " '" + tok.value + "')";
-        state.error = make_error("ParseError", full_msg, state.file_name, tok.line, tok.col);
+inline void setParseError(ParserState& state, const Token& tok, std::string_view msg) {
+    if (!state.hasError) {
+        state.hasError = true;
+        std::string fullMsg = std::string(msg) + " (got " + tok.kind + " '" + tok.value + "')";
+        state.error = makeError("ParseError", fullMsg, state.fileName, tok.line, tok.col);
     }
 }
 
 inline const Token& current(const std::vector<Token>& tokens, const ParserState& state) {
-    static const Token empty_eof{"EOF", "", 1, 1};
+    static const Token emptyEof{"EOF", "", 1, 1};
     if (tokens.empty()) {
-        return empty_eof;
+        return emptyEof;
     }
     if (state.pos < tokens.size()) {
         return tokens[state.pos];
@@ -53,10 +53,10 @@ inline const Token& current(const std::vector<Token>& tokens, const ParserState&
     return tokens.back();
 }
 
-inline const Token& peek_offset(const std::vector<Token>& tokens, const ParserState& state, size_t offset) {
-    static const Token empty_eof{"EOF", "", 1, 1};
+inline const Token& peekOffset(const std::vector<Token>& tokens, const ParserState& state, size_t offset) {
+    static const Token emptyEof{"EOF", "", 1, 1};
     if (tokens.empty()) {
-        return empty_eof;
+        return emptyEof;
     }
     const size_t idx = state.pos + offset;
     if (idx < tokens.size()) {
@@ -66,7 +66,7 @@ inline const Token& peek_offset(const std::vector<Token>& tokens, const ParserSt
 }
 
 inline bool check(const std::vector<Token>& tokens, const ParserState& state, std::string_view kind, std::string_view value = "") {
-    if (state.has_error) {
+    if (state.hasError) {
         return false;
     }
     const Token& tok = current(tokens, state);
@@ -79,8 +79,8 @@ inline bool check(const std::vector<Token>& tokens, const ParserState& state, st
     return true;
 }
 
-inline bool check_any_ident_or_type(const std::vector<Token>& tokens, const ParserState& state) {
-    if (state.has_error) {
+inline bool checkAnyIdentOrType(const std::vector<Token>& tokens, const ParserState& state) {
+    if (state.hasError) {
         return false;
     }
     const Token& tok = current(tokens, state);
@@ -88,9 +88,9 @@ inline bool check_any_ident_or_type(const std::vector<Token>& tokens, const Pars
 }
 
 inline const Token& match(const std::vector<Token>& tokens, ParserState& state, std::string_view kind, std::string_view value = "") {
-    static const Token fallback_tok{"EOF", "", 1, 1};
-    if (state.has_error) {
-        return fallback_tok;
+    static const Token fallbackTok{"EOF", "", 1, 1};
+    if (state.hasError) {
+        return fallbackTok;
     }
     const Token& tok = current(tokens, state);
     if (!check(tokens, state, kind, value)) {
@@ -98,95 +98,95 @@ inline const Token& match(const std::vector<Token>& tokens, ParserState& state, 
         if (!value.empty()) {
             expected += " ('" + std::string(value) + "')";
         }
-        set_parse_error(state, tok, expected);
+        setParseError(state, tok, expected);
         return tok;
     }
     state.pos += 1;
     return tok;
 }
 
-inline const Token& match_ident_or_type(const std::vector<Token>& tokens, ParserState& state) {
-    static const Token fallback_tok{"EOF", "", 1, 1};
-    if (state.has_error) {
-        return fallback_tok;
+inline const Token& matchIdentOrType(const std::vector<Token>& tokens, ParserState& state) {
+    static const Token fallbackTok{"EOF", "", 1, 1};
+    if (state.hasError) {
+        return fallbackTok;
     }
     const Token& tok = current(tokens, state);
     if (tok.kind == "IDENT" || tok.kind == "TYPE_KW" || (tok.kind == "KEYWORD" && tok.value == "error")) {
         state.pos += 1;
         return tok;
     }
-    set_parse_error(state, tok, "Expected identifier or type name");
+    setParseError(state, tok, "Expected identifier or type name");
     return tok;
 }
 
-inline void skip_newlines(const std::vector<Token>& tokens, ParserState& state) {
-    while (!state.has_error && check(tokens, state, "NEWLINE")) {
+inline void skipNewlines(const std::vector<Token>& tokens, ParserState& state) {
+    while (!state.hasError && check(tokens, state, "NEWLINE")) {
         state.pos += 1;
     }
 }
 
-inline void expect_newline_or_eof(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline void expectNewlineOrEof(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return;
     }
     if (check(tokens, state, "NEWLINE")) {
-        skip_newlines(tokens, state);
+        skipNewlines(tokens, state);
     } else if (check(tokens, state, "EOF")) {
         return;
     } else {
-        set_parse_error(state, current(tokens, state), "Expected end of line (NEWLINE)");
+        setParseError(state, current(tokens, state), "Expected end of line (NEWLINE)");
     }
 }
 
-inline std::string strip_quotes(std::string_view raw) {
-    constexpr char single_quote = static_cast<char>(39);
-    if (raw.size() >= 2 && (raw.front() == '"' || raw.front() == single_quote) && raw.back() == raw.front()) {
+inline std::string stripQuotes(std::string_view raw) {
+    constexpr char singleQuote = static_cast<char>(39);
+    if (raw.size() >= 2 && (raw.front() == '"' || raw.front() == singleQuote) && raw.back() == raw.front()) {
         return std::string(raw.substr(1, raw.size() - 2));
     }
     return std::string(raw);
 }
 
 // Forward declarations
-inline TypeId parse_type(const std::vector<Token>& tokens, ParserState& state);
-inline ExprId parse_expr(const std::vector<Token>& tokens, ParserState& state);
-inline StmtId parse_statement(const std::vector<Token>& tokens, ParserState& state);
+inline TypeId parseType(const std::vector<Token>& tokens, ParserState& state);
+inline ExprId parseExpr(const std::vector<Token>& tokens, ParserState& state);
+inline StmtId parseStatement(const std::vector<Token>& tokens, ParserState& state);
 
 // ==========================================
 // Argument & Struct Field Parsing Helpers
 // ==========================================
 
-inline void parse_call_arguments(
+inline void parseCallArguments(
     const std::vector<Token>& tokens,
     ParserState& state,
-    std::string_view closing_kind,
-    std::vector<ExprId>& pos_args,
-    std::vector<NamedArg>& named_args
+    std::string_view closingKind,
+    std::vector<ExprId>& posArgs,
+    std::vector<NamedArg>& namedArgs
 ) {
-    if (check(tokens, state, closing_kind)) {
+    if (check(tokens, state, closingKind)) {
         return;
     }
 
-    while (!state.has_error) {
-        const Token& peek_tok = peek_offset(tokens, state, 1);
-        if (check(tokens, state, "IDENT") && peek_tok.kind == "COLON") {
-            set_parse_error(state, peek_tok, "Named arguments must use '=' (e.g., name=value), not ':'");
+    while (!state.hasError) {
+        const Token& peekTok = peekOffset(tokens, state, 1);
+        if (check(tokens, state, "IDENT") && peekTok.kind == "COLON") {
+            setParseError(state, peekTok, "Named arguments must use '=' (e.g., name=value), not ':'");
             return;
         }
-        if (check(tokens, state, "IDENT") && peek_tok.kind == "ASSIGN") {
-            const Token name_tok = match(tokens, state, "IDENT");
+        if (check(tokens, state, "IDENT") && peekTok.kind == "ASSIGN") {
+            const Token nameTok = match(tokens, state, "IDENT");
             state.pos += 1;  // consume '='
-            const ExprId val = parse_expr(tokens, state);
+            const ExprId val = parseExpr(tokens, state);
             NamedArg arg{};
-            arg.name = name_tok.value;
+            arg.name = nameTok.value;
             arg.value = val;
-            named_args.push_back(std::move(arg));
+            namedArgs.push_back(std::move(arg));
         } else {
-            pos_args.push_back(parse_expr(tokens, state));
+            posArgs.push_back(parseExpr(tokens, state));
         }
 
         if (check(tokens, state, "COMMA")) {
             match(tokens, state, "COMMA");
-            if (check(tokens, state, closing_kind)) {
+            if (check(tokens, state, closingKind)) {
                 break;
             }
         } else {
@@ -200,66 +200,66 @@ inline void parse_call_arguments(
 // Expression Precedence Climbing
 // ==========================================
 
-inline ExprId parse_expr(const std::vector<Token>& tokens, ParserState& state);
+inline ExprId parseExpr(const std::vector<Token>& tokens, ParserState& state);
 
-inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline ExprId parsePrimary(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return INVALID_ID;
     }
     const Token& tok = current(tokens, state);
 
 
     if (check(tokens, state, "NUMBER")) {
-        const Token num_tok = match(tokens, state, "NUMBER");
-        return add_expr(state.arena, num_tok.line, num_tok.col, NumberLiteral{num_tok.value, num_tok.value.find('.') != std::string::npos});
+        const Token numTok = match(tokens, state, "NUMBER");
+        return addExpr(state.arena, numTok.line, numTok.col, NumberLiteral{numTok.value, numTok.value.find('.') != std::string::npos});
     }
     if (check(tokens, state, "STRING")) {
-        const Token str_tok = match(tokens, state, "STRING");
-        return add_expr(state.arena, str_tok.line, str_tok.col, StringLiteral{strip_quotes(str_tok.value)});
+        const Token strTok = match(tokens, state, "STRING");
+        return addExpr(state.arena, strTok.line, strTok.col, StringLiteral{stripQuotes(strTok.value)});
     }
     if (check(tokens, state, "KEYWORD", "true") || check(tokens, state, "KEYWORD", "false")) {
-        const Token b_tok = match(tokens, state, "KEYWORD");
-        return add_expr(state.arena, b_tok.line, b_tok.col, BoolLiteral{b_tok.value == "true"});
+        const Token bTok = match(tokens, state, "KEYWORD");
+        return addExpr(state.arena, bTok.line, bTok.col, BoolLiteral{bTok.value == "true"});
     }
     if (check(tokens, state, "KEYWORD", "null")) {
-        const Token n_tok = match(tokens, state, "KEYWORD", "null");
-        return add_expr(state.arena, n_tok.line, n_tok.col, NullLiteral{});
+        const Token nTok = match(tokens, state, "KEYWORD", "null");
+        return addExpr(state.arena, nTok.line, nTok.col, NullLiteral{});
     }
 
     if (check(tokens, state, "LPAREN")) {
         match(tokens, state, "LPAREN");
-        const ExprId inner = parse_expr(tokens, state);
+        const ExprId inner = parseExpr(tokens, state);
         match(tokens, state, "RPAREN");
         return inner;
     }
 
     if (check(tokens, state, "LBRACKET")) {
-        const Token b_tok = match(tokens, state, "LBRACKET");
+        const Token bTok = match(tokens, state, "LBRACKET");
         std::vector<ExprId> elements;
         if (!check(tokens, state, "RBRACKET")) {
-            elements.push_back(parse_expr(tokens, state));
+            elements.push_back(parseExpr(tokens, state));
             while (check(tokens, state, "COMMA")) {
                 match(tokens, state, "COMMA");
                 if (check(tokens, state, "RBRACKET")) {
                     break;
                 }
-                elements.push_back(parse_expr(tokens, state));
+                elements.push_back(parseExpr(tokens, state));
             }
         }
         match(tokens, state, "RBRACKET");
         ListLiteral node{};
         node.elements = std::move(elements);
-        return add_expr(state.arena, b_tok.line, b_tok.col, std::move(node));
+        return addExpr(state.arena, bTok.line, bTok.col, std::move(node));
     }
 
     if (check(tokens, state, "LBRACE")) {
-        const Token b_tok = match(tokens, state, "LBRACE");
+        const Token bTok = match(tokens, state, "LBRACE");
         std::vector<DictEntry> entries;
         if (!check(tokens, state, "RBRACE")) {
             DictEntry first{};
-            first.key = parse_expr(tokens, state);
+            first.key = parseExpr(tokens, state);
             match(tokens, state, "COLON");
-            first.value = parse_expr(tokens, state);
+            first.value = parseExpr(tokens, state);
             entries.push_back(std::move(first));
 
             while (check(tokens, state, "COMMA")) {
@@ -268,59 +268,59 @@ inline ExprId parse_primary(const std::vector<Token>& tokens, ParserState& state
                     break;
                 }
                 DictEntry entry{};
-                entry.key = parse_expr(tokens, state);
+                entry.key = parseExpr(tokens, state);
                 match(tokens, state, "COLON");
-                entry.value = parse_expr(tokens, state);
+                entry.value = parseExpr(tokens, state);
                 entries.push_back(std::move(entry));
             }
         }
         match(tokens, state, "RBRACE");
         DictLiteral node{};
         node.entries = std::move(entries);
-        return add_expr(state.arena, b_tok.line, b_tok.col, std::move(node));
+        return addExpr(state.arena, bTok.line, bTok.col, std::move(node));
     }
 
-    if (check_any_ident_or_type(tokens, state)) {
-        const Token id_tok = match_ident_or_type(tokens, state);
+    if (checkAnyIdentOrType(tokens, state)) {
+        const Token idTok = matchIdentOrType(tokens, state);
         Identifier node{};
-        node.name = id_tok.value;
-        return add_expr(state.arena, id_tok.line, id_tok.col, std::move(node));
+        node.name = idTok.value;
+        return addExpr(state.arena, idTok.line, idTok.col, std::move(node));
     }
 
-    set_parse_error(state, tok, "Expected expression");
+    setParseError(state, tok, "Expected expression");
     return INVALID_ID;
 }
 
-inline ExprId parse_postfix(const std::vector<Token>& tokens, ParserState& state) {
-    ExprId expr = parse_primary(tokens, state);
+inline ExprId parsePostfix(const std::vector<Token>& tokens, ParserState& state) {
+    ExprId expr = parsePrimary(tokens, state);
 
-    while (!state.has_error) {
+    while (!state.hasError) {
         if (check(tokens, state, "DOT")) {
             match(tokens, state, "DOT");
-            const Token field_tok = match_ident_or_type(tokens, state);
+            const Token fieldTok = matchIdentOrType(tokens, state);
             FieldAccess node{};
             node.target = expr;
-            node.field_name = field_tok.value;
-            expr = add_expr(state.arena, field_tok.line, field_tok.col, std::move(node));
+            node.fieldName = fieldTok.value;
+            expr = addExpr(state.arena, fieldTok.line, fieldTok.col, std::move(node));
         } else if (check(tokens, state, "LBRACKET")) {
-            const Token b_tok = match(tokens, state, "LBRACKET");
-            const ExprId idx_expr = parse_expr(tokens, state);
+            const Token bTok = match(tokens, state, "LBRACKET");
+            const ExprId idxExpr = parseExpr(tokens, state);
             match(tokens, state, "RBRACKET");
             IndexAccess node{};
             node.target = expr;
-            node.index = idx_expr;
-            expr = add_expr(state.arena, b_tok.line, b_tok.col, std::move(node));
+            node.index = idxExpr;
+            expr = addExpr(state.arena, bTok.line, bTok.col, std::move(node));
         } else if (check(tokens, state, "LPAREN")) {
-            const Token p_tok = match(tokens, state, "LPAREN");
-            std::vector<ExprId> pos_args;
-            std::vector<NamedArg> named_args;
-            parse_call_arguments(tokens, state, "RPAREN", pos_args, named_args);
+            const Token pTok = match(tokens, state, "LPAREN");
+            std::vector<ExprId> posArgs;
+            std::vector<NamedArg> namedArgs;
+            parseCallArguments(tokens, state, "RPAREN", posArgs, namedArgs);
             match(tokens, state, "RPAREN");
             FuncCall node{};
             node.callee = expr;
-            node.args = std::move(pos_args);
-            node.named_args = std::move(named_args);
-            expr = add_expr(state.arena, p_tok.line, p_tok.col, std::move(node));
+            node.args = std::move(posArgs);
+            node.namedArgs = std::move(namedArgs);
+            expr = addExpr(state.arena, pTok.line, pTok.col, std::move(node));
         } else {
             break;
         }
@@ -328,475 +328,475 @@ inline ExprId parse_postfix(const std::vector<Token>& tokens, ParserState& state
     return expr;
 }
 
-inline ExprId parse_unary(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline ExprId parseUnary(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return INVALID_ID;
     }
     if (check(tokens, state, "OP_ARITH", "-") || check(tokens, state, "OP_ARITH", "+")) {
-        const Token op_tok = match(tokens, state, "OP_ARITH");
-        const ExprId operand = parse_unary(tokens, state);
+        const Token opTok = match(tokens, state, "OP_ARITH");
+        const ExprId operand = parseUnary(tokens, state);
         UnaryOp node{};
-        node.op = op_tok.value;
+        node.op = opTok.value;
         node.operand = operand;
-        return add_expr(state.arena, op_tok.line, op_tok.col, std::move(node));
+        return addExpr(state.arena, opTok.line, opTok.col, std::move(node));
     }
-    return parse_postfix(tokens, state);
+    return parsePostfix(tokens, state);
 }
 
 template <typename ParseOperandFn>
-inline ExprId parse_binary_op_loop(
+inline ExprId parseBinaryOpLoop(
     const std::vector<Token>& tokens,
     ParserState& state,
-    std::string_view token_kind,
-    std::initializer_list<std::string_view> allowed_ops,
-    ParseOperandFn parse_operand
+    std::string_view tokenKind,
+    std::initializer_list<std::string_view> allowedOps,
+    ParseOperandFn parseOperand
 ) {
-    ExprId left = parse_operand(tokens, state);
-    while (!state.has_error) {
-        bool matched_op = false;
-        if (allowed_ops.size() == 0) {
-            matched_op = check(tokens, state, token_kind);
+    ExprId left = parseOperand(tokens, state);
+    while (!state.hasError) {
+        bool matchedOp = false;
+        if (allowedOps.size() == 0) {
+            matchedOp = check(tokens, state, tokenKind);
         } else {
-            for (const std::string_view op : allowed_ops) {
-                if (check(tokens, state, token_kind, op)) {
-                    matched_op = true;
+            for (const std::string_view op : allowedOps) {
+                if (check(tokens, state, tokenKind, op)) {
+                    matchedOp = true;
                     break;
                 }
             }
         }
-        if (!matched_op) {
+        if (!matchedOp) {
             break;
         }
-        const Token op_tok = match(tokens, state, token_kind);
-        const ExprId right = parse_operand(tokens, state);
-        left = add_expr(state.arena, op_tok.line, op_tok.col, BinaryOp{op_tok.value, left, right});
+        const Token opTok = match(tokens, state, tokenKind);
+        const ExprId right = parseOperand(tokens, state);
+        left = addExpr(state.arena, opTok.line, opTok.col, BinaryOp{opTok.value, left, right});
     }
     return left;
 }
 
-inline ExprId parse_multiplicative(const std::vector<Token>& tokens, ParserState& state) {
-    return parse_binary_op_loop(tokens, state, "OP_ARITH", {"*", "/"}, parse_unary);
+inline ExprId parseMultiplicative(const std::vector<Token>& tokens, ParserState& state) {
+    return parseBinaryOpLoop(tokens, state, "OP_ARITH", {"*", "/"}, parseUnary);
 }
 
-inline ExprId parse_additive(const std::vector<Token>& tokens, ParserState& state) {
-    return parse_binary_op_loop(tokens, state, "OP_ARITH", {"+", "-", "&"}, parse_multiplicative);
+inline ExprId parseAdditive(const std::vector<Token>& tokens, ParserState& state) {
+    return parseBinaryOpLoop(tokens, state, "OP_ARITH", {"+", "-", "&"}, parseMultiplicative);
 }
 
-inline ExprId parse_comparison(const std::vector<Token>& tokens, ParserState& state) {
-    return parse_binary_op_loop(tokens, state, "OP_CMP", {}, parse_additive);
+inline ExprId parseComparison(const std::vector<Token>& tokens, ParserState& state) {
+    return parseBinaryOpLoop(tokens, state, "OP_CMP", {}, parseAdditive);
 }
 
-inline ExprId parse_not(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline ExprId parseNot(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return INVALID_ID;
     }
     if (check(tokens, state, "KEYWORD", "not")) {
-        const Token op_tok = match(tokens, state, "KEYWORD", "not");
-        const ExprId operand = parse_not(tokens, state);
-        return add_expr(state.arena, op_tok.line, op_tok.col, UnaryOp{"not", operand});
+        const Token opTok = match(tokens, state, "KEYWORD", "not");
+        const ExprId operand = parseNot(tokens, state);
+        return addExpr(state.arena, opTok.line, opTok.col, UnaryOp{"not", operand});
     }
-    return parse_comparison(tokens, state);
+    return parseComparison(tokens, state);
 }
 
-inline ExprId parse_and(const std::vector<Token>& tokens, ParserState& state) {
-    return parse_binary_op_loop(tokens, state, "KEYWORD", {"and"}, parse_not);
+inline ExprId parseAnd(const std::vector<Token>& tokens, ParserState& state) {
+    return parseBinaryOpLoop(tokens, state, "KEYWORD", {"and"}, parseNot);
 }
 
-inline ExprId parse_or(const std::vector<Token>& tokens, ParserState& state) {
-    return parse_binary_op_loop(tokens, state, "KEYWORD", {"or"}, parse_and);
+inline ExprId parseOr(const std::vector<Token>& tokens, ParserState& state) {
+    return parseBinaryOpLoop(tokens, state, "KEYWORD", {"or"}, parseAnd);
 }
 
-inline ExprId parse_expr(const std::vector<Token>& tokens, ParserState& state) {
-    return parse_or(tokens, state);
+inline ExprId parseExpr(const std::vector<Token>& tokens, ParserState& state) {
+    return parseOr(tokens, state);
 }
 
 // ==========================================
 // Types
 // ==========================================
 
-inline TypeId parse_type(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline TypeId parseType(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return INVALID_ID;
     }
     const Token start = current(tokens, state);
-    const Token tok = match_ident_or_type(tokens, state);
-    std::string type_name = tok.value;
+    const Token tok = matchIdentOrType(tokens, state);
+    std::string typeName = tok.value;
 
     while (check(tokens, state, "DOT")) {
         match(tokens, state, "DOT");
         const Token part = match(tokens, state, "IDENT");
-        type_name += "." + part.value;
+        typeName += "." + part.value;
     }
 
-    std::vector<TypeId> type_args;
-    if (type_name == "list" && check(tokens, state, "LBRACKET")) {
+    std::vector<TypeId> typeArgs;
+    if (typeName == "list" && check(tokens, state, "LBRACKET")) {
         match(tokens, state, "LBRACKET");
-        type_args.push_back(parse_type(tokens, state));
+        typeArgs.push_back(parseType(tokens, state));
         match(tokens, state, "RBRACKET");
-    } else if (type_name == "dict" && check(tokens, state, "LBRACKET")) {
+    } else if (typeName == "dict" && check(tokens, state, "LBRACKET")) {
         match(tokens, state, "LBRACKET");
-        type_args.push_back(parse_type(tokens, state));
+        typeArgs.push_back(parseType(tokens, state));
         match(tokens, state, "COMMA");
-        type_args.push_back(parse_type(tokens, state));
+        typeArgs.push_back(parseType(tokens, state));
         match(tokens, state, "RBRACKET");
     }
 
     TypeNode node{};
     node.line = start.line;
     node.col = start.col;
-    node.name = std::move(type_name);
-    node.type_args = std::move(type_args);
-    return add_type(state.arena, std::move(node));
+    node.name = std::move(typeName);
+    node.typeArgs = std::move(typeArgs);
+    return addType(state.arena, std::move(node));
 }
 
 // ==========================================
 // Statements
 // ==========================================
 
-inline StmtId parse_assignment_or_expr_stmt(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline StmtId parseAssignmentOrExprStmt(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return INVALID_ID;
     }
     const Token start = current(tokens, state);
 
     if (check(tokens, state, "KEYWORD", "dim") || check(tokens, state, "KEYWORD", "const")) {
-        const Token decl_kw = match(tokens, state, "KEYWORD");
-        const bool is_dim = (decl_kw.value == "dim");
-        const bool is_const = (decl_kw.value == "const");
+        const Token declKw = match(tokens, state, "KEYWORD");
+        const bool isDim = (declKw.value == "dim");
+        const bool isConst = (declKw.value == "const");
 
-        const Token first_ident = match(tokens, state, "IDENT");
-        Identifier first_id_node{};
-        first_id_node.name = first_ident.value;
-        const ExprId target_expr = add_expr(state.arena, first_ident.line, first_ident.col, std::move(first_id_node));
+        const Token firstIdent = match(tokens, state, "IDENT");
+        Identifier firstIdNode{};
+        firstIdNode.name = firstIdent.value;
+        const ExprId targetExpr = addExpr(state.arena, firstIdent.line, firstIdent.col, std::move(firstIdNode));
 
-        bool has_declared_type = false;
-        TypeId decl_type = INVALID_ID;
+        bool hasDeclaredType = false;
+        TypeId declType = INVALID_ID;
         if (check(tokens, state, "KEYWORD", "as")) {
             match(tokens, state, "KEYWORD", "as");
-            has_declared_type = true;
-            decl_type = parse_type(tokens, state);
+            hasDeclaredType = true;
+            declType = parseType(tokens, state);
         }
 
         match(tokens, state, "ASSIGN");
-        const ExprId val_expr = parse_expr(tokens, state);
-        expect_newline_or_eof(tokens, state);
+        const ExprId valExpr = parseExpr(tokens, state);
+        expectNewlineOrEof(tokens, state);
 
         VarAssignment stmt{};
-        stmt.target = target_expr;
-        stmt.is_dim = is_dim;
-        stmt.is_const = is_const;
-        stmt.has_declared_type = has_declared_type;
-        stmt.declared_type = decl_type;
-        stmt.value = val_expr;
-        return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+        stmt.target = targetExpr;
+        stmt.isDim = isDim;
+        stmt.isConst = isConst;
+        stmt.hasDeclaredType = hasDeclaredType;
+        stmt.declaredType = declType;
+        stmt.value = valExpr;
+        return addStmt(state.arena, start.line, start.col, std::move(stmt));
     }
 
-    const ExprId first_expr = parse_expr(tokens, state);
+    const ExprId firstExpr = parseExpr(tokens, state);
 
     if (check(tokens, state, "ASSIGN")) {
         match(tokens, state, "ASSIGN");
-        const ExprId val_expr = parse_expr(tokens, state);
-        expect_newline_or_eof(tokens, state);
+        const ExprId valExpr = parseExpr(tokens, state);
+        expectNewlineOrEof(tokens, state);
 
         VarAssignment stmt{};
-        stmt.target = first_expr;
-        stmt.has_declared_type = false;
-        stmt.declared_type = INVALID_ID;
-        stmt.value = val_expr;
-        return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+        stmt.target = firstExpr;
+        stmt.hasDeclaredType = false;
+        stmt.declaredType = INVALID_ID;
+        stmt.value = valExpr;
+        return addStmt(state.arena, start.line, start.col, std::move(stmt));
     }
 
-    expect_newline_or_eof(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
     ExprStmt stmt{};
-    stmt.expr = first_expr;
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    stmt.expr = firstExpr;
+    return addStmt(state.arena, start.line, start.col, std::move(stmt));
 }
 
-inline std::vector<StmtId> parse_stmt_block_until(
+inline std::vector<StmtId> parseStmtBlockUntil(
     const std::vector<Token>& tokens,
     ParserState& state,
-    std::initializer_list<std::string_view> end_keywords,
-    std::string_view unclosed_msg
+    std::initializer_list<std::string_view> endKeywords,
+    std::string_view unclosedMsg
 ) {
     std::vector<StmtId> body;
-    while (!state.has_error) {
-        bool reached_end = false;
-        for (const std::string_view kw : end_keywords) {
+    while (!state.hasError) {
+        bool reachedEnd = false;
+        for (const std::string_view kw : endKeywords) {
             if (check(tokens, state, "KEYWORD", kw)) {
-                reached_end = true;
+                reachedEnd = true;
                 break;
             }
         }
-        if (reached_end) {
+        if (reachedEnd) {
             break;
         }
         if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), unclosed_msg);
+            setParseError(state, current(tokens, state), unclosedMsg);
             break;
         }
-        body.push_back(parse_statement(tokens, state));
-        skip_newlines(tokens, state);
+        body.push_back(parseStatement(tokens, state));
+        skipNewlines(tokens, state);
     }
     return body;
 }
 
-inline StmtId parse_if_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseIfStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "if");
-    const ExprId condition = parse_expr(tokens, state);
-    expect_newline_or_eof(tokens, state);
+    const ExprId condition = parseExpr(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
-    std::vector<StmtId> then_body = parse_stmt_block_until(
+    std::vector<StmtId> thenBody = parseStmtBlockUntil(
         tokens, state, {"else if", "else", "end if"}, "Unclosed 'if' statement, expected 'end if'"
     );
 
-    std::vector<ElseIfBranch> elif_branches;
-    while (!state.has_error && check(tokens, state, "KEYWORD", "else if")) {
-        const Token elif_tok = match(tokens, state, "KEYWORD", "else if");
-        const ExprId elif_cond = parse_expr(tokens, state);
-        expect_newline_or_eof(tokens, state);
-        std::vector<StmtId> elif_body = parse_stmt_block_until(
+    std::vector<ElseIfBranch> elifBranches;
+    while (!state.hasError && check(tokens, state, "KEYWORD", "else if")) {
+        const Token elifTok = match(tokens, state, "KEYWORD", "else if");
+        const ExprId elifCond = parseExpr(tokens, state);
+        expectNewlineOrEof(tokens, state);
+        std::vector<StmtId> elifBody = parseStmtBlockUntil(
             tokens, state, {"else if", "else", "end if"}, "Unclosed 'else if' block, expected 'end if'"
         );
-        elif_branches.push_back(ElseIfBranch{elif_tok.line, elif_tok.col, elif_cond, std::move(elif_body)});
+        elifBranches.push_back(ElseIfBranch{elifTok.line, elifTok.col, elifCond, std::move(elifBody)});
     }
 
-    bool has_else = false;
-    std::vector<StmtId> else_body;
+    bool hasElse = false;
+    std::vector<StmtId> elseBody;
     if (check(tokens, state, "KEYWORD", "else")) {
         match(tokens, state, "KEYWORD", "else");
-        expect_newline_or_eof(tokens, state);
-        has_else = true;
-        else_body = parse_stmt_block_until(tokens, state, {"end if"}, "Unclosed 'else' block, expected 'end if'");
+        expectNewlineOrEof(tokens, state);
+        hasElse = true;
+        elseBody = parseStmtBlockUntil(tokens, state, {"end if"}, "Unclosed 'else' block, expected 'end if'");
     }
 
     match(tokens, state, "KEYWORD", "end if");
-    expect_newline_or_eof(tokens, state);
-    return add_stmt(state.arena, start.line, start.col, IfStmt{condition, std::move(then_body), std::move(elif_branches), has_else, std::move(else_body)});
+    expectNewlineOrEof(tokens, state);
+    return addStmt(state.arena, start.line, start.col, IfStmt{condition, std::move(thenBody), std::move(elifBranches), hasElse, std::move(elseBody)});
 }
 
-inline StmtId parse_for_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseForStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "for");
-    std::vector<std::string> loop_vars;
-    loop_vars.push_back(match(tokens, state, "IDENT").value);
+    std::vector<std::string> loopVars;
+    loopVars.push_back(match(tokens, state, "IDENT").value);
     while (check(tokens, state, "COMMA")) {
         match(tokens, state, "COMMA");
-        loop_vars.push_back(match(tokens, state, "IDENT").value);
+        loopVars.push_back(match(tokens, state, "IDENT").value);
     }
 
-    RangeSpec range_spec{};
-    bool has_iterable = false;
+    RangeSpec rangeSpec{};
+    bool hasIterable = false;
     ExprId iterable = INVALID_ID;
 
     if (check(tokens, state, "ASSIGN")) {
-        if (loop_vars.size() != 1) {
-            set_parse_error(state, start, "Range 'for' loop only supports a single loop variable");
+        if (loopVars.size() != 1) {
+            setParseError(state, start, "Range 'for' loop only supports a single loop variable");
             return INVALID_ID;
         }
-        const Token eq_tok = match(tokens, state, "ASSIGN");
-        const ExprId start_expr = parse_expr(tokens, state);
+        const Token eqTok = match(tokens, state, "ASSIGN");
+        const ExprId startExpr = parseExpr(tokens, state);
         match(tokens, state, "KEYWORD", "to");
-        const ExprId end_expr = parse_expr(tokens, state);
-        bool has_step = false;
-        ExprId step_expr = INVALID_ID;
+        const ExprId endExpr = parseExpr(tokens, state);
+        bool hasStep = false;
+        ExprId stepExpr = INVALID_ID;
         if (check(tokens, state, "KEYWORD", "step")) {
             match(tokens, state, "KEYWORD", "step");
-            has_step = true;
-            step_expr = parse_expr(tokens, state);
+            hasStep = true;
+            stepExpr = parseExpr(tokens, state);
         }
-        range_spec = RangeSpec{true, eq_tok.line, eq_tok.col, start_expr, end_expr, has_step, step_expr, true};
+        rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr, true};
     } else {
         match(tokens, state, "KEYWORD", "in");
-        has_iterable = true;
-        iterable = parse_expr(tokens, state);
+        hasIterable = true;
+        iterable = parseExpr(tokens, state);
     }
 
-    expect_newline_or_eof(tokens, state);
-    std::vector<StmtId> body = parse_stmt_block_until(tokens, state, {"end for"}, "Unclosed 'for' loop, expected 'end for'");
+    expectNewlineOrEof(tokens, state);
+    std::vector<StmtId> body = parseStmtBlockUntil(tokens, state, {"end for"}, "Unclosed 'for' loop, expected 'end for'");
     match(tokens, state, "KEYWORD", "end for");
-    expect_newline_or_eof(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
-    return add_stmt(state.arena, start.line, start.col, ForStmt{std::move(loop_vars), range_spec, has_iterable, iterable, std::move(body)});
+    return addStmt(state.arena, start.line, start.col, ForStmt{std::move(loopVars), rangeSpec, hasIterable, iterable, std::move(body)});
 }
 
-inline StmtId parse_select_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseSelectStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "select case");
-    const ExprId target = parse_expr(tokens, state);
-    expect_newline_or_eof(tokens, state);
+    const ExprId target = parseExpr(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
     std::vector<SelectCase> cases;
-    while (!state.has_error && check(tokens, state, "KEYWORD", "case")) {
-        const Token case_tok = match(tokens, state, "KEYWORD", "case");
-        const ExprId match_expr = parse_expr(tokens, state);
-        expect_newline_or_eof(tokens, state);
-        std::vector<StmtId> case_body = parse_stmt_block_until(
+    while (!state.hasError && check(tokens, state, "KEYWORD", "case")) {
+        const Token caseTok = match(tokens, state, "KEYWORD", "case");
+        const ExprId matchExpr = parseExpr(tokens, state);
+        expectNewlineOrEof(tokens, state);
+        std::vector<StmtId> caseBody = parseStmtBlockUntil(
             tokens, state, {"case", "case else", "end select"}, "Unclosed 'case' in 'select case', expected 'end select'"
         );
-        cases.push_back(SelectCase{case_tok.line, case_tok.col, match_expr, std::move(case_body)});
+        cases.push_back(SelectCase{caseTok.line, caseTok.col, matchExpr, std::move(caseBody)});
     }
 
-    bool has_case_else = false;
-    std::vector<StmtId> case_else;
+    bool hasCaseElse = false;
+    std::vector<StmtId> caseElse;
     if (check(tokens, state, "KEYWORD", "case else")) {
         match(tokens, state, "KEYWORD", "case else");
-        expect_newline_or_eof(tokens, state);
-        has_case_else = true;
-        case_else = parse_stmt_block_until(tokens, state, {"end select"}, "Unclosed 'case else', expected 'end select'");
+        expectNewlineOrEof(tokens, state);
+        hasCaseElse = true;
+        caseElse = parseStmtBlockUntil(tokens, state, {"end select"}, "Unclosed 'case else', expected 'end select'");
     }
 
     match(tokens, state, "KEYWORD", "end select");
-    expect_newline_or_eof(tokens, state);
-    return add_stmt(state.arena, start.line, start.col, SelectStmt{target, std::move(cases), has_case_else, std::move(case_else)});
+    expectNewlineOrEof(tokens, state);
+    return addStmt(state.arena, start.line, start.col, SelectStmt{target, std::move(cases), hasCaseElse, std::move(caseElse)});
 }
 
-inline StmtId parse_on_error_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseOnErrorStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "on error");
-    const Token err_ident = match(tokens, state, "IDENT");
-    expect_newline_or_eof(tokens, state);
-    std::vector<StmtId> body = parse_stmt_block_until(tokens, state, {"end error"}, "Unclosed 'on error' block, expected 'end error'");
+    const Token errIdent = match(tokens, state, "IDENT");
+    expectNewlineOrEof(tokens, state);
+    std::vector<StmtId> body = parseStmtBlockUntil(tokens, state, {"end error"}, "Unclosed 'on error' block, expected 'end error'");
     match(tokens, state, "KEYWORD", "end error");
-    expect_newline_or_eof(tokens, state);
-    return add_stmt(state.arena, start.line, start.col, ErrorBlock{err_ident.value, std::move(body)});
+    expectNewlineOrEof(tokens, state);
+    return addStmt(state.arena, start.line, start.col, ErrorBlock{errIdent.value, std::move(body)});
 }
 
-inline StmtId parse_defer_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseDeferStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "defer");
-    expect_newline_or_eof(tokens, state);
-    std::vector<StmtId> body = parse_stmt_block_until(tokens, state, {"end defer"}, "Unclosed 'defer' block, expected 'end defer'");
+    expectNewlineOrEof(tokens, state);
+    std::vector<StmtId> body = parseStmtBlockUntil(tokens, state, {"end defer"}, "Unclosed 'defer' block, expected 'end defer'");
     match(tokens, state, "KEYWORD", "end defer");
-    expect_newline_or_eof(tokens, state);
-    return add_stmt(state.arena, start.line, start.col, DeferStmt{std::move(body)});
+    expectNewlineOrEof(tokens, state);
+    return addStmt(state.arena, start.line, start.col, DeferStmt{std::move(body)});
 }
 
-inline StmtId parse_return_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseReturnStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "return");
     ReturnStmt stmt{};
     if (!check(tokens, state, "NEWLINE") && !check(tokens, state, "EOF")) {
         stmt.has_value = true;
-        stmt.value = parse_expr(tokens, state);
+        stmt.value = parseExpr(tokens, state);
     }
-    expect_newline_or_eof(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return addStmt(state.arena, start.line, start.col, std::move(stmt));
 }
 
-inline StmtId parse_break_stmt(const std::vector<Token>& tokens, ParserState& state) {
+inline StmtId parseBreakStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "break");
-    expect_newline_or_eof(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
     BreakStmt stmt{};
-    return add_stmt(state.arena, start.line, start.col, std::move(stmt));
+    return addStmt(state.arena, start.line, start.col, std::move(stmt));
 }
 
-inline StmtId parse_statement(const std::vector<Token>& tokens, ParserState& state) {
-    skip_newlines(tokens, state);
-    if (state.has_error) {
+inline StmtId parseStatement(const std::vector<Token>& tokens, ParserState& state) {
+    skipNewlines(tokens, state);
+    if (state.hasError) {
         return INVALID_ID;
     }
 
     if (check(tokens, state, "KEYWORD", "if")) {
-        return parse_if_stmt(tokens, state);
+        return parseIfStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "for")) {
-        return parse_for_stmt(tokens, state);
+        return parseForStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "select case")) {
-        return parse_select_stmt(tokens, state);
+        return parseSelectStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "on error")) {
-        return parse_on_error_stmt(tokens, state);
+        return parseOnErrorStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "defer")) {
-        return parse_defer_stmt(tokens, state);
+        return parseDeferStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "return")) {
-        return parse_return_stmt(tokens, state);
+        return parseReturnStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "break")) {
-        return parse_break_stmt(tokens, state);
+        return parseBreakStmt(tokens, state);
     }
 
-    return parse_assignment_or_expr_stmt(tokens, state);
+    return parseAssignmentOrExprStmt(tokens, state);
 }
 
 // ==========================================
 // Top-Level Declarations
 // ==========================================
 
-inline DeclId parse_import_decl(const std::vector<Token>& tokens, ParserState& state) {
+inline DeclId parseImportDecl(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "import");
-    std::string module_path;
+    std::string modulePath;
     if (check(tokens, state, "STRING")) {
-        const Token str_tok = match(tokens, state, "STRING");
-        module_path = strip_quotes(str_tok.value);
+        const Token strTok = match(tokens, state, "STRING");
+        modulePath = stripQuotes(strTok.value);
     } else {
-        module_path = match(tokens, state, "IDENT").value;
+        modulePath = match(tokens, state, "IDENT").value;
         while (check(tokens, state, "DOT")) {
             match(tokens, state, "DOT");
-            module_path += "." + match(tokens, state, "IDENT").value;
+            modulePath += "." + match(tokens, state, "IDENT").value;
         }
     }
 
-    bool has_alias = false;
+    bool hasAlias = false;
     std::string alias;
     if (check(tokens, state, "KEYWORD", "as")) {
         match(tokens, state, "KEYWORD", "as");
-        has_alias = true;
+        hasAlias = true;
         alias = match(tokens, state, "IDENT").value;
     }
-    expect_newline_or_eof(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
     ImportDecl decl{};
     decl.kind = "module";
-    decl.target = std::move(module_path);
-    decl.has_alias = has_alias;
+    decl.target = std::move(modulePath);
+    decl.hasAlias = hasAlias;
     decl.alias = std::move(alias);
-    return add_decl(state.arena, start.line, start.col, std::move(decl));
+    return addDecl(state.arena, start.line, start.col, std::move(decl));
 }
 
-inline DeclId parse_import_header_decl(const std::vector<Token>& tokens, ParserState& state) {
+inline DeclId parseImportHeaderDecl(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "import header");
-    const Token str_tok = match(tokens, state, "STRING");
-    expect_newline_or_eof(tokens, state);
+    const Token strTok = match(tokens, state, "STRING");
+    expectNewlineOrEof(tokens, state);
 
     ImportDecl decl{};
     decl.kind = "header";
-    decl.target = strip_quotes(str_tok.value);
-    return add_decl(state.arena, start.line, start.col, std::move(decl));
+    decl.target = stripQuotes(strTok.value);
+    return addDecl(state.arena, start.line, start.col, std::move(decl));
 }
 
-inline DeclId parse_import_link_decl(const std::vector<Token>& tokens, ParserState& state) {
+inline DeclId parseImportLinkDecl(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "import link");
-    const Token str_tok = match(tokens, state, "STRING");
-    expect_newline_or_eof(tokens, state);
+    const Token strTok = match(tokens, state, "STRING");
+    expectNewlineOrEof(tokens, state);
 
     ImportDecl decl{};
     decl.kind = "link";
-    decl.target = strip_quotes(str_tok.value);
-    return add_decl(state.arena, start.line, start.col, std::move(decl));
+    decl.target = stripQuotes(strTok.value);
+    return addDecl(state.arena, start.line, start.col, std::move(decl));
 }
 
-inline DeclId parse_alias_decl(const std::vector<Token>& tokens, ParserState& state, bool is_pub, const Token& start_tok) {
+inline DeclId parseAliasDecl(const std::vector<Token>& tokens, ParserState& state, bool isPub, const Token& startTok) {
     match(tokens, state, "KEYWORD", "alias");
-    const Token name_tok = match(tokens, state, "IDENT");
+    const Token nameTok = match(tokens, state, "IDENT");
     match(tokens, state, "ASSIGN");
-    const TypeId target_type = parse_type(tokens, state);
-    expect_newline_or_eof(tokens, state);
+    const TypeId targetType = parseType(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
     AliasDecl decl{};
-    decl.name = name_tok.value;
-    decl.target_type = target_type;
-    decl.is_pub = is_pub;
-    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
+    decl.name = nameTok.value;
+    decl.targetType = targetType;
+    decl.isPub = isPub;
+    return addDecl(state.arena, startTok.line, startTok.col, std::move(decl), "", state.fileName, nameTok.line, nameTok.line, nameTok.col);
 }
 
-inline DeclId parse_type_decl(const std::vector<Token>& tokens, ParserState& state, bool is_pub, bool is_extern, const Token& start_tok) {
+inline DeclId parseTypeDecl(const std::vector<Token>& tokens, ParserState& state, bool isPub, bool isExtern, const Token& startTok) {
     match(tokens, state, "KEYWORD", "type");
-    const Token name_tok = match(tokens, state, "IDENT");
-    expect_newline_or_eof(tokens, state);
+    const Token nameTok = match(tokens, state, "IDENT");
+    expectNewlineOrEof(tokens, state);
 
     std::vector<FieldDecl> fields;
-    if (is_extern && !check(tokens, state, "KEYWORD", "end type")) {
+    if (isExtern && !check(tokens, state, "KEYWORD", "end type")) {
         if (check(tokens, state, "EOF") ||
             check(tokens, state, "KEYWORD", "pub") ||
             check(tokens, state, "KEYWORD", "extern") ||
@@ -807,169 +807,169 @@ inline DeclId parse_type_decl(const std::vector<Token>& tokens, ParserState& sta
             check(tokens, state, "KEYWORD", "import header") ||
             check(tokens, state, "KEYWORD", "import link")) {
             TypeDecl decl{};
-            decl.name = name_tok.value;
+            decl.name = nameTok.value;
             decl.fields = std::move(fields);
-            decl.is_pub = is_pub;
-            decl.is_extern = is_extern;
-            return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
+            decl.isPub = isPub;
+            decl.isExtern = isExtern;
+            return addDecl(state.arena, startTok.line, startTok.col, std::move(decl), "", state.fileName, nameTok.line, nameTok.line, nameTok.col);
         }
     }
 
-    while (!state.has_error && !check(tokens, state, "KEYWORD", "end type")) {
+    while (!state.hasError && !check(tokens, state, "KEYWORD", "end type")) {
         if (check(tokens, state, "EOF")) {
-            set_parse_error(state, current(tokens, state), "Unclosed 'type " + name_tok.value + "', expected 'end type'");
+            setParseError(state, current(tokens, state), "Unclosed 'type " + nameTok.value + "', expected 'end type'");
             break;
         }
-        const Token field_tok = match(tokens, state, "IDENT");
+        const Token fieldTok = match(tokens, state, "IDENT");
         match(tokens, state, "KEYWORD", "as");
-        const TypeId field_type = parse_type(tokens, state);
+        const TypeId fieldType = parseType(tokens, state);
         FieldDecl fd{};
-        fd.line = field_tok.line;
-        fd.col = field_tok.col;
-        fd.name = field_tok.value;
-        fd.type_id = field_type;
+        fd.line = fieldTok.line;
+        fd.col = fieldTok.col;
+        fd.name = fieldTok.value;
+        fd.typeId = fieldType;
         fields.push_back(std::move(fd));
-        expect_newline_or_eof(tokens, state);
+        expectNewlineOrEof(tokens, state);
     }
 
-    const Token end_tok = match(tokens, state, "KEYWORD", "end type");
-    expect_newline_or_eof(tokens, state);
+    const Token endTok = match(tokens, state, "KEYWORD", "end type");
+    expectNewlineOrEof(tokens, state);
 
     TypeDecl decl{};
-    decl.name = name_tok.value;
+    decl.name = nameTok.value;
     decl.fields = std::move(fields);
-    decl.is_pub = is_pub;
-    decl.is_extern = is_extern;
-    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, end_tok.line, name_tok.line, name_tok.col);
+    decl.isPub = isPub;
+    decl.isExtern = isExtern;
+    return addDecl(state.arena, startTok.line, startTok.col, std::move(decl), "", state.fileName, endTok.line, nameTok.line, nameTok.col);
 }
 
-inline Param parse_param(const std::vector<Token>& tokens, ParserState& state) {
-    bool is_byref = false;
+inline Param parseParam(const std::vector<Token>& tokens, ParserState& state) {
+    bool isByref = false;
     if (check(tokens, state, "KEYWORD", "byref")) {
         match(tokens, state, "KEYWORD", "byref");
-        is_byref = true;
+        isByref = true;
     }
-    const Token name_tok = match(tokens, state, "IDENT");
+    const Token nameTok = match(tokens, state, "IDENT");
     match(tokens, state, "KEYWORD", "as");
-    const TypeId t_node = parse_type(tokens, state);
+    const TypeId tNode = parseType(tokens, state);
     Param p{};
-    p.line = name_tok.line;
-    p.col = name_tok.col;
-    p.name = name_tok.value;
-    p.type_id = t_node;
-    p.is_byref = is_byref;
+    p.line = nameTok.line;
+    p.col = nameTok.col;
+    p.name = nameTok.value;
+    p.typeId = tNode;
+    p.isByref = isByref;
     return p;
 }
 
-inline DeclId parse_fn_decl(const std::vector<Token>& tokens, ParserState& state, bool is_pub, bool is_extern, const Token& start_tok) {
+inline DeclId parseFnDecl(const std::vector<Token>& tokens, ParserState& state, bool isPub, bool isExtern, const Token& startTok) {
     match(tokens, state, "KEYWORD", "fn");
-    const Token name_tok = match(tokens, state, "IDENT");
+    const Token nameTok = match(tokens, state, "IDENT");
     match(tokens, state, "LPAREN");
 
     std::vector<Param> params;
     if (!check(tokens, state, "RPAREN")) {
-        params.push_back(parse_param(tokens, state));
+        params.push_back(parseParam(tokens, state));
         while (check(tokens, state, "COMMA")) {
             match(tokens, state, "COMMA");
             if (check(tokens, state, "RPAREN")) {
                 break;
             }
-            params.push_back(parse_param(tokens, state));
+            params.push_back(parseParam(tokens, state));
         }
     }
     match(tokens, state, "RPAREN");
 
-    TypeId return_type = find_or_add_type(state.arena, "void", {}, start_tok.line, start_tok.col);
-    bool is_fallible = false;
+    TypeId returnType = findOrAddType(state.arena, "void", {}, startTok.line, startTok.col);
+    bool isFallible = false;
     if (check(tokens, state, "KEYWORD", "as")) {
         match(tokens, state, "KEYWORD", "as");
         if (check(tokens, state, "TYPE_KW", "err")) {
             match(tokens, state, "TYPE_KW", "err");
-            is_fallible = true;
+            isFallible = true;
         } else {
-            return_type = parse_type(tokens, state);
+            returnType = parseType(tokens, state);
         }
     }
     if (check(tokens, state, "KEYWORD", "can error")) {
         match(tokens, state, "KEYWORD", "can error");
-        is_fallible = true;
+        isFallible = true;
     }
-    expect_newline_or_eof(tokens, state);
+    expectNewlineOrEof(tokens, state);
 
     std::vector<StmtId> body;
-    if (is_extern && !check(tokens, state, "KEYWORD", "end fn")) {
+    if (isExtern && !check(tokens, state, "KEYWORD", "end fn")) {
         FnDecl decl{};
-        decl.name = name_tok.value;
+        decl.name = nameTok.value;
         decl.params = std::move(params);
-        decl.return_type = return_type;
-        decl.is_fallible = is_fallible;
+        decl.returnType = returnType;
+        decl.isFallible = isFallible;
         decl.body = std::move(body);
-        decl.is_pub = is_pub;
-        decl.is_extern = true;
-        return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, name_tok.line, name_tok.line, name_tok.col);
+        decl.isPub = isPub;
+        decl.isExtern = true;
+        return addDecl(state.arena, startTok.line, startTok.col, std::move(decl), "", state.fileName, nameTok.line, nameTok.line, nameTok.col);
     }
 
-    body = parse_stmt_block_until(tokens, state, {"end fn"}, "Unclosed 'fn " + name_tok.value + "', expected 'end fn'");
+    body = parseStmtBlockUntil(tokens, state, {"end fn"}, "Unclosed 'fn " + nameTok.value + "', expected 'end fn'");
 
-    const Token end_tok = match(tokens, state, "KEYWORD", "end fn");
-    expect_newline_or_eof(tokens, state);
+    const Token endTok = match(tokens, state, "KEYWORD", "end fn");
+    expectNewlineOrEof(tokens, state);
 
     FnDecl decl{};
-    decl.name = name_tok.value;
+    decl.name = nameTok.value;
     decl.params = std::move(params);
-    decl.return_type = return_type;
-    decl.is_fallible = is_fallible;
+    decl.returnType = returnType;
+    decl.isFallible = isFallible;
     decl.body = std::move(body);
-    decl.is_pub = is_pub;
-    decl.is_extern = is_extern;
-    return add_decl(state.arena, start_tok.line, start_tok.col, std::move(decl), "", state.file_name, end_tok.line, name_tok.line, name_tok.col);
+    decl.isPub = isPub;
+    decl.isExtern = isExtern;
+    return addDecl(state.arena, startTok.line, startTok.col, std::move(decl), "", state.fileName, endTok.line, nameTok.line, nameTok.col);
 }
 
-inline DeclId parse_top_level_decl(const std::vector<Token>& tokens, ParserState& state) {
-    if (state.has_error) {
+inline DeclId parseTopLevelDecl(const std::vector<Token>& tokens, ParserState& state) {
+    if (state.hasError) {
         return INVALID_ID;
     }
     const Token tok = current(tokens, state);
 
     if (check(tokens, state, "KEYWORD", "import")) {
-        return parse_import_decl(tokens, state);
+        return parseImportDecl(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "import header")) {
-        return parse_import_header_decl(tokens, state);
+        return parseImportHeaderDecl(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "import link")) {
-        return parse_import_link_decl(tokens, state);
+        return parseImportLinkDecl(tokens, state);
     }
 
-    bool is_pub = false;
-    bool is_extern = false;
+    bool isPub = false;
+    bool isExtern = false;
     while (check(tokens, state, "KEYWORD", "pub") || check(tokens, state, "KEYWORD", "extern")) {
         if (check(tokens, state, "KEYWORD", "pub")) {
             match(tokens, state, "KEYWORD", "pub");
-            is_pub = true;
+            isPub = true;
         } else if (check(tokens, state, "KEYWORD", "extern")) {
             match(tokens, state, "KEYWORD", "extern");
-            is_extern = true;
+            isExtern = true;
         }
     }
 
     if (check(tokens, state, "KEYWORD", "alias")) {
-        if (is_extern) {
-            set_parse_error(state, current(tokens, state), "'extern' cannot be applied to 'alias'");
+        if (isExtern) {
+            setParseError(state, current(tokens, state), "'extern' cannot be applied to 'alias'");
             return INVALID_ID;
         }
-        return parse_alias_decl(tokens, state, is_pub, tok);
+        return parseAliasDecl(tokens, state, isPub, tok);
     }
 
     if (check(tokens, state, "KEYWORD", "type")) {
-        return parse_type_decl(tokens, state, is_pub, is_extern, tok);
+        return parseTypeDecl(tokens, state, isPub, isExtern, tok);
     }
 
     if (check(tokens, state, "KEYWORD", "fn")) {
-        return parse_fn_decl(tokens, state, is_pub, is_extern, tok);
+        return parseFnDecl(tokens, state, isPub, isExtern, tok);
     }
 
-    set_parse_error(state, current(tokens, state), "Expected top-level declaration ('import', 'alias', 'type', or 'fn')");
+    setParseError(state, current(tokens, state), "Expected top-level declaration ('import', 'alias', 'type', or 'fn')");
     return INVALID_ID;
 }
 
@@ -977,30 +977,30 @@ inline DeclId parse_top_level_decl(const std::vector<Token>& tokens, ParserState
 // Main Parse Entry Point
 // ==========================================
 
-inline ParseResult parse_tokens_with_arena(
+inline ParseResult parseTokensWithArena(
     const std::vector<Token>& tokens,
     AstArena arena,
-    std::string_view file_name = "main.cb"
+    std::string_view fileName = "main.cb"
 ) {
     ParserState state{};
-    state.file_name = std::string(file_name);
+    state.fileName = std::string(fileName);
     state.arena = std::move(arena);
 
     Program prog{};
-    prog.file_name = state.file_name;
+    prog.fileName = state.fileName;
 
-    skip_newlines(tokens, state);
-    while (!state.has_error && !check(tokens, state, "EOF")) {
-        const DeclId decl_id = parse_top_level_decl(tokens, state);
-        if (state.has_error) {
+    skipNewlines(tokens, state);
+    while (!state.hasError && !check(tokens, state, "EOF")) {
+        const DeclId declId = parseTopLevelDecl(tokens, state);
+        if (state.hasError) {
             break;
         }
-        prog.declarations.push_back(decl_id);
-        skip_newlines(tokens, state);
+        prog.declarations.push_back(declId);
+        skipNewlines(tokens, state);
     }
 
     ParseResult result{};
-    if (state.has_error) {
+    if (state.hasError) {
         result.ok = false;
         result.error = std::move(state.error);
     } else {
@@ -1011,8 +1011,8 @@ inline ParseResult parse_tokens_with_arena(
     return result;
 }
 
-inline ParseResult parse_tokens(const std::vector<Token>& tokens, std::string_view file_name = "main.cb") {
-    return parse_tokens_with_arena(tokens, AstArena{}, file_name);
+inline ParseResult parseTokens(const std::vector<Token>& tokens, std::string_view fileName = "main.cb") {
+    return parseTokensWithArena(tokens, AstArena{}, fileName);
 }
 
 }  // namespace cb

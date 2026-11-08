@@ -1,0 +1,60 @@
+' EXPECT_CPP: #include "
+' EXPECT_CPP: os_bridge.hpp"
+' EXPECT_CPP: cbStdOsArgs(
+' EXPECT_CPP: cbStdOsCwd(
+' EXPECT_CPP: cbStdOsClock(
+' EXPECT_CPP: int main(int argc, char** argv)
+' EXPECT_OUT: Args count=1
+' EXPECT_OUT: Platform valid=true, unsetEnvExists=false, unsetEnvVal=[]
+' EXPECT_OUT: Working dir changed=stdlibOsSandbox, restored=true
+' EXPECT_OUT: Clock monotonic=true
+' EXPECT_OUT: Subprocess exit codes: zero=0, seven=7
+' EXPECT_OUT: Stderr message via eprint
+
+import "std/os"
+import "std/fs"
+
+fn testChdirRoundtrip(sandboxDir as str) can error
+    dim origCwd = os.cwd()
+    os.chdir(sandboxDir)
+    defer
+        os.chdir(origCwd)
+    end defer
+    dim insideCwd = os.cwd()
+    print("Working dir changed=" & fs.fileName(insideCwd) & ", restored=" & (origCwd != insideCwd))
+end fn
+
+fn main() as int
+    on error e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end error
+
+    dim argv = os.args()
+    print("Args count=" & len(argv))
+
+    dim plat = os.platform()
+    dim platOk = (plat == "linux" or plat == "macos" or plat == "windows")
+    dim hasUnset = os.hasEnv("CB_NONEXISTENT_ENV_VAR_999")
+    dim unsetVal = os.env("CB_NONEXISTENT_ENV_VAR_999")
+    print("Platform valid=" & platOk & ", unsetEnvExists=" & hasUnset & ", unsetEnvVal=[" & unsetVal & "]")
+
+    dim sandboxDir = "build/testArtifacts/stdlibOsSandbox"
+    if not fs.exists(sandboxDir)
+        fs.mkdir(sandboxDir)
+    end if
+    testChdirRoundtrip(sandboxDir)
+    fs.remove(sandboxDir)
+
+    dim t0 = os.clock()
+    os.sleep(5)
+    dim t1 = os.clock()
+    print("Clock monotonic=" & (t1 >= t0 and t0 >= 0))
+
+    dim rc0 = os.run("exit 0")
+    dim rc7 = os.run("exit 7")
+    print("Subprocess exit codes: zero=" & rc0 & ", seven=" & rc7)
+
+    os.eprint("Stderr message via eprint")
+    return 0
+end fn

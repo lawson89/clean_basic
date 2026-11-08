@@ -1,17 +1,17 @@
-' EXPECT_CPP: struct cb_error {
+' EXPECT_CPP: struct CbError {
 ' EXPECT_CPP: struct Connection {
-' EXPECT_CPP: std::tuple<Connection, cb_error> connect(std::string ip)
-' EXPECT_CPP: return { Connection{}, cb_error{std::string("IP cannot be empty"), 408} };
-' EXPECT_CPP: return { Connection{1}, cb_error{"", 0} };
-' EXPECT_CPP: cb_error validate_port(int port)
+' EXPECT_CPP: std::tuple<Connection, CbError> connect(std::string ip)
+' EXPECT_CPP: return { Connection{}, CbError{std::string("IP cannot be empty"), 408} };
+' EXPECT_CPP: return { Connection{1}, CbError{"", 0} };
+' EXPECT_CPP: CbError validatePort(int port)
 ' EXPECT_CPP: auto [_val2, _err2] = connect(std::string("192.168.1.1"));
-' EXPECT_CPP: if (cb_has_error(_err2)) return { {}, _err2 };
+' EXPECT_CPP: if (cbHasError(_err2)) return { {}, _err2 };
 ' EXPECT_CPP: auto conn = _val2;
-' EXPECT_CPP: auto _defer_1 = _defer([&]() {
-' EXPECT_CPP: close_connection(conn);
-' EXPECT_CPP: auto [_val3, _err3] = process_network();
-' EXPECT_CPP: if (cb_has_error(_err3)) {
-' EXPECT_CPP: cb_error e = _err3;
+' EXPECT_CPP: auto _defer_1 = cbDefer([&]() {
+' EXPECT_CPP: closeConnection(conn);
+' EXPECT_CPP: auto [_val3, _err3] = processNetwork();
+' EXPECT_CPP: if (cbHasError(_err3)) {
+' EXPECT_CPP: CbError e = _err3;
 ' EXPECT_CPP: auto records = _val3;
 ' FORBID_CPP: try
 ' FORBID_CPP: catch
@@ -27,7 +27,7 @@ pub type Connection
     id as int
 end type
 
-pub fn validate_port(port as int) can error
+pub fn validatePort(port as int) can error
     if port <= 0
         error("Invalid port ", port)
     end if
@@ -42,56 +42,56 @@ pub fn connect(ip as str) as Connection can error
     return Connection(id=1)
 end fn
 
-pub fn close_connection(conn as Connection)
+pub fn closeConnection(conn as Connection)
     print("Closing connection: " & conn.id)
 end fn
 
 ' Declares 'can error', enabling implicit error bubbling
-pub fn process_network() as int can error
-    validate_port(8080)
+pub fn processNetwork() as int can error
+    validatePort(8080)
 
-    ' IMPLICIT BUBBLING: If connect fails, process_network immediately returns the error.
+    ' IMPLICIT BUBBLING: If connect fails, processNetwork immediately returns the error.
     dim conn = connect("192.168.1.1")
 
     ' DETERMINISTIC CLEANUP: Runs right before the function exits, no matter how.
     defer
-        close_connection(conn)
+        closeConnection(conn)
     end defer
 
     return 100
 end fn
 
-fn start_server()
-    ' start_server() cannot fail. Register a scope-level 'on error' handler.
+fn startServer()
+    ' startServer() cannot fail. Register a scope-level 'on error' handler.
     on error e
         print("Failed to start server: " & e)
         return
     end error
 
-    dim records = process_network()
+    dim records = processNetwork()
     print("Connected and processed ", records, " records.")
 end fn
 
-fn test_failed_connect()
-    on error err_obj
-        print("Handled empty IP (code=" & err_obj.code & "): " & err_obj.msg)
+fn testFailedConnect()
+    on error errObj
+        print("Handled empty IP (code=" & errObj.code & "): " & errObj.msg)
         return
     end error
 
-    dim bad_conn = connect("")
-    print("Unexpected success: " & bad_conn.id)
+    dim badConn = connect("")
+    print("Unexpected success: " & badConn.id)
 end fn
 
-fn test_failed_port()
+fn testFailedPort()
     on error e
         print("Handled bad port (code=" & e.code & "): " & e)
         return
     end error
 
-    validate_port(0)
+    validatePort(0)
 end fn
 
-fn test_multi_call_and_defer_lifo()
+fn testMultiCallAndDeferLifo()
     defer
         print("Defer A before error return")
     end defer
@@ -105,15 +105,15 @@ fn test_multi_call_and_defer_lifo()
         return
     end error
 
-    validate_port(8080)
+    validatePort(8080)
     dim c1 = connect("10.0.0.1")
     dim c2 = connect("")
     print("Unreachable: " & c1.id & ", " & c2.id)
 end fn
 
 fn main()
-    start_server()
-    test_failed_connect()
-    test_failed_port()
-    test_multi_call_and_defer_lifo()
+    startServer()
+    testFailedConnect()
+    testFailedPort()
+    testMultiCallAndDeferLifo()
 end fn
