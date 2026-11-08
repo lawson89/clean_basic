@@ -64,7 +64,7 @@
         },
         {
           "name": "keyword.control.cleanbasic",
-          "match": "\\b(?:import|as|pub|extern|type|alias|fn|return|if|else|for|to|step|in|case|defer|break)\\b"
+          "match": "\\b(?:import|as|pub|extern|type|alias|fn|return|if|else|for|to|step|in|case|defer|break|continue)\\b"
         },
         {
           "name": "storage.modifier.cleanbasic",

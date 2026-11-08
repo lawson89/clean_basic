@@ -570,12 +570,21 @@ public:
         std::vector<SelectCase> cases;
         while (check("KEYWORD", "case")) {
             const Token caseTok = match("KEYWORD", "case");
-            const ExprId matchExpr = parseExpr();
+            std::vector<ExprId> matchExprs;
+            matchExprs.push_back(parseExpr());
+            while (check("COMMA")) {
+                match("COMMA");
+                matchExprs.push_back(parseExpr());
+            }
             expectNewlineOrEof();
             std::vector<StmtId> caseBody = parseStmtBlockUntil(
                 {"case", "case else", "end select"}, "Unclosed 'case' in 'select case', expected 'end select'"
             );
-            cases.push_back(SelectCase{caseTok.line, caseTok.col, matchExpr, std::move(caseBody)});
+            ExprId firstMatch = INVALID_ID;
+            if (!matchExprs.empty()) {
+                firstMatch = matchExprs.front();
+            }
+            cases.push_back(SelectCase{caseTok.line, caseTok.col, firstMatch, std::move(matchExprs), std::move(caseBody)});
         }
 
         bool hasCaseElse = false;
@@ -641,6 +650,14 @@ public:
         return arena.addStmt(start.line, start.col, std::move(stmt));
     }
 
+    StmtId parseContinueStmt() {
+        const Token start = match("KEYWORD", "continue");
+        expectNewlineOrEof();
+
+        ContinueStmt stmt{};
+        return arena.addStmt(start.line, start.col, std::move(stmt));
+    }
+
     StmtId parseStatement() {
         skipNewlines();
 
@@ -667,6 +684,9 @@ public:
         }
         if (check("KEYWORD", "break")) {
             return parseBreakStmt();
+        }
+        if (check("KEYWORD", "continue")) {
+            return parseContinueStmt();
         }
 
         return parseAssignmentOrExprStmt();

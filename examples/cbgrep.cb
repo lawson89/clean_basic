@@ -21,36 +21,31 @@ fn printUsage()
 end fn
 
 fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
-    dim flags = arg.slice(1, arg.len()).chars()
+    dim flags = arg.sliceFrom(1).chars()
     for ch in flags
-        if ch == "i"
-            opts.ignoreCase = true
-        else if ch == "n"
-            opts.lineNumbers = true
-        else if ch == "c"
-            opts.countOnly = true
-        else if ch == "v"
-            opts.invertMatch = true
-        else
-            os.eprint("cbgrep: invalid option -- '" & ch & "'")
-            printUsage()
-            return false
-        end if
+        select case ch
+            case "i"
+                opts.ignoreCase = true
+            case "n"
+                opts.lineNumbers = true
+            case "c"
+                opts.countOnly = true
+            case "v"
+                opts.invertMatch = true
+            case else
+                os.eprint("cbgrep: invalid option -- '" & ch & "'")
+                printUsage()
+                return false
+        end select
     end for
     return true
 end fn
 
 fn lineMatches(line as str, pattern as str, opts as GrepOptions) as bool
-    dim matched = false
     if opts.ignoreCase
-        matched = line.asciiFindIgnoreCase(pattern) != -1
-    else
-        matched = line.find(pattern) != -1
+        return line.asciiContainsIgnoreCase(pattern) != opts.invertMatch
     end if
-    if opts.invertMatch
-        return not matched
-    end if
-    return matched
+    return line.contains(pattern) != opts.invertMatch
 end fn
 
 fn formatMatchLine(path as str, showPath as bool, lineNum as int, line as str, opts as GrepOptions) as str
@@ -137,13 +132,14 @@ fn searchDir(dirPath as str, pattern as str, opts as GrepOptions, byref hadError
     dim total = 0
     dim entries = fs.dir(dirPath)
     for name in entries
-        if not name.startsWith(".")
-            dim childPath = fs.joinPath(dirPath, name)
-            if fs.isDir(childPath)
-                total = total + searchDir(childPath, pattern, opts, hadError)
-            else if fs.isFile(childPath)
-                total = total + searchFileSafe(childPath, pattern, opts, true, hadError)
-            end if
+        if name.startsWith(".")
+            continue
+        end if
+        dim childPath = fs.joinPath(dirPath, name)
+        if fs.isDir(childPath)
+            total = total + searchDir(childPath, pattern, opts, hadError)
+        else if fs.isFile(childPath)
+            total = total + searchFileSafe(childPath, pattern, opts, true, hadError)
         end if
     end for
     return total
@@ -151,32 +147,30 @@ end fn
 
 fn main() as int
     dim argv = os.args()
-    dim opts = GrepOptions(ignoreCase=false, lineNumbers=false, countOnly=false, invertMatch=false)
+    dim opts = GrepOptions()
     dim hasPattern = false
     dim pattern = ""
     dim targets as list[str] = []
     dim flagsDone = false
 
-    if argv.len() > 1
-        for i = 1 to argv.len() - 1
-            dim arg = argv[i]
-            if not flagsDone and not hasPattern and (arg == "-h" or arg == "--help")
-                printUsage()
-                return 0
-            else if not flagsDone and arg == "--"
-                flagsDone = true
-            else if not flagsDone and not hasPattern and arg.startsWith("-") and arg != "-"
-                if not parseFlagGroup(arg, opts)
-                    return 2
-                end if
-            else if not hasPattern
-                pattern = arg
-                hasPattern = true
-            else
-                targets.push(arg)
+    for i = 1 to argv.len() - 1
+        dim arg = argv[i]
+        if not flagsDone and not hasPattern and (arg == "-h" or arg == "--help")
+            printUsage()
+            return 0
+        else if not flagsDone and arg == "--"
+            flagsDone = true
+        else if not flagsDone and not hasPattern and arg.startsWith("-") and arg != "-"
+            if not parseFlagGroup(arg, opts)
+                return 2
             end if
-        end for
-    end if
+        else if not hasPattern
+            pattern = arg
+            hasPattern = true
+        else
+            targets.push(arg)
+        end if
+    end for
 
     if not hasPattern
         printUsage()

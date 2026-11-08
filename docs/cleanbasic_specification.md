@@ -44,7 +44,7 @@ Param           ::= ["byref"] Identifier "as" Type
 
 Statement       ::= VarDecl | Assignment | ExprStmt
                   | IfStmt | ForStmt | SelectStmt
-                  | ErrBlock | DeferBlock | ReturnStmt | BreakStmt
+                  | ErrBlock | DeferBlock | ReturnStmt | BreakStmt | ContinueStmt
 
 VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr NEWLINE
 Assignment      ::= Expr "=" Expr NEWLINE
@@ -66,12 +66,14 @@ ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
                     "end for" NEWLINE
 
 SelectStmt      ::= "select case" Expr NEWLINE
-                    ("case" Expr NEWLINE Statement*)*
+                    ("case" ExprList NEWLINE Statement*)*
                     ["case else" NEWLINE Statement*]
                     "end select" NEWLINE
+ExprList        ::= Expr ("," Expr)*
 
 ReturnStmt      ::= "return" [Expr] NEWLINE
 BreakStmt       ::= "break" NEWLINE
+ContinueStmt    ::= "continue" NEWLINE
 
 Expr            ::= OrExpr
 OrExpr          ::= AndExpr ("or" AndExpr)*
@@ -224,7 +226,7 @@ end fn
 
 ### 4. Control Flow, Ranges, and Built-in Containers
 
-CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` inclusive range loops alongside `for item in collection` loops, and integral/boolean `select case` blocks lowered directly to native C++ `switch` statements.
+CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` loops alongside `while` loops, `break` and `continue` control statements, and `select case` blocks on `int`, `bool`, and `str` (lowered to native C++ `switch` jump tables with stacked cases for integral/boolean types, and single-evaluation `if / else if / else` chains for strings, supporting comma-separated multi-value `case expr1, expr2` clauses).
 
 ```vb
 fn demoContainers() as int

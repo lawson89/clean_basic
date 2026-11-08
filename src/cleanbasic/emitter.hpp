@@ -691,14 +691,85 @@ inline void Emitter::emitStmt(
     }
 
     if (const auto* selS = arena.getStmt<SelectStmt>(stmtId)) {
+        const TypeId targetTid = inferExprType(arena, selS->target, symbols, scope, currentModuleId);
         const std::string targetCpp = emitExpr(selS->target, scope);
+
+        if (targetTid == symbols.typeStr) {
+            emitLine("{");
+            indentLevel += 1;
+            const std::string selVar = nextTemp("_sel");
+            emitLine("const auto " + selVar + " = " + targetCpp + ";");
+            bool isFirst = true;
+            for (size_t idx = 0; idx < selS->cases.size(); ++idx) {
+                const auto& c = selS->cases[idx];
+                std::vector<ExprId> mExprs = c.matchExprs;
+                if (mExprs.empty() && c.matchExpr != INVALID_ID) {
+                    mExprs.push_back(c.matchExpr);
+                }
+                std::string cond;
+                for (size_t mIdx = 0; mIdx < mExprs.size(); ++mIdx) {
+                    if (mIdx > 0) {
+                        cond += " || ";
+                    }
+                    cond += selVar + " == " + emitExpr(mExprs[mIdx], scope);
+                }
+                if (cond.empty()) {
+                    cond = "false";
+                }
+                if (isFirst) {
+                    emitLine("if (" + cond + ") {");
+                    isFirst = false;
+                } else {
+                    emitLine("} else if (" + cond + ") {");
+                }
+                indentLevel += 1;
+                auto cDecls = declaredVars;
+                emitStmtList(fn, c.body, scope, cDecls);
+                indentLevel -= 1;
+            }
+            if (selS->hasCaseElse) {
+                if (isFirst) {
+                    emitLine("{");
+                    indentLevel += 1;
+                    auto elseDecls = declaredVars;
+                    emitStmtList(fn, selS->caseElse, scope, elseDecls);
+                    indentLevel -= 1;
+                    emitLine("}");
+                } else {
+                    emitLine("} else {");
+                    indentLevel += 1;
+                    auto elseDecls = declaredVars;
+                    emitStmtList(fn, selS->caseElse, scope, elseDecls);
+                    indentLevel -= 1;
+                    emitLine("}");
+                }
+            } else {
+                if (!isFirst) {
+                    emitLine("}");
+                }
+            }
+            indentLevel -= 1;
+            emitLine("}");
+            return;
+        }
+
         emitLine("switch (" + targetCpp + ") {");
         indentLevel += 1;
 
         for (size_t idx = 0; idx < selS->cases.size(); ++idx) {
             const auto& c = selS->cases[idx];
-            const std::string matchCpp = emitExpr(c.matchExpr, scope);
-            emitLine("case " + matchCpp + ": {");
+            std::vector<ExprId> mExprs = c.matchExprs;
+            if (mExprs.empty() && c.matchExpr != INVALID_ID) {
+                mExprs.push_back(c.matchExpr);
+            }
+            for (size_t mIdx = 0; mIdx < mExprs.size(); ++mIdx) {
+                const std::string matchCpp = emitExpr(mExprs[mIdx], scope);
+                if (mIdx + 1 == mExprs.size()) {
+                    emitLine("case " + matchCpp + ": {");
+                } else {
+                    emitLine("case " + matchCpp + ":");
+                }
+            }
             indentLevel += 1;
             auto cDecls = declaredVars;
             emitStmtList(fn, c.body, scope, cDecls);
@@ -749,6 +820,11 @@ inline void Emitter::emitStmt(
 
     if (arena.getStmt<BreakStmt>(stmtId) != nullptr) {
         emitLine("break;");
+        return;
+    }
+
+    if (arena.getStmt<ContinueStmt>(stmtId) != nullptr) {
+        emitLine("continue;");
         return;
     }
 }

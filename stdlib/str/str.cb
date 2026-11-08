@@ -38,6 +38,7 @@ extern fn cbStrPadRight(s as str, width as int, pad as str) as str
 
 ' Slicing & Substrings
 extern fn cbStrSlice(s as str, start as int, stop as int) as str
+extern fn cbStrSliceFrom(s as str, start as int) as str
 extern fn cbStrLeft(s as str, n as int) as str
 extern fn cbStrRight(s as str, n as int) as str
 extern fn cbStrMid(s as str, start as int, count as int) as str
@@ -173,6 +174,10 @@ end fn
 
 pub fn slice(s as str, start as int, stop as int) as str
     return cbStrSlice(s, start, stop)
+end fn
+
+pub fn sliceFrom(s as str, start as int) as str
+    return cbStrSliceFrom(s, start)
 end fn
 
 pub fn left(s as str, n as int) as str

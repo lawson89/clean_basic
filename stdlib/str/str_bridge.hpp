@@ -519,6 +519,26 @@ inline std::string cbStrSlice(const std::string& s, int64_t start, int64_t stop)
     );
 }
 
+inline std::string cbStrSliceFrom(const std::string& s, int64_t start) {
+    if (s.empty()) {
+        return "";
+    }
+    int64_t clampedStart = start;
+    if (clampedStart < 0) {
+        clampedStart = 0;
+    }
+    size_t bytePos = 0;
+    int64_t cpIdx = 0;
+    while (bytePos < s.size() && cpIdx < clampedStart) {
+        bytePos += cbStrUtf8Step(s, bytePos);
+        cpIdx += 1;
+    }
+    if (bytePos >= s.size()) {
+        return "";
+    }
+    return s.substr(bytePos);
+}
+
 inline std::string cbStrLeft(const std::string& s, int64_t n) {
     if (n <= 0 || s.empty()) {
         return "";

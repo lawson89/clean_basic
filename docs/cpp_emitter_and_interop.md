@@ -190,9 +190,12 @@ void startServer() {
 
 ---
 
-## 5. Native `switch` Lowering for `select case`
+## 5. Lowering for `select case` (`switch` Jump Tables & String Equality Chains)
 
-Because the semantic analyzer restricts `select case <target>` to `int` or `bool` expressions, `emitStmt()` lowers `SelectStmt` directly to a native C++ `switch` statement with scoped `case <expr>: { ... break; }` blocks and `default: { ... break; }`:
+`select case <target>` supports `int`, `bool`, and `str` expressions:
+* **Integral & Boolean Targets (`int`, `bool`):** Emitted as a native C++ `switch` statement. Multi-value clauses (`case 1, 2:`) emit stacked case labels (`case 1:
+case 2: {`) sharing a scoped compound block with an implicit `break;`.
+* **String Targets (`str`):** Emitted inside a scoped compound block by evaluating `target` once into a temporary variable (`const auto _sel_1 = <target>;`) followed by an `if (_sel_1 == <m1> || _sel_1 == <m2>) { ... } else if (...) { ... } else { ... }` equality chain.
 
 **CleanBasic Source:**
 ```vb

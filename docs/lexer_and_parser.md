@@ -33,7 +33,7 @@ struct LexResult {
 
 | Token `kind` | Examples (`Token::value`) | Description |
 | :--- | :--- | :--- |
-| `KEYWORD` | `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
+| `KEYWORD` | `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
 | `TYPE_KW` | `int`, `float`, `bool`, `str`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
 | `NUMBER` | `42`, `3.14159`, `0` | Integer or decimal floating-point numeric literals. |
@@ -164,8 +164,9 @@ Inside a function body, `parseStatement()` dispatches on leading keywords:
 | Any expression starter | `parseAssignmentOrExprStmt` | Parses lhs `firstExpr = parseExpr()`. If the next token is `ASSIGN` (`=`), parses rhs `valExpr` and emits a `VarAssignment` (covering variable reassignment, struct field mutation `p.health = 10`, and container index assignment `nums[0] = 5`). Otherwise, emits an `ExprStmt` (e.g., `print("hi")` or `hero.heal(10)`). |
 | `if` | `parseIfStmt` | Parses `if <Expr>`, zero or more `else if <Expr>` branches (`ElseIfBranch`), optional `else` branch, and terminating `end if` into `IfStmt`. |
 | `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, parses `<start> to <end> [step <step>]`, and sets `rangeSpec.inclusive = true`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal` or `for k, v in dictVal`). Terminated by `end for`. |
-| `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr>` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
+| `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr1>[, <matchExpr2>...]` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
 | `on error` | `parseOnErrorStmt` | Parses `on error <errIdent>`, statement list body, and `end error` into `ErrorBlock`. |
 | `defer` | `parseDeferStmt` | Parses `defer`, statement list body, and `end defer` into `DeferStmt`. |
 | `return` | `parseReturnStmt` | Parses `return [<Expr>]` into `ReturnStmt` (`has_value = true` if an expression precedes `NEWLINE`/`EOF`). |
 | `break` | `parseBreakStmt` | Parses `break` into `BreakStmt`. |
+| `continue` | `parseContinueStmt` | Parses `continue` into `ContinueStmt`. |

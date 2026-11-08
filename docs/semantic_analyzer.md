@@ -231,16 +231,14 @@ In `analyzeStmt()` (`VarAssignment`):
    `AnalyzerError: Cannot reassign const variable '<name>'.`
 3. **`byref` Parameter Mutability:** Function parameters are passed by value by default (`isByref = false`). When a parameter is marked `byref p as Player`, `VarSymbol::isByref = true` is recorded in the function scope and emitted as a mutable C++ reference (`Player& p`).
 
-### 6.3 `select case` Type Constraint
-To guarantee that every `select case` statement lowers to a fast, native C++ `switch` jump table without hidden string comparisons or branching overhead, `analyzeStmt()` verifies the target expression's inferred type:
-```cpp
-const TypeId targetTid = inferExprType(arena, selStmt.target, symbols, scope, state.moduleId);
-if (targetTid != symbols.typeInt && targetTid != symbols.typeBool) {
-    setAnalyzerError(state, stmtNode.line, stmtNode.col,
-        "select case expression must be of type 'int' or 'bool'");
-    return;
-}
-```
+### 6.3 `select case` Target and Case Expression Constraints
+`select case <target>` supports `int`, `bool`, and `str` expressions. The analyzer validates that:
+1. The target expression is of type `int`, `bool`, or `str` (reporting an error otherwise).
+2. Every match expression in each `case expr1, expr2` clause matches the target type.
+Integral and boolean targets lower to native C++ `switch` jump tables with stacked `case` labels, while string targets lower to a single-evaluation temporary variable paired with an `if / else if / else` equality chain.
+
+### 6.4 Loop Nesting Depth & `break` / `continue` Validation
+The analyzer tracks loop depth (`loopDepth`) inside `ForStmt` and `WhileStmt` blocks. Using `break` or `continue` outside of a loop (`loopDepth <= 0`) is rejected at compile time with an `AnalyzerError`.
 
 ---
 
@@ -272,6 +270,7 @@ When `analyzeStmt()` encounters an `ErrorBlock` (`on error e ... end error`):
 3. It verifies that `stmtListHasExit(arena, errBlock.body)` is `true`—meaning the last statement in the `on error` block is an explicit control-flow exit:
    * `return [<expr>]` (`ReturnStmt`)
    * `break` (`BreakStmt`)
+   * `continue` (`ContinueStmt`)
    * `error(...)` (`ExprStmt` calling the `error` intrinsic)
    If the block can fall through without exiting, the analyzer reports:
    `AnalyzerError: 'on error' block must terminate with an explicit control-flow exit ('return', 'error(...)', or 'break').`

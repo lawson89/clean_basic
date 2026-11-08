@@ -28,6 +28,9 @@ inline bool stmtListHasExit(const AstArena& arena, const std::vector<StmtId>& st
     if (arena.getStmt<BreakStmt>(lastSid) != nullptr) {
         return true;
     }
+    if (arena.getStmt<ContinueStmt>(lastSid) != nullptr) {
+        return true;
+    }
     if (const auto* estmt = arena.getStmt<ExprStmt>(lastSid)) {
         if (const auto* call = arena.getExpr<FuncCall>(estmt->expr)) {
             if (isErrorBuiltinCall(arena, *call)) {
@@ -44,9 +47,10 @@ public:
     GlobalSymbolTable& symbols;
     std::string fileName = "main.cb";
     std::string moduleId = "";
+    int loopDepth = 0;
 
     Analyzer(AstArena& arena, GlobalSymbolTable& symbols, std::string_view fileName = "main.cb")
-        : arena(arena), symbols(symbols), fileName(fileName), moduleId("") {}
+        : arena(arena), symbols(symbols), fileName(fileName), moduleId(""), loopDepth(0) {}
 
     [[noreturn]] void setAnalyzerError(uint32_t line, uint32_t col, std::string_view msg) const {
         throw makeError("AnalyzerError", std::string(msg), fileName, line, col);
@@ -192,7 +196,10 @@ public:
                         }
                     }
 
-                    const size_t paramOffset = isUfcs ? 1 : 0;
+                    size_t paramOffset = 0;
+                    if (isUfcs) {
+                        paramOffset = 1;
+                    }
                     for (size_t aIdx = 0; aIdx < call->args.size(); ++aIdx) {
                         const size_t pIdx = paramOffset + aIdx;
                         if (pIdx < fnSym.params.size()) {
@@ -411,6 +418,7 @@ public:
         }
 
         if (const auto* forStmt = arena.getStmt<ForStmt>(stmtId)) {
+            loopDepth += 1;
             if (forStmt->rangeSpec.hasRange) {
                 validateExprCalls(fn, forStmt->rangeSpec.start, scope, false);
                 validateExprCalls(fn, forStmt->rangeSpec.end, scope, false);
@@ -442,10 +450,12 @@ public:
                 }
             }
             analyzeBlock(fn, forStmt->body, scope, hasActiveOnError);
+            loopDepth -= 1;
             return;
         }
 
         if (const auto* whileStmt = arena.getStmt<WhileStmt>(stmtId)) {
+            loopDepth += 1;
             bool isFallibleCond = false;
             if (const auto* call = arena.getExpr<FuncCall>(whileStmt->condition)) {
                 const auto fnOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
@@ -461,6 +471,7 @@ public:
                 validateExprCalls(fn, whileStmt->condition, scope, false);
             }
             analyzeBlock(fn, whileStmt->body, scope, hasActiveOnError);
+            loopDepth -= 1;
             return;
         }
 
@@ -468,12 +479,22 @@ public:
             validateExprCalls(fn, selStmt->target, scope, false);
 
             const TypeId targetTid = inferExprType(arena, selStmt->target, symbols, scope, moduleId);
-            if (targetTid != symbols.typeInt && targetTid != symbols.typeBool) {
-                setAnalyzerError(stmtNode.line, stmtNode.col, "select case expression must be of type 'int' or 'bool'");
+            if (targetTid != symbols.typeInt && targetTid != symbols.typeBool && targetTid != symbols.typeStr) {
+                setAnalyzerError(stmtNode.line, stmtNode.col, "select case expression must be of type 'int', 'bool', or 'str'");
             }
 
             for (const auto& scase : selStmt->cases) {
-                validateExprCalls(fn, scase.matchExpr, scope, false);
+                std::vector<ExprId> mExprs = scase.matchExprs;
+                if (mExprs.empty() && scase.matchExpr != INVALID_ID) {
+                    mExprs.push_back(scase.matchExpr);
+                }
+                for (const auto& mExpr : mExprs) {
+                    validateExprCalls(fn, mExpr, scope, false);
+                    const TypeId mExprTid = inferExprType(arena, mExpr, symbols, scope, moduleId);
+                    if (mExprTid != targetTid && mExprTid != symbols.typeAuto) {
+                        setAnalyzerError(scase.line, scase.col, "case expression type does not match select case target type");
+                    }
+                }
                 analyzeBlock(fn, scase.body, scope, hasActiveOnError);
             }
 
@@ -512,6 +533,20 @@ public:
             }
             return;
         }
+
+        if (arena.getStmt<BreakStmt>(stmtId) != nullptr) {
+            if (loopDepth <= 0) {
+                setAnalyzerError(stmtNode.line, stmtNode.col, "'break' cannot be used outside of a loop");
+            }
+            return;
+        }
+
+        if (arena.getStmt<ContinueStmt>(stmtId) != nullptr) {
+            if (loopDepth <= 0) {
+                setAnalyzerError(stmtNode.line, stmtNode.col, "'continue' cannot be used outside of a loop");
+            }
+            return;
+        }
     }
 
     void analyzeBlock(
@@ -527,6 +562,7 @@ public:
     }
 
     void analyzeFn(const FnDecl& fn) {
+        loopDepth = 0;
         std::unordered_map<std::string, VarSymbol> scope;
         for (const auto& param : fn.params) {
             const TypeId resolvedTid = resolveAlias(arena, symbols, moduleId, param.typeId);

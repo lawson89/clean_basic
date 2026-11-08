@@ -7,10 +7,10 @@
 ' EXPECT_OUT: IgnoreCase: eq=true starts=true ends=true find=7 rfind=24 contains=true
 ' EXPECT_OUT: Split/Join: csv=a|b|c chars=X-Y fields=2026-11-06,ERROR,diskFull lines=3
 ' EXPECT_OUT: Trim/Pad: trim=[hello] ltrim=[hello  ] rtrim=[  hello] chars=[core] padL=[00042] padR=[hi...]
-' EXPECT_OUT: Slice: slice=Basic left=Clean right=Basic mid=eanBa char=B byte=66 fromChar=A
+' EXPECT_OUT: Slice: slice=Basic sliceFrom=Basic left=Clean right=Basic mid=eanBa char=B byte=66 fromChar=A
 ' EXPECT_OUT: Transform: rep=a-b-c first=a-b:c lower=cleanbasic upper=CLEANBASIC repeat=ha!ha!ha! rev=dcba
 ' EXPECT_OUT: Parse/Class: int=-42 float=3.250000 bool1=true bool0=false digit=true alpha=true space=true builtinStr=99
-' EXPECT_OUT: UTF8: bytes=10 cp=6 valid=true chars=c|a|f|é rev=🚀 éfac left=café right=🚀 mid=fé char3=é rocket=🚀 trim=café padL=««café padR=café»» jpLen=5 jpMid=んに
+' EXPECT_OUT: UTF8: bytes=10 cp=6 valid=true chars=c|a|f|é rev=🚀 éfac left=café right=🚀 mid=fé char3=é rocket=🚀 trim=café padL=««café padR=café»» jpLen=5 jpMid=んに jpFrom=ちは
 
 import "std/str"
 import "std/fs"
@@ -74,6 +74,7 @@ fn main() as int
     dim word = "CleanBasic"
     print(
         "Slice: slice=" & word.slice(5, 99) &
+        " sliceFrom=" & word.sliceFrom(5) &
         " left=" & word.left(5) &
         " right=" & word.right(5) &
         " mid=" & word.mid(2, 5) &
@@ -128,7 +129,8 @@ fn main() as int
         " padL=" & cafe.padLeft(6, "«") &
         " padR=" & cafe.padRight(6, "»") &
         " jpLen=" & jp.utf8Len() &
-        " jpMid=" & jp.mid(1, 2)
+        " jpMid=" & jp.mid(1, 2) &
+        " jpFrom=" & jp.sliceFrom(3)
     )
 
     return 0

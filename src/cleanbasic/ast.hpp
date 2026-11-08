@@ -224,6 +224,7 @@ struct SelectCase {
     uint32_t line = 1;
     uint32_t col = 1;
     ExprId matchExpr = INVALID_ID;
+    std::vector<ExprId> matchExprs;
     std::vector<StmtId> body;
 };
 
@@ -252,6 +253,10 @@ struct BreakStmt {
     uint32_t dummy = 0;
 };
 
+struct ContinueStmt {
+    uint32_t dummy = 0;
+};
+
 using StmtVariant = std::variant<
     VarAssignment,
     ExprStmt,
@@ -262,7 +267,8 @@ using StmtVariant = std::variant<
     ErrorBlock,
     DeferStmt,
     ReturnStmt,
-    BreakStmt
+    BreakStmt,
+    ContinueStmt
 >;
 
 struct StmtNode {

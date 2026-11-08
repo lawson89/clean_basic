@@ -43,7 +43,7 @@ inline bool isSingleKeyword(std::string_view word) {
         "import", "as", "pub", "extern", "alias", "type", "fn",
         "dim", "const", "byref", "if", "else",
         "for", "in", "to", "step", "while", "case", "defer", "on", "error",
-        "return", "break", "and", "or", "not",
+        "return", "break", "continue", "and", "or", "not",
         "true", "false", "null"
     };
     for (const auto& kw : keywords) {

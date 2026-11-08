@@ -2687,5 +2687,159 @@ end fn
         CHECK(res.error.message.find("Cannot pass const variable 'p' to byref parameter 'p'") != std::string::npos);
     }
 }
+TEST_CASE("Language ergonomics: continue, loop depth validation, and multi-value/string select case", "[control_flow][select_case][continue]") {
+    SECTION("continue statement in for and while loops transpiles to C++ continue;") {
+        const std::string code = R"(
+fn main()
+    for i = 1 to 5
+        if i == 3
+            continue
+        end if
+    end for
+
+    dim n = 0
+    while n < 5
+        n = n + 1
+        if n == 2
+            continue
+        end if
+    end while
+end fn
+)";
+        const auto res = cb::transpileSource(code, "testContinue.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("continue;") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects break and continue outside loops") {
+        const std::string badBreak = R"(
+fn main()
+    break
+end fn
+)";
+        const auto resBreak = cb::transpileSource(badBreak, "badBreak.cb");
+        CHECK_FALSE(resBreak.ok);
+        CHECK(resBreak.error.message.find("'break' cannot be used outside of a loop") != std::string::npos);
+
+        const std::string badContinue = R"(
+fn main()
+    continue
+end fn
+)";
+        const auto resCont = cb::transpileSource(badContinue, "badContinue.cb");
+        CHECK_FALSE(resCont.ok);
+        CHECK(resCont.error.message.find("'continue' cannot be used outside of a loop") != std::string::npos);
+
+        const std::string badSelectBreak = R"(
+fn main()
+    select case 1
+        case 1
+            break
+    end select
+end fn
+)";
+        const auto resSelBreak = cb::transpileSource(badSelectBreak, "badSelBreak.cb");
+        CHECK_FALSE(resSelBreak.ok);
+        CHECK(resSelBreak.error.message.find("'break' cannot be used outside of a loop") != std::string::npos);
+    }
+
+    SECTION("Multi-value case clauses for int emit stacked case labels") {
+        const std::string code = R"(
+fn classify(n as int) as str
+    select case n
+        case 1, 2, 3
+            return "small"
+        case 4, 5
+            return "medium"
+        case else
+            return "large"
+    end select
+end fn
+
+fn main()
+end fn
+)";
+        const auto res = cb::transpileSource(code, "multiCaseInt.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("case 1:") != std::string::npos);
+        CHECK(res.cppCode.find("case 2:") != std::string::npos);
+        CHECK(res.cppCode.find("case 3: {") != std::string::npos);
+        CHECK(res.cppCode.find("case 4:") != std::string::npos);
+        CHECK(res.cppCode.find("case 5: {") != std::string::npos);
+        CHECK(res.cppCode.find("default: {") != std::string::npos);
+    }
+
+    SECTION("select case on str lowers to single-eval temporary variable and if/else-if equality chain") {
+        const std::string code = R"(
+fn classifyStr(s as str) as int
+    select case s
+        case "apple", "banana"
+            return 1
+        case "cherry"
+            return 2
+        case else
+            return 0
+    end select
+end fn
+
+fn main()
+end fn
+)";
+        const auto res = cb::transpileSource(code, "strSelect.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("const auto _sel_") != std::string::npos);
+        CHECK(res.cppCode.find(R"(if (_sel_1 == std::string("apple") || _sel_1 == std::string("banana")) {)") != std::string::npos);
+        CHECK(res.cppCode.find(R"(} else if (_sel_1 == std::string("cherry")) {)") != std::string::npos);
+        CHECK(res.cppCode.find("} else {") != std::string::npos);
+    }
+
+    SECTION("Analyzer type-checks case expressions against target type and rejects invalid select case targets") {
+        const std::string mismatchType = R"(
+fn main()
+    select case 10
+        case "hello"
+            print("no")
+    end select
+end fn
+)";
+        const auto resMismatch = cb::transpileSource(mismatchType, "mismatchType.cb");
+        CHECK_FALSE(resMismatch.ok);
+        CHECK(resMismatch.error.message.find("case expression type does not match select case target type") != std::string::npos);
+
+        const std::string badTarget = R"(
+fn main()
+    dim f = 3.14
+    select case f
+        case 3.14
+            print("no")
+    end select
+end fn
+)";
+        const auto resBadTarget = cb::transpileSource(badTarget, "badTarget.cb");
+        CHECK_FALSE(resBadTarget.ok);
+        CHECK(resBadTarget.error.message.find("select case expression must be of type 'int', 'bool', or 'str'") != std::string::npos);
+    }
+
+    SECTION("continue is accepted as valid scope exit terminator for on error blocks inside loops") {
+        const std::string code = R"(
+fn fallibleTask() as int can error
+    error("failed")
+    return 0
+end fn
+
+fn main()
+    for i = 1 to 5
+        on error e
+            continue
+        end error
+        dim x = fallibleTask()
+    end for
+end fn
+)";
+        const auto res = cb::transpileSource(code, "continueOnError.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("continue;") != std::string::npos);
+    }
+}
 
 
