@@ -56,7 +56,7 @@ fn main() as int
         "Split/Join: csv=" & joinedCsv &
         " chars=" & joinedChars &
         " fields=" & str.join(cols, ",") &
-        " lines=" & len(lineList)
+        " lines=" & lineList.len()
     )
 
     ' 3. Trimming & Padding
@@ -97,7 +97,7 @@ fn main() as int
     dim parsedF = " 3.25 ".toFloat()
     dim parsedB1 = "TRUE".toBool()
     dim parsedB0 = "0".toBool()
-    dim bStr = str(99)
+    dim bStr = 99.toStr()
     print(
         "Parse/Class: int=" & parsedI &
         " float=" & parsedF &
@@ -114,7 +114,7 @@ fn main() as int
     dim cafe = "café"
     dim jp = "こんにちは"
     print(
-        "UTF8: bytes=" & len(u) &
+        "UTF8: bytes=" & u.len() &
         " cp=" & u.utf8Len() &
         " valid=" & u.utf8Valid() &
         " chars=" & str.join(cafe.chars(), "|") &

@@ -1,6 +1,6 @@
 # Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility
 
-This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/analyzer.hpp`), including the `GlobalSymbolTable` architecture, two-pass symbol registration, type alias cycle detection, Unified Function Call Syntax (UFCS) resolution, struct constructor resolution, `const`/`dim`/`byref` mutability enforcement, and static error-handling verification.
+This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/symbols.hpp`, `src/cleanbasic/type_infer.hpp`, and `src/cleanbasic/analyzer.hpp`), including the `GlobalSymbolTable` architecture, two-pass symbol registration, type alias cycle detection, Unified Function Call Syntax (UFCS) resolution, struct constructor resolution, `const`/`dim`/`byref` mutability enforcement, and static error-handling verification.
 
 ### Related Documentation
 * [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
@@ -12,7 +12,7 @@ This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/an
 
 ## 1. `GlobalSymbolTable` & Symbol Records (`src/cleanbasic/analyzer.hpp`)
 
-`cb::analyzeProgram(AstArena& arena, const Program& program)` builds and validates a `cb::GlobalSymbolTable`:
+`cb::analyzeProgram(AstArena& arena, const Program& program)` builds and validates a `cb::GlobalSymbolTable` (defined in `src/cleanbasic/symbols.hpp`):
 
 ```cpp
 struct GlobalSymbolTable {
@@ -30,7 +30,6 @@ struct GlobalSymbolTable {
     TypeId typeVoid = INVALID_ID;
     TypeId typeAuto = INVALID_ID;
     TypeId typeNull = INVALID_ID;
-    TypeId typeAny = INVALID_ID;
     TypeId typeErr = INVALID_ID;
     TypeId typeCptr = INVALID_ID;
 };
@@ -61,13 +60,21 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 | `err` | `symbols.typeErr` | Built-in structured error type (`CbError`) with `.msg as str` and `.code as int` fields. |
 | `list[T]` | Parametric `TypeNode{"list", {T}}` | Dynamic contiguous array (`std::vector<T>`). |
 | `dict[K, V]` | Parametric `TypeNode{"dict", {K, V}}` | Hash table (`std::unordered_map<K, V>`). |
-| `void`, `auto`, `null`, `any` | Internal compiler type handles | Used for void return types, type inference fallbacks, `null` literals, and polymorphic built-in parameters. |
+| `void`, `auto`, `null` | Internal compiler type handles | Used for void return types, type inference fallbacks, and `null` literals. |
 
 ### 2.2 Built-in Functions (`isBuiltinSymbolName`)
 * **`print(...)`**: Variadic standard output function (infallible, lowered to `(std::cout << ... << std::endl)` in the emitter).
-* **`len(container as any) as int`**: Returns the integer length of a `list[T]`, `dict[K, V]`, or `str` (`static_cast<int>(container.size())`).
-* **`str(val as any) as str`**: Converts numeric, boolean, or `err` values to `std::string`.
 * **`error(msg..., [code=N])`**: Special built-in intrinsic validated by `isErrorBuiltinCall()`. Raises and returns a `CbError{msg, code}` value from a `can error` function (default `code = 1`).
+
+### 2.3 Built-in Receiver Methods
+
+CleanBasic provides consistent `camelCase` receiver methods for built-in types:
+
+* **`.len() as int`**: Supported on `list[T]`, `dict[K, V]`, and `str`. Returns the number of elements or characters.
+* **`.push(item as T)`**: Supported on `list[T]`. Appends an item to the end of the list.
+* **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, and `err`. Returns a string representation.
+* **`.toInt() as int`**: Supported on `int`, `float`, and `bool`. Performs an infallible integer conversion.
+* **`.toFloat() as float`**: Supported on `int` and `float`. Performs an infallible floating-point conversion.
 
 ---
 

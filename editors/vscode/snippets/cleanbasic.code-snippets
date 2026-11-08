@@ -101,5 +101,40 @@
       "end defer"
     ],
     "description": "Deterministic scope-exit cleanup block"
+  },
+  "Length Method": {
+    "prefix": "len",
+    "body": [
+      "len()"
+    ],
+    "description": "Call .len() on a list, dict, or str"
+  },
+  "To String Method": {
+    "prefix": "tostr",
+    "body": [
+      "toStr()"
+    ],
+    "description": "Call .toStr() on a primitive value"
+  },
+  "To Integer Method": {
+    "prefix": "toint",
+    "body": [
+      "toInt()"
+    ],
+    "description": "Call .toInt() on a primitive value"
+  },
+  "To Float Method": {
+    "prefix": "tofloat",
+    "body": [
+      "toFloat()"
+    ],
+    "description": "Call .toFloat() on a primitive value"
+  },
+  "Push Method": {
+    "prefix": "push",
+    "body": [
+      "push(${1:item})"
+    ],
+    "description": "Call .push(item) on a list"
   }
 }

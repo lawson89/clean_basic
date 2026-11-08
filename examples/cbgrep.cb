@@ -21,7 +21,7 @@ fn printUsage()
 end fn
 
 fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
-    dim flags = arg.slice(1, len(arg)).chars()
+    dim flags = arg.slice(1, arg.len()).chars()
     for ch in flags
         if ch == "i"
             opts.ignoreCase = true
@@ -59,7 +59,7 @@ fn formatMatchLine(path as str, showPath as bool, lineNum as int, line as str, o
     else if showPath
         return path & ":" & line
     else if opts.lineNumbers
-        return str(lineNum) & ":" & line
+        return lineNum.toStr() & ":" & line
     end if
     return line
 end fn
@@ -157,8 +157,8 @@ fn main() as int
     dim targets as list[str] = []
     dim flagsDone = false
 
-    if len(argv) > 1
-        for i = 1 to len(argv) - 1
+    if argv.len() > 1
+        for i = 1 to argv.len() - 1
             dim arg = argv[i]
             if not flagsDone and not hasPattern and (arg == "-h" or arg == "--help")
                 printUsage()
@@ -186,10 +186,10 @@ fn main() as int
     dim totalMatches = 0
     dim hadError = false
 
-    if len(targets) == 0
+    if targets.len() == 0
         totalMatches = searchStdin(pattern, opts, false)
     else
-        dim showPath = len(targets) > 1
+        dim showPath = targets.len() > 1
         for target in targets
             if target == "-"
                 totalMatches = totalMatches + searchStdin(pattern, opts, showPath)

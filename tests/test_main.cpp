@@ -233,9 +233,9 @@ end fn
     REQUIRE(parseRes.program.declarations.size() == 2);
     const cb::DeclId fnDeclId = parseRes.program.declarations[1];
     REQUIRE(fnDeclId < parseRes.arena.decls.size());
-    const auto& declNode = parseRes.arena.decls[fnDeclId];
-    REQUIRE(std::holds_alternative<cb::FnDecl>(declNode.payload));
-    const auto& fnDecl = std::get<cb::FnDecl>(declNode.payload);
+
+    REQUIRE(cb::isDecl<cb::FnDecl>(parseRes.arena, fnDeclId));
+    const auto& fnDecl = cb::asDecl<cb::FnDecl>(parseRes.arena, fnDeclId);
     CHECK(fnDecl.name == "compute");
     REQUIRE(fnDecl.params.size() == 2);
     CHECK(fnDecl.params[0].isByref);
@@ -254,9 +254,9 @@ end fn
         const auto parseFt = cb::parseTokens(lexFt.tokens, "forTo.cb");
         REQUIRE(parseFt.ok);
         REQUIRE(parseFt.program.declarations.size() == 1);
-        const auto& fnFt = std::get<cb::FnDecl>(parseFt.arena.decls[parseFt.program.declarations[0]].payload);
+        const auto& fnFt = cb::asDecl<cb::FnDecl>(parseFt.arena, parseFt.program.declarations[0]);
         REQUIRE(fnFt.body.size() >= 2);
-        const auto& forStmt = std::get<cb::ForStmt>(parseFt.arena.stmts[fnFt.body[1]].payload);
+        const auto& forStmt = cb::asStmt<cb::ForStmt>(parseFt.arena, fnFt.body[1]);
         CHECK(forStmt.rangeSpec.hasRange);
         CHECK(forStmt.rangeSpec.inclusive);
         CHECK(forStmt.rangeSpec.hasStep);
@@ -279,8 +279,8 @@ end fn
         const auto parseCe = cb::parseTokens(lexCe.tokens, "canErr.cb");
         REQUIRE(parseCe.ok);
         REQUIRE(parseCe.program.declarations.size() == 2);
-        const auto& fn0 = std::get<cb::FnDecl>(parseCe.arena.decls[parseCe.program.declarations[0]].payload);
-        const auto& fn1 = std::get<cb::FnDecl>(parseCe.arena.decls[parseCe.program.declarations[1]].payload);
+        const auto& fn0 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[0]);
+        const auto& fn1 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[1]);
         CHECK(fn0.isFallible);
         CHECK(fn0.returnType != cb::INVALID_ID);
         CHECK(fn1.isFallible);
@@ -561,10 +561,10 @@ end fn
         CHECK_FALSE(itMain->second.isFallible);
 
         const cb::DeclId middleDeclId = parseGood.program.declarations[1];
-        const auto& middleFn = std::get<cb::FnDecl>(parseGood.arena.decls[middleDeclId].payload);
+        const auto& middleFn = cb::asDecl<cb::FnDecl>(parseGood.arena, middleDeclId);
         REQUIRE(!middleFn.body.empty());
         const cb::StmtId valStmtId = middleFn.body[0];
-        const auto& valAssign = std::get<cb::VarAssignment>(parseGood.arena.stmts[valStmtId].payload);
+        const auto& valAssign = cb::asStmt<cb::VarAssignment>(parseGood.arena, valStmtId);
         CHECK(valAssign.implicitBubble);
     }
 }
@@ -865,7 +865,7 @@ TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
 
 fn main()
     dim x = 42
-    print("Answer: " & str(x))
+    print("Answer: " & x.toStr())
 end fn
 )";
     outCb.close();
@@ -2084,7 +2084,8 @@ fn main() as int
         const auto compList = readResponseForId(5);
         const cb::JsonId listItems = cb::jsonGetField(compList.arena, compList.root, "result");
         CHECK(hasCompletionItem(compList.arena, listItems, "push", 2, "fn(item as int)"));
-        CHECK(hasCompletionItem(compList.arena, listItems, "append", 2, "fn(item as int)"));
+        CHECK(hasCompletionItem(compList.arena, listItems, "len", 2, "fn() as int"));
+        CHECK_FALSE(hasCompletionItem(compList.arena, listItems, "append"));
 
         // 6. Verify named field= completion inside 'player.Player(' (id = 6)
         const auto compNamed = readResponseForId(6);
@@ -2540,3 +2541,42 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
         CHECK(rcNoMatch != 0);
     }
 }
+
+
+
+TEST_CASE("Analyzer rejects removed global len() and str() functions", "[analyzer]") {
+    SECTION("Rejects global len()") {
+        const std::string code = R"(
+fn main()
+    dim x = [1, 2]
+    print(len(x))
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badLen.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Global 'len()' is removed; use 'x.len()'") != std::string::npos);
+    }
+    SECTION("Rejects global str()") {
+        const std::string code = R"(
+fn main()
+    dim x = 42
+    print(str(x))
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badStr.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Global 'str()' is removed; use 'x.toStr()'") != std::string::npos);
+    }
+    SECTION("Rejects list.append()") {
+        const std::string code = R"(
+fn main()
+    dim x as list[int] = []
+    x.append(1)
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badAppend.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("'.append()' is removed; use '.push()'") != std::string::npos);
+    }
+}
+

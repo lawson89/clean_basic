@@ -31,7 +31,7 @@ fn main() as int
     end error
 
     dim argv = os.args()
-    print("Args count=" & len(argv))
+    print("Args count=" & argv.len())
 
     dim plat = os.platform()
     dim platOk = (plat == "linux" or plat == "macos" or plat == "windows")

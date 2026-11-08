@@ -1,6 +1,6 @@
 # Unity C++17 Code Generation, Runtime Preamble & C/C++ Interop
 
-This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, RAII `defer` guards, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
+This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/emitter_types.hpp` and `src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, RAII `defer` guards, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
 
 ### Related Documentation
 * [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
@@ -17,7 +17,7 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/emi
 1. **Linker Flags Comment Header** (when `import link "..."` is used):
    `// CleanBasic Linker Flags: -l<lib1> -l<lib2>`
 2. **C++17 Runtime Preamble (`CPP_RUNTIME_PREAMBLE`)**:
-   Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`) plus `CbError`, `cbToStr`, `cbHasError`, and `_DeferTask` / `_defer`.
+   Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`) plus `CbError`, `cbToStr`, `cbHasError`, `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`.
 3. **External C/C++ Headers** (from `import header "..."`):
    Deduplicated `#include "<header>"` directives.
 4. **Struct Forward Declarations & Type Aliases**:
@@ -71,13 +71,18 @@ inline std::string cbToStr(bool val) {
 inline std::string cbToStr(const CbError& val) { return val.msg; }
 inline bool cbHasError(const CbError& val) { return !val.msg.empty() || val.code != 0; }
 
-template <typename F> struct _DeferTask { F f; ~_DeferTask() { f(); } };
-template <typename F> _DeferTask<F> _defer(F f) { return {f}; }
+inline std::vector<std::string>& cbRuntimeArgs() {
+    static std::vector<std::string> args;
+    return args;
+}
+
+template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };
+template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }
 ```
 
 * **`CbError`**: Represents the built-in `err` type. An empty message (`msg == ""`) with `code == 0` denotes success (`cbHasError(err) == false`).
 * **`cbToStr`**: Overloaded helper used by the `&` string concatenation operator, `print(...)` (for `bool` and `err`), and `error(...)` message formatting.
-* **`_DeferTask<F>` & `_defer(F)`**: Zero-overhead RAII scope-exit wrapper that invokes the captured lambda in its destructor `~_DeferTask()` when the enclosing C++ scope exits.
+* **`CbDeferTask<F>` & `cbDefer(F)`**: Zero-overhead RAII scope-exit wrapper that invokes the captured lambda in its destructor `~_DeferTask()` when the enclosing C++ scope exits.
 
 ---
 
@@ -145,7 +150,7 @@ std::tuple<int, CbError> processNetwork() {
     auto [_val1, _err1] = connect(std::string("192.168.1.1"));
     if (cbHasError(_err1)) return { {}, _err1 };
     auto conn = _val1;
-    auto _defer_1 = _defer([&]() {
+    auto _defer_1 = cbDefer([&]() {
         closeConnection(conn);
     });
     return { 100, CbError{"", 0} };

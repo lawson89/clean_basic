@@ -36,12 +36,12 @@ package "CleanBasic Transpiler (namespace cb)" {
 (ast.hpp::AstArena)
 types | exprs | stmts | decls" as Arena
     component "4. Semantic Analyzer
-(analyzer.hpp::analyzeProgram)" as Analyzer
+(analyzer.hpp, symbols.hpp, type_infer.hpp)" as Analyzer
     database "GlobalSymbolTable
 (analyzer.hpp)
 types | aliases | functions | modules" as SymTab
     component "5. Unity C++17 Emitter
-(emitter.hpp::emitProgram)" as Emitter
+(emitter.hpp, emitter_types.hpp)" as Emitter
 }
 
 file "Unity C++17 Output (build.cpp)" as BuildCPP
@@ -76,17 +76,16 @@ Gpp --> Bin : "Links -pthread & import link libs"
 | **1. Lexical Analysis** | `src/cleanbasic/lexer.hpp`<br>`cb::tokenize()` | Raw source (`std::string_view`), filename | `LexResult` (`std::vector<Token>` or `DiagnosticError`) | Scans characters into tokens, coalesces two-word keywords (`end if`, `select case`, `can error`, etc.), collapses consecutive newlines, and rejects C-style `&&`, `\|\|`, `!` operators. |
 | **2. Syntax Analysis** | `src/cleanbasic/parser.hpp`<br>`cb::parseTokens()` / `cb::parseTokensWithArena()` | `std::vector<Token>`, `AstArena` | `ParseResult` (`Program`, `AstArena`, or `DiagnosticError`) | Recursive-descent parsing of top-level declarations, statements, and precedence-climbed expressions into flat arena vectors. |
 | **3. Module Resolution** | `src/cleanbasic/pipeline.hpp`<br>`cb::loadModuleDeclarationsRecursive()` | Root `Program`, `AstArena`, file path | Merged `std::vector<DeclId>` in topological dependency order | Recursively lexes and parses imported `.cb` modules into the **same** `AstArena`, deduplicates diamond dependencies, and detects circular import chains. |
-| **4. Semantic Analysis** | `src/cleanbasic/analyzer.hpp`<br>`cb::analyzeProgram()` | Unified `AstArena` & `Program` | `AnalysisResult` (`GlobalSymbolTable` or `DiagnosticError`) | Two-pass registration of types, aliases, functions, and module scopes; type inference; UFCS resolution; `const`/`dim` mutability checks; and static `can error` / `on error` verification. |
-| **5. C++17 Emission** | `src/cleanbasic/emitter.hpp`<br>`cb::emitProgram()` | `AstArena`, `GlobalSymbolTable`, `Program` | `std::string` (complete `build.cpp` source) | Emits the C++17 runtime preamble, `#include` headers, forward declarations, POD `struct` definitions, free functions, RAII `_defer` guards, tuple error propagation, and `int main()`. |
+| **4. Semantic Analysis** | `src/cleanbasic/analyzer.hpp`<br>(umbrella for `symbols.hpp`, `type_infer.hpp`) | Unified `AstArena` & `Program` | `AnalysisResult` (`GlobalSymbolTable` or `DiagnosticError`) | Two-pass registration of types, aliases, functions, and module scopes; type inference; UFCS resolution; `const`/`dim` mutability checks; and static `can error` / `on error` verification. |
+| **5. C++17 Emission** | `src/cleanbasic/emitter.hpp`<br>(umbrella for `emitter_types.hpp`) | `AstArena`, `GlobalSymbolTable`, `Program` | `std::string` (complete `build.cpp` source) | Emits the C++17 runtime preamble, `#include` headers, forward declarations, POD `struct` definitions, free functions, RAII `cbDefer` guards, tuple error propagation, and `int main()`. |
 
 ---
 
 ## 2. Data-Oriented C++17 Design (`src/cleanbasic/ast.hpp`)
 
-The transpiler itself is written in a strict, procedural, data-oriented subset of C++17 (`-std=c++17 -fno-exceptions -fno-rtti`, documented in [`docs/cppSubset.md`](cppSubset.md)):
-* **POD Structs + Free Functions Only:** All AST nodes, symbol records, and state containers are Plain Old Data (`struct`) with public fields and zero member methods. All compiler logic lives in standalone free functions inside `namespace cb`.
-* **Zero Raw Pointers:** No `T*`, `new`, or `delete` are used to link AST nodes.
-* **Zero Exceptions:** No `throw`, `try`, or `catch`. All errors are returned by value inside result structs (`LexResult`, `ParseResult`, `AnalysisResult`, `TranspileResult`, `BuildFileResult`).
+The CleanBasic compilation pipeline maintains a clear distinction between the **bootstrap transpiler implementation** and the **emitted C++17 target code** (detailed in [`docs/cpp_subset.md`](cpp_subset.md)):
+* **Target Output (`build.cpp`):** Strictly procedural POD `struct` definitions, free functions, value semantics, and zero exceptions/classes.
+* **Bootstrap Transpiler (`src/cleanbasic/`):** Implemented in idiomatic C++17 using flat `AstArena` contiguous vector storage, stateful pass classes (`Parser`, `Analyzer`, `Emitter`), concise `std::get_if<T>` pointer accessors (`arena.getExpr<T>(id)`, `arena.getStmt<T>(id)`, `arena.getDecl<T>(id)`), and exception-based diagnostic short-circuiting (`throw DiagnosticError`) caught at the top-level API boundary (`parseTokensWithArena`, `analyzeProgram`) so callers always receive value-based `ParseResult` and `AnalysisResult` structs.
 
 ### 2.1 Flat `AstArena` Vector Storage & Integer Handles
 

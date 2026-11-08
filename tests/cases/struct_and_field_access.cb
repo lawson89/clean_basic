@@ -13,8 +13,8 @@ end type
 
 fn main()
     dim pt = Point(x=1, y=2)
-    print(str(pt.x))
+    print(pt.x.toStr())
     pt.x = 10
     pt.y = 15
-    print(str(pt.x + pt.y))
+    print((pt.x + pt.y).toStr())
 end fn

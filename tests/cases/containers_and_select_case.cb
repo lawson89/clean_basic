@@ -6,7 +6,7 @@
 ' EXPECT_OUT: score: 42
 
 fn testContainers(nums as list[int], lookup as dict[str, int]) as int
-    select case len(nums)
+    select case nums.len()
     case 0
         return 0
     case else

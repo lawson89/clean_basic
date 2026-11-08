@@ -88,7 +88,11 @@
       "patterns": [
         {
           "name": "support.function.builtin.cleanbasic",
-          "match": "\\b(?:print|len|str|error)(?=\\s*\\()"
+          "match": "\\b(?:print|error)(?=\\s*\\()"
+        },
+        {
+          "name": "support.function.builtin.method.cleanbasic",
+          "match": "\\.(?:len|toStr|toInt|toFloat|push)(?=\\s*\\()"
         }
       ]
     },

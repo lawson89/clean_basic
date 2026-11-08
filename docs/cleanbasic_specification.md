@@ -213,7 +213,7 @@ fn startServer()
     ' startServer() cannot fail. Register a scope-level 'on error' handler
     ' before calling any fallible functions in this scope.
     on error e
-        print("Failed to start server (code=" & e.code & "): " & e.msg)
+        print("Failed to start server (code=" & e.code.toStr() & "): " & e.msg)
         return
     end error
 
@@ -232,7 +232,7 @@ fn demoContainers() as int
     dim scores as dict[str, int] = {"alice": 100, "bob": 85}
 
     dim total = 0
-    for i = 0 to 2 step 1
+    for i = 0 to nums.len() - 1
         total = total + nums[i]
     end for
 
@@ -242,7 +242,7 @@ fn demoContainers() as int
 
     select case scores["alice"]
         case 100
-            print("Perfect score! Total: " & total)
+            print("Perfect score! Total: " & total.toStr())
         case else
             print("Keep trying")
     end select

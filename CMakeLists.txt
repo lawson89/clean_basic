@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Catch2 v3 integration (find_package with FetchContent fallback)
-set(CATCH_CONFIG_DISABLE_EXCEPTIONS ON CACHE BOOL "Disable exceptions in Catch2" FORCE)
 set(CATCH_INSTALL_DOCS OFF CACHE BOOL "Disable Catch2 docs" FORCE)
 set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "Disable Catch2 extras" FORCE)
 
@@ -36,7 +35,6 @@ target_compile_definitions(cleanbasic_core INTERFACE
     CLEANBASIC_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_compile_options(cleanbasic_core INTERFACE
-    -fno-exceptions
     -fno-rtti
     -Wall
     -Wextra
