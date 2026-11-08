@@ -184,19 +184,7 @@ partition "UFCS Resolution (target is a value expression)" {
     endif
   endif
 
-  :UFCS Step 3 (Directly Imported Modules):
-  Collect all pub functions named 'name' across
-  symbols.modules[currentModuleId];
-  if (Exactly 1 pub candidate?) then (yes)
-    :Return candidate FnSymbol;
-    stop
-  elseif (Multiple pub candidates?) then (disambiguate by 1st param type)
-    :Filter candidates where params[0].type == recvTypeKey;
-    if (Exactly 1 type-matched candidate?) then (yes)
-      :Return matched FnSymbol;
-      stop
-    endif
-  endif
+
 }
 
 :Return std::nullopt;

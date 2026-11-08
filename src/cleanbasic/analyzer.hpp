@@ -340,42 +340,7 @@ inline std::optional<FnSymbol> resolveUfcsFn(
         }
     }
 
-    // UFCS Step 3: Directly imported modules of currentModuleId
-    const auto modIt = symbols.modules.find(std::string(currentModuleId));
-    if (modIt != symbols.modules.end()) {
-        std::vector<FnSymbol> pubCandidates;
-        std::unordered_set<std::string> seenKeys;
-        for (const auto& [aliasName, importedModId] : modIt->second) {
-            const std::string candKey = symbolKey(importedModId, methodName);
-            if (seenKeys.find(candKey) != seenKeys.end()) {
-                continue;
-            }
-            seenKeys.insert(candKey);
-            const auto candIt = symbols.functions.find(candKey);
-            if (candIt != symbols.functions.end() && candIt->second.isPub) {
-                pubCandidates.push_back(candIt->second);
-            }
-        }
-        if (pubCandidates.size() == 1) {
-            return pubCandidates[0];
-        }
-        if (pubCandidates.size() > 1 && !recvTypeKey.empty()) {
-            std::vector<FnSymbol> typeMatched;
-            for (const auto& cand : pubCandidates) {
-                if (!cand.params.empty() && cand.params[0].typeId < arena.types.size()) {
-                    const std::string paramKey = resolveSymbolKey(
-                        symbols, cand.moduleId, arena.types[cand.params[0].typeId].name
-                    );
-                    if (paramKey == recvTypeKey) {
-                        typeMatched.push_back(cand);
-                    }
-                }
-            }
-            if (typeMatched.size() == 1) {
-                return typeMatched[0];
-            }
-        }
-    }
+
     return std::nullopt;
 }
 

@@ -1496,13 +1496,7 @@ inline void collectUfcsCompletionsForType(
     const std::string& recvTypeKey = snap.arena.types[resolvedRecv].name;
     const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);
 
-    std::unordered_map<std::string, bool> allowedImportedMods;
-    const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
-    if (modMapIt != snap.symbols.modules.end()) {
-        for (const auto& kv : modMapIt->second) {
-            allowedImportedMods[kv.second] = true;
-        }
-    }
+
 
     for (const auto& kv : snap.symbols.functions) {
         const FnSymbol& fn = kv.second;
@@ -1511,8 +1505,7 @@ inline void collectUfcsCompletionsForType(
         }
         const bool inCurrentMod = (fn.moduleId == currentModuleId);
         const bool inDefiningMod = (!recvModId.empty() && fn.moduleId == recvModId && fn.isPub);
-        const bool inImportedMod = (allowedImportedMods.find(fn.moduleId) != allowedImportedMods.end() && fn.isPub);
-        if (!inCurrentMod && !inDefiningMod && !inImportedMod) {
+        if (!inCurrentMod && !inDefiningMod) {
             continue;
         }
 
