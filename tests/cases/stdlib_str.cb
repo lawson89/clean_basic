@@ -1,8 +1,8 @@
 ' EXPECT_CPP: #include "
 ' EXPECT_CPP: str_bridge.hpp"
-' EXPECT_CPP: cbStdStrTrim(
-' EXPECT_CPP: cbStdStrSplit(
-' EXPECT_CPP: cbStdStrToInt(
+' EXPECT_CPP: cb_std_str__trim(
+' EXPECT_CPP: cb_std_str__split(
+' EXPECT_CPP: cb_std_str__toInt(
 ' EXPECT_OUT: Search: contains=true find=6 rfind=17 count=2 starts=true ends=true
 ' EXPECT_OUT: IgnoreCase: eq=true starts=true ends=true find=7 rfind=24 contains=true
 ' EXPECT_OUT: Split/Join: csv=a|b|c chars=X-Y fields=2026-11-06,ERROR,diskFull lines=3

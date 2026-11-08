@@ -1,8 +1,8 @@
 ' EXPECT_CPP: #include "
 ' EXPECT_CPP: os_bridge.hpp"
-' EXPECT_CPP: cbStdOsArgs(
-' EXPECT_CPP: cbStdOsCwd(
-' EXPECT_CPP: cbStdOsClock(
+' EXPECT_CPP: cb_std_os__args(
+' EXPECT_CPP: cb_std_os__cwd(
+' EXPECT_CPP: cb_std_os__clock(
 ' EXPECT_CPP: int main(int argc, char** argv)
 ' EXPECT_OUT: Args count=1
 ' EXPECT_OUT: Platform valid=true, unsetEnvExists=false, unsetEnvVal=[]

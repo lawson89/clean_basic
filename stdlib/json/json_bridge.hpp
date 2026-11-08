@@ -10,7 +10,7 @@
 #include <variant>
 
 struct CbJsonDoc {
-    cb_vendor_json::JsonArena arena;
+    cbVendorJson::JsonArena arena;
     int root = -1;
 };
 
@@ -25,7 +25,7 @@ inline CbJsonDoc cbJsonNewDoc() {
 }
 
 inline std::tuple<CbJsonDoc, CbError> cbJsonParse(const std::string& text) {
-    auto res = cb_vendor_json::parseJson(text);
+    auto res = cbVendorJson::parseJson(text);
     if (!res.ok) {
         return {CbJsonDoc{}, CbError{res.error, 400}};
     }
@@ -47,7 +47,7 @@ inline std::string cbJsonStringifyVal(const CbJsonDoc& doc, CbJsonVal val) {
     if (val.id < 0) {
         return "null";
     }
-    return cb_vendor_json::serializeJson(doc.arena, static_cast<cb_vendor_json::JsonId>(val.id));
+    return cbVendorJson::serializeJson(doc.arena, static_cast<cbVendorJson::JsonId>(val.id));
 }
 
 inline std::string cbJsonStringify(const CbJsonDoc& doc) {
@@ -55,42 +55,42 @@ inline std::string cbJsonStringify(const CbJsonDoc& doc) {
 }
 
 inline CbJsonVal cbJsonNewObject(CbJsonDoc& doc) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddObject(doc.arena))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddObject(doc.arena))};
 }
 
 inline CbJsonVal cbJsonNewArray(CbJsonDoc& doc) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddArray(doc.arena))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddArray(doc.arena))};
 }
 
 inline CbJsonVal cbJsonNewStr(CbJsonDoc& doc, const std::string& val) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddString(doc.arena, val))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddString(doc.arena, val))};
 }
 
 inline CbJsonVal cbJsonNewInt(CbJsonDoc& doc, int val) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddInt(doc.arena, static_cast<int64_t>(val)))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddInt(doc.arena, static_cast<int64_t>(val)))};
 }
 
 inline CbJsonVal cbJsonNewFloat(CbJsonDoc& doc, double val) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddFloat(doc.arena, val))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddFloat(doc.arena, val))};
 }
 
 inline CbJsonVal cbJsonNewBool(CbJsonDoc& doc, bool val) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddBool(doc.arena, val))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddBool(doc.arena, val))};
 }
 
 inline CbJsonVal cbJsonNewNull(CbJsonDoc& doc) {
-    return CbJsonVal{static_cast<int>(cb_vendor_json::jsonAddNull(doc.arena))};
+    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddNull(doc.arena))};
 }
 
 inline void cbJsonObjectSet(CbJsonDoc& doc, CbJsonVal obj, const std::string& key, CbJsonVal val) {
     if (obj.id < 0 || val.id < 0) {
         return;
     }
-    cb_vendor_json::jsonObjectSet(
+    cbVendorJson::jsonObjectSet(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(obj.id),
+        static_cast<cbVendorJson::JsonId>(obj.id),
         key,
-        static_cast<cb_vendor_json::JsonId>(val.id)
+        static_cast<cbVendorJson::JsonId>(val.id)
     );
 }
 
@@ -98,10 +98,10 @@ inline void cbJsonArrayPush(CbJsonDoc& doc, CbJsonVal arr, CbJsonVal elem) {
     if (arr.id < 0 || elem.id < 0) {
         return;
     }
-    cb_vendor_json::jsonArrayPush(
+    cbVendorJson::jsonArrayPush(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(arr.id),
-        static_cast<cb_vendor_json::JsonId>(elem.id)
+        static_cast<cbVendorJson::JsonId>(arr.id),
+        static_cast<cbVendorJson::JsonId>(elem.id)
     );
 }
 
@@ -109,12 +109,12 @@ inline bool cbJsonHasField(const CbJsonDoc& doc, CbJsonVal obj, const std::strin
     if (obj.id < 0) {
         return false;
     }
-    const auto fid = cb_vendor_json::jsonGetField(
+    const auto fid = cbVendorJson::jsonGetField(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(obj.id),
+        static_cast<cbVendorJson::JsonId>(obj.id),
         key
     );
-    return fid != cb_vendor_json::JSON_INVALID_ID;
+    return fid != cbVendorJson::JSON_INVALID_ID;
 }
 
 inline std::tuple<CbJsonVal, CbError> cbJsonGetField(
@@ -125,12 +125,12 @@ inline std::tuple<CbJsonVal, CbError> cbJsonGetField(
     if (obj.id < 0) {
         return {CbJsonVal{-1}, CbError{"Invalid JSON object handle", 404}};
     }
-    const auto fid = cb_vendor_json::jsonGetField(
+    const auto fid = cbVendorJson::jsonGetField(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(obj.id),
+        static_cast<cbVendorJson::JsonId>(obj.id),
         key
     );
-    if (fid == cb_vendor_json::JSON_INVALID_ID) {
+    if (fid == cbVendorJson::JSON_INVALID_ID) {
         return {CbJsonVal{-1}, CbError{"Missing JSON object field '" + key + "'", 404}};
     }
     return {CbJsonVal{static_cast<int>(fid)}, CbError{"", 0}};
@@ -140,9 +140,9 @@ inline std::tuple<std::string, CbError> cbJsonGetStr(const CbJsonDoc& doc, CbJso
     if (val.id < 0) {
         return {std::string(""), CbError{"Invalid JSON value handle", 422}};
     }
-    const auto res = cb_vendor_json::jsonGetString(
+    const auto res = cbVendorJson::jsonGetString(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(val.id)
+        static_cast<cbVendorJson::JsonId>(val.id)
     );
     if (!res.has_value()) {
         return {std::string(""), CbError{"JSON value is not a string", 422}};
@@ -154,9 +154,9 @@ inline std::tuple<int, CbError> cbJsonGetInt(const CbJsonDoc& doc, CbJsonVal val
     if (val.id < 0) {
         return {0, CbError{"Invalid JSON value handle", 422}};
     }
-    const auto res = cb_vendor_json::jsonGetInt(
+    const auto res = cbVendorJson::jsonGetInt(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(val.id)
+        static_cast<cbVendorJson::JsonId>(val.id)
     );
     if (!res.has_value()) {
         return {0, CbError{"JSON value is not a number", 422}};
@@ -168,9 +168,9 @@ inline std::tuple<double, CbError> cbJsonGetFloat(const CbJsonDoc& doc, CbJsonVa
     if (val.id < 0) {
         return {0.0, CbError{"Invalid JSON value handle", 422}};
     }
-    const auto res = cb_vendor_json::jsonGetFloat(
+    const auto res = cbVendorJson::jsonGetFloat(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(val.id)
+        static_cast<cbVendorJson::JsonId>(val.id)
     );
     if (!res.has_value()) {
         return {0.0, CbError{"JSON value is not a number", 422}};
@@ -182,9 +182,9 @@ inline std::tuple<bool, CbError> cbJsonGetBool(const CbJsonDoc& doc, CbJsonVal v
     if (val.id < 0) {
         return {false, CbError{"Invalid JSON value handle", 422}};
     }
-    const auto res = cb_vendor_json::jsonGetBool(
+    const auto res = cbVendorJson::jsonGetBool(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(val.id)
+        static_cast<cbVendorJson::JsonId>(val.id)
     );
     if (!res.has_value()) {
         return {false, CbError{"JSON value is not a boolean", 422}};
@@ -196,9 +196,9 @@ inline bool cbJsonIsNull(const CbJsonDoc& doc, CbJsonVal val) {
     if (val.id < 0) {
         return false;
     }
-    return cb_vendor_json::jsonIsNull(
+    return cbVendorJson::jsonIsNull(
         doc.arena,
-        static_cast<cb_vendor_json::JsonId>(val.id)
+        static_cast<cbVendorJson::JsonId>(val.id)
     );
 }
 
@@ -206,14 +206,14 @@ inline int cbJsonArrayLen(const CbJsonDoc& doc, CbJsonVal arr) {
     if (arr.id < 0) {
         return 0;
     }
-    const auto uid = static_cast<cb_vendor_json::JsonId>(arr.id);
+    const auto uid = static_cast<cbVendorJson::JsonId>(arr.id);
     if (uid >= doc.arena.nodes.size()) {
         return 0;
     }
-    if (!std::holds_alternative<cb_vendor_json::JsonArray>(doc.arena.nodes[uid])) {
+    if (!std::holds_alternative<cbVendorJson::JsonArray>(doc.arena.nodes[uid])) {
         return 0;
     }
-    return static_cast<int>(std::get<cb_vendor_json::JsonArray>(doc.arena.nodes[uid]).elements.size());
+    return static_cast<int>(std::get<cbVendorJson::JsonArray>(doc.arena.nodes[uid]).elements.size());
 }
 
 inline std::tuple<CbJsonVal, CbError> cbJsonArrayAt(
@@ -224,12 +224,12 @@ inline std::tuple<CbJsonVal, CbError> cbJsonArrayAt(
     if (arr.id < 0 || index < 0) {
         return {CbJsonVal{-1}, CbError{"JSON array index out of bounds", 404}};
     }
-    const auto uid = static_cast<cb_vendor_json::JsonId>(arr.id);
+    const auto uid = static_cast<cbVendorJson::JsonId>(arr.id);
     if (uid >= doc.arena.nodes.size() ||
-        !std::holds_alternative<cb_vendor_json::JsonArray>(doc.arena.nodes[uid])) {
+        !std::holds_alternative<cbVendorJson::JsonArray>(doc.arena.nodes[uid])) {
         return {CbJsonVal{-1}, CbError{"JSON value is not an array", 422}};
     }
-    const auto& elems = std::get<cb_vendor_json::JsonArray>(doc.arena.nodes[uid]).elements;
+    const auto& elems = std::get<cbVendorJson::JsonArray>(doc.arena.nodes[uid]).elements;
     const auto uIdx = static_cast<size_t>(index);
     if (uIdx >= elems.size()) {
         return {CbJsonVal{-1}, CbError{"JSON array index out of bounds", 404}};

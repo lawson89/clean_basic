@@ -242,6 +242,51 @@ inline TypeId inferExprType(
     std::string_view currentModuleId
 );
 
+inline TypeNode resolveAliasFromNode(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeNode curr
+) {
+    std::unordered_set<std::string> seen;
+    std::string activeModId(currentModuleId);
+
+    while (!curr.name.empty()) {
+        const std::string key = resolveSymbolKey(symbols, activeModId, curr.name);
+        const auto it = symbols.aliases.find(key);
+        if (it == symbols.aliases.end()) {
+            break;
+        }
+        if (curr.name.find('.') != std::string::npos && !it->second.isPub) {
+            break;
+        }
+        if (seen.find(key) != seen.end()) {
+            break;
+        }
+        seen.insert(key);
+        activeModId = it->second.moduleId;
+        const TypeId aliasedId = it->second.targetType;
+        if (aliasedId >= arena.types.size()) {
+            break;
+        }
+        const TypeNode& aliased = arena.types[aliasedId];
+        curr.name = aliased.name;
+        curr.typeArgs = aliased.typeArgs;
+    }
+
+    if (!curr.name.empty() && !isBuiltinTypeName(curr.name)) {
+        const std::string typeKey = resolveSymbolKey(symbols, activeModId, curr.name);
+        const auto tit = symbols.types.find(typeKey);
+        if (tit != symbols.types.end()) {
+            if (curr.name.find('.') == std::string::npos || tit->second.isPub) {
+                curr.name = tit->second.key;
+            }
+        }
+    }
+
+    return curr;
+}
+
 inline std::optional<TypeSymbol> resolveTypeSymbolByName(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -249,34 +294,23 @@ inline std::optional<TypeSymbol> resolveTypeSymbolByName(
     std::string_view rawName,
     bool requireFirstHopPub = false
 ) {
-    std::string key = resolveSymbolKey(symbols, currentModuleId, rawName);
-    if (symbols.functions.find(key) != symbols.functions.end()) {
+    const std::string firstKey = resolveSymbolKey(symbols, currentModuleId, rawName);
+    if (symbols.functions.find(firstKey) != symbols.functions.end()) {
         return std::nullopt;
     }
-    std::unordered_set<std::string> seen;
-    std::string activeMod(currentModuleId);
-    bool firstHop = true;
-    while (symbols.aliases.find(key) != symbols.aliases.end()) {
-        if (seen.find(key) != seen.end()) {
-            break;
-        }
-        seen.insert(key);
-        const auto& asym = symbols.aliases.at(key);
-        if (firstHop && requireFirstHopPub && !asym.isPub && asym.moduleId != currentModuleId) {
+    if (requireFirstHopPub) {
+        const auto ait = symbols.aliases.find(firstKey);
+        if (ait != symbols.aliases.end() && !ait->second.isPub && ait->second.moduleId != currentModuleId) {
             return std::nullopt;
         }
-        firstHop = false;
-        activeMod = asym.moduleId;
-        if (asym.targetType >= arena.types.size()) {
-            break;
+        const auto tit = symbols.types.find(firstKey);
+        if (tit != symbols.types.end() && !tit->second.isPub && tit->second.moduleId != currentModuleId) {
+            return std::nullopt;
         }
-        key = resolveSymbolKey(symbols, activeMod, arena.types[asym.targetType].name);
     }
-    const auto it = symbols.types.find(key);
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(rawName), {}});
+    const auto it = symbols.types.find(resolved.name);
     if (it != symbols.types.end()) {
-        if (firstHop && requireFirstHopPub && !it->second.isPub && it->second.moduleId != currentModuleId) {
-            return std::nullopt;
-        }
         return it->second;
     }
     return std::nullopt;
@@ -308,6 +342,52 @@ inline std::optional<TypeSymbol> resolveTypeSymbol(
     return std::nullopt;
 }
 
+inline std::string resolveUfcsDefiningModule(
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    std::string_view recvTypeKey
+) {
+    if (recvTypeKey == "str") {
+        if (currentModuleId == "std/str") {
+            return "std/str";
+        }
+        const auto modIt = symbols.modules.find(std::string(currentModuleId));
+        if (modIt != symbols.modules.end()) {
+            for (const auto& kv : modIt->second) {
+                if (kv.second == "std/str") {
+                    return "std/str";
+                }
+            }
+        }
+        return "";
+    }
+    const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);
+    return recvModId;
+}
+
+inline bool ufcsParamMatchesReceiver(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    const FnSymbol& fn,
+    std::string_view recvTypeKey
+) {
+    if (fn.params.empty()) {
+        return false;
+    }
+    if (recvTypeKey.empty() || recvTypeKey == "auto" || recvTypeKey == "any") {
+        return true;
+    }
+    const TypeId p0Tid = fn.params[0].typeId;
+    if (p0Tid == INVALID_ID || p0Tid >= arena.types.size()) {
+        return false;
+    }
+    const TypeNode p0Resolved = resolveAliasFromNode(arena, symbols, fn.moduleId, arena.types[p0Tid]);
+    if (p0Resolved.name == "any") {
+        return true;
+    }
+    return p0Resolved.name == recvTypeKey;
+}
+
 inline std::optional<FnSymbol> resolveUfcsFn(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -315,31 +395,36 @@ inline std::optional<FnSymbol> resolveUfcsFn(
     TypeId recvTid,
     std::string_view methodName
 ) {
+    TypeNode resolvedRecvNode{};
+    if (recvTid < arena.types.size()) {
+        resolvedRecvNode = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[recvTid]);
+    }
+    std::string recvTypeKey = resolvedRecvNode.name;
+    if (!recvTypeKey.empty() && !isBuiltinTypeName(recvTypeKey)) {
+        recvTypeKey = resolveSymbolKey(symbols, currentModuleId, recvTypeKey);
+    }
+
     // UFCS Step 1: Current module
     const std::string localKey = symbolKey(currentModuleId, methodName);
     const auto localIt = symbols.functions.find(localKey);
-    if (localIt != symbols.functions.end()) {
+    if (localIt != symbols.functions.end() &&
+        ufcsParamMatchesReceiver(arena, symbols, localIt->second, recvTypeKey)) {
         return localIt->second;
     }
 
-    // UFCS Step 2: Receiver's defining module
-    const TypeId resolvedRecv = resolveAlias(arena, symbols, currentModuleId, recvTid);
-    std::string recvTypeKey;
-    if (resolvedRecv != INVALID_ID && resolvedRecv < arena.types.size()) {
-        recvTypeKey = resolveSymbolKey(symbols, currentModuleId, arena.types[resolvedRecv].name);
-        const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);
-        if (!recvModId.empty()) {
-            const std::string recvFnKey = symbolKey(recvModId, methodName);
-            const auto recvFnIt = symbols.functions.find(recvFnKey);
-            if (recvFnIt != symbols.functions.end()) {
-                if (recvFnIt->second.isPub) {
-                    return recvFnIt->second;
-                }
-                return std::nullopt;
+    // UFCS Step 2: Receiver's defining module (including 'std/str' for 'str' when imported)
+    const std::string recvModId = resolveUfcsDefiningModule(symbols, currentModuleId, recvTypeKey);
+    if (!recvModId.empty()) {
+        const std::string recvFnKey = symbolKey(recvModId, methodName);
+        const auto recvFnIt = symbols.functions.find(recvFnKey);
+        if (recvFnIt != symbols.functions.end()) {
+            if ((recvModId == currentModuleId || recvFnIt->second.isPub) &&
+                ufcsParamMatchesReceiver(arena, symbols, recvFnIt->second, recvTypeKey)) {
+                return recvFnIt->second;
             }
+            return std::nullopt;
         }
     }
-
 
     return std::nullopt;
 }
@@ -435,50 +520,7 @@ inline TypeNode resolveAliasNode(
     if (tid >= arena.types.size()) {
         return TypeNode{};
     }
-
-    std::unordered_set<std::string> seen;
-    TypeNode curr = arena.types[tid];
-    std::string activeModId(currentModuleId);
-
-    while (!curr.name.empty()) {
-        const std::string key = resolveSymbolKey(symbols, activeModId, curr.name);
-        const auto it = symbols.aliases.find(key);
-        if (it == symbols.aliases.end()) {
-            break;
-        }
-        if (curr.name.find('.') != std::string::npos && !it->second.isPub) {
-            break;
-        }
-        if (seen.find(key) != seen.end()) {
-            break;
-        }
-        seen.insert(key);
-        activeModId = it->second.moduleId;
-        const TypeId aliasedId = it->second.targetType;
-        if (aliasedId >= arena.types.size()) {
-            break;
-        }
-        const TypeNode& aliased = arena.types[aliasedId];
-
-        TypeNode nextNode{};
-        nextNode.line = curr.line;
-        nextNode.col = curr.col;
-        nextNode.name = aliased.name;
-        nextNode.typeArgs = aliased.typeArgs;
-        curr = std::move(nextNode);
-    }
-
-    if (!curr.name.empty() && !isBuiltinTypeName(curr.name)) {
-        const std::string typeKey = resolveSymbolKey(symbols, activeModId, curr.name);
-        const auto tit = symbols.types.find(typeKey);
-        if (tit != symbols.types.end()) {
-            if (curr.name.find('.') == std::string::npos || tit->second.isPub) {
-                curr.name = tit->second.key;
-            }
-        }
-    }
-
-    return curr;
+    return resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
 }
 
 inline TypeId resolveAlias(
@@ -976,11 +1018,7 @@ inline void analyzeStmt(
 
     if (std::holds_alternative<ErrorBlock>(payload)) {
         const auto& errBlock = std::get<ErrorBlock>(payload);
-        TypeId errT = symbols.typeErr;
-        if (errT == INVALID_ID) {
-            errT = addType(arena, TypeNode{stmtNode.line, stmtNode.col, "err", {}});
-        }
-        bindLocalVar(scope, state, errBlock.errVar, errT, false, false, stmtNode.line, stmtNode.col);
+        bindLocalVar(scope, state, errBlock.errVar, symbols.typeErr, false, false, stmtNode.line, stmtNode.col);
         auto errScope = scope;
         analyzeBlock(state, arena, fn, errBlock.body, symbols, errScope, false);
         if (state.hasError) return;
@@ -1024,8 +1062,7 @@ inline void analyzeStmt(
                 validateExprCalls(state, arena, fn, forStmt.rangeSpec.step, symbols, scope, false);
             }
             if (!forStmt.loopVars.empty()) {
-                const TypeId intT = addType(arena, TypeNode{stmtNode.line, stmtNode.col, "int", {}});
-                bindLocalVar(scope, state, forStmt.loopVars[0], intT, false, false, stmtNode.line, stmtNode.col);
+                bindLocalVar(scope, state, forStmt.loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
             }
         } else if (forStmt.hasIterable) {
             validateExprCalls(state, arena, fn, forStmt.iterable, symbols, scope, false);
@@ -1042,15 +1079,38 @@ inline void analyzeStmt(
                         bindLocalVar(scope, state, forStmt.loopVars[1], iterT.typeArgs[1], false, false, stmtNode.line, stmtNode.col);
                     }
                 } else {
-                    const TypeId autoT = addType(arena, TypeNode{stmtNode.line, stmtNode.col, "auto", {}});
                     for (const auto& lv : forStmt.loopVars) {
-                        bindLocalVar(scope, state, lv, autoT, false, false, stmtNode.line, stmtNode.col);
+                        bindLocalVar(scope, state, lv, symbols.typeAuto, false, false, stmtNode.line, stmtNode.col);
                     }
                 }
             }
         }
         if (state.hasError) return;
         analyzeBlock(state, arena, fn, forStmt.body, symbols, scope, hasActiveOnError);
+        return;
+    }
+
+    if (std::holds_alternative<WhileStmt>(payload)) {
+        const auto& whileStmt = std::get<WhileStmt>(payload);
+        bool isFallibleCond = false;
+        if (whileStmt.condition < arena.exprs.size() &&
+            std::holds_alternative<FuncCall>(arena.exprs[whileStmt.condition].payload)) {
+            const auto& call = std::get<FuncCall>(arena.exprs[whileStmt.condition].payload);
+            const auto fnOpt = resolveFuncCall(arena, call, symbols, state.moduleId, scope);
+            if (fnOpt.has_value() && fnOpt->isFallible) {
+                isFallibleCond = true;
+            }
+        }
+        if (isFallibleCond) {
+            bool dummyBubble = false;
+            checkFallibleUsage(state, arena, fn, whileStmt.condition, hasActiveOnError, symbols, dummyBubble);
+            if (state.hasError) return;
+            validateExprCalls(state, arena, fn, whileStmt.condition, symbols, scope, true);
+        } else {
+            validateExprCalls(state, arena, fn, whileStmt.condition, symbols, scope, false);
+        }
+        if (state.hasError) return;
+        analyzeBlock(state, arena, fn, whileStmt.body, symbols, scope, hasActiveOnError);
         return;
     }
 
@@ -1088,12 +1148,12 @@ inline void analyzeStmt(
 
     if (std::holds_alternative<ReturnStmt>(payload)) {
         const auto& retStmt = std::get<ReturnStmt>(payload);
-        if (retStmt.has_value) {
+        if (retStmt.hasValue) {
             validateExprCalls(state, arena, fn, retStmt.value, symbols, scope, false);
             if (state.hasError) return;
         }
         bool isReturnErrorCall = false;
-        if (retStmt.has_value) {
+        if (retStmt.hasValue) {
             const ExprId firstId = retStmt.value;
             if (firstId < arena.exprs.size() && std::holds_alternative<FuncCall>(arena.exprs[firstId].payload)) {
                 const auto& call = std::get<FuncCall>(arena.exprs[firstId].payload);
@@ -1104,11 +1164,11 @@ inline void analyzeStmt(
         }
         if (!isReturnErrorCall) {
             const bool expectedHasValue = (fn.returnType != INVALID_ID && !isVoidType(arena, fn.returnType));
-            if (retStmt.has_value && !expectedHasValue) {
+            if (retStmt.hasValue && !expectedHasValue) {
                 std::string msg = "Function '" + fn.name + "' returns void, but a value was returned.";
                 setAnalyzerError(state, stmtNode.line, stmtNode.col, msg);
                 return;
-            } else if (!retStmt.has_value && expectedHasValue) {
+            } else if (!retStmt.hasValue && expectedHasValue) {
                 std::string msg = "Function '" + fn.name + "' expects a return value, but none was provided.";
                 setAnalyzerError(state, stmtNode.line, stmtNode.col, msg);
                 return;

@@ -875,7 +875,7 @@ end fn
 
     const std::string content = cb::testE2E::readFileText(testOutPath);
     CHECK(content.find("// CleanBasic Linker Flags: -lm") != std::string::npos);
-    CHECK(content.find("int main()") != std::string::npos);
+    CHECK(content.find("int main(int argc, char** argv)") != std::string::npos);
 
     std::string cbBinPath = "./build/cleanbasic";
     std::ifstream cbBinRoot("build/cleanbasic");
@@ -2486,5 +2486,57 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         CHECK(okRes.compileCommand.find(R"(-I")") != std::string::npos);
         std::error_code ec;
         CHECK(std::filesystem::exists(outBin, ec));
+    }
+}
+
+TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/cbgrep.cb E2E verification", "[stdlib][fs][os][str][cbgrep][e2e]") {
+    SECTION("E2E fixture tests/cases/stdlib_fs.cb compiles and runs natively") {
+        cb::testE2E::runE2EFixture("stdlib_fs", "tests/cases/stdlib_fs.cb");
+    }
+
+    SECTION("E2E fixture tests/cases/stdlib_os.cb compiles and runs natively") {
+        cb::testE2E::runE2EFixture("stdlib_os", "tests/cases/stdlib_os.cb");
+    }
+
+    SECTION("E2E fixture tests/cases/stdlib_str.cb compiles and runs natively with deterministic std/str UFCS") {
+        cb::testE2E::runE2EFixture("stdlib_str", "tests/cases/stdlib_str.cb");
+    }
+
+    SECTION("examples/cbgrep.cb compiles and runs natively with CLI flags and exit codes") {
+        const std::string outCpp = "build/testArtifacts/cbgrepBuild.cpp";
+        const std::string outBin = "build/testArtifacts/cbgrepBin";
+        const cb::BuildFileResult buildRes = cb::buildFile(
+            "examples/cbgrep.cb",
+            outCpp,
+            true,
+            outBin,
+            "native",
+            "g++"
+        );
+        INFO("cbgrep build diagnostic: " << cb::formatDiagnostic(buildRes.error));
+        REQUIRE(buildRes.ok);
+
+        const std::string sampleFile = "build/testArtifacts/cbgrepSample.txt";
+        const std::string stdoutFile = "build/testArtifacts/cbgrepStdout.txt";
+        {
+            std::ofstream out(sampleFile, std::ios::out | std::ios::binary | std::ios::trunc);
+            out << "CleanBasic Alpha" << std::endl
+                << "Second line" << std::endl
+                << "cleanbasic beta" << std::endl;
+        }
+
+        const int rcMatch = std::system(("./" + outBin + " -in cleanbasic " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcMatch == 0);
+        const std::string matchOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(matchOut.find("1:CleanBasic Alpha") != std::string::npos);
+        CHECK(matchOut.find("3:cleanbasic beta") != std::string::npos);
+
+        const int rcCount = std::system(("./" + outBin + " -ic cleanbasic " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcCount == 0);
+        const std::string countOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(countOut.find("2") != std::string::npos);
+
+        const int rcNoMatch = std::system(("./" + outBin + " nonexistentPatternXYZ " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcNoMatch != 0);
     }
 }

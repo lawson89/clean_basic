@@ -351,7 +351,7 @@ inline std::vector<std::string> cbStrLines(const std::string& s) {
             if (start < s.size()) {
                 std::string tail = s.substr(start);
                 if (!tail.empty() && tail.back() == '\r') {
-                    tail.popBack();
+                    tail.pop_back();
                 }
                 out.push_back(std::move(tail));
             }
@@ -359,7 +359,7 @@ inline std::vector<std::string> cbStrLines(const std::string& s) {
         }
         std::string line = s.substr(start, nl - start);
         if (!line.empty() && line.back() == '\r') {
-            line.popBack();
+            line.pop_back();
         }
         out.push_back(std::move(line));
         start = nl + 1;
@@ -732,8 +732,8 @@ inline std::tuple<int, CbError> cbStrToInt(const std::string& s) {
     if (iss.fail() || !iss.eof()) {
         return {0, CbError{"Integer out of range: '" + s + "'", 400}};
     }
-    const int64_t minI = static_cast<int64_t>(std::numericLimits<int>::min());
-    const int64_t maxI = static_cast<int64_t>(std::numericLimits<int>::max());
+    const int64_t minI = static_cast<int64_t>(std::numeric_limits<int>::min());
+    const int64_t maxI = static_cast<int64_t>(std::numeric_limits<int>::max());
     if (val < minI || val > maxI) {
         return {0, CbError{"Integer out of range: '" + s + "'", 400}};
     }

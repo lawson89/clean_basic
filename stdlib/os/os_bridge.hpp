@@ -7,7 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <systemError>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -26,7 +26,7 @@ inline bool cbOsReadLine(std::string& outLine) {
         return false;
     }
     if (!outLine.empty() && outLine.back() == '\r') {
-        outLine.popBack();
+        outLine.pop_back();
     }
     return true;
 }
@@ -55,20 +55,20 @@ inline bool cbOsHasEnv(const std::string& name) {
 }
 
 inline std::tuple<std::string, CbError> cbOsCwd() {
-    std::errorCode ec;
-    const std::filesystem::path p = std::filesystem::currentPath(ec);
+    std::error_code ec;
+    const std::filesystem::path p = std::filesystem::current_path(ec);
     if (ec) {
         return {std::string(""), CbError{"Failed to get current working directory: " + ec.message(), 500}};
     }
-    return {p.genericString(), CbError{"", 0}};
+    return {p.generic_string(), CbError{"", 0}};
 }
 
 inline CbError cbOsChdir(const std::string& path) {
     if (path.empty()) {
         return CbError{"Cannot change directory to empty path", 400};
     }
-    std::errorCode ec;
-    std::filesystem::currentPath(path, ec);
+    std::error_code ec;
+    std::filesystem::current_path(path, ec);
     if (ec) {
         return CbError{"Failed to change directory to '" + path + "': " + ec.message(), 500};
     }
@@ -86,9 +86,9 @@ inline std::string cbOsPlatform() {
 }
 
 inline int cbOsClock() {
-    static const auto startTime = std::chrono::steadyClock::now();
-    const auto now = std::chrono::steadyClock::now();
-    const auto elapsedMs = std::chrono::durationCast<std::chrono::milliseconds>(now - startTime).count();
+    static const auto startTime = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
     return static_cast<int>(elapsedMs);
 }
 
@@ -96,7 +96,7 @@ inline void cbOsSleep(int ms) {
     if (ms <= 0) {
         return;
     }
-    std::thisThread::sleepFor(std::chrono::milliseconds(ms));
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
 inline int cbOsRun(const std::string& cmd) {

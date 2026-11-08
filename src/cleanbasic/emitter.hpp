@@ -46,6 +46,11 @@ inline std::string cbToStr(bool val) {
 inline std::string cbToStr(const CbError& val) { return val.msg; }
 inline bool cbHasError(const CbError& val) { return !val.msg.empty() || val.code != 0; }
 
+inline std::vector<std::string>& cbRuntimeArgs() {
+    static std::vector<std::string> args;
+    return args;
+}
+
 template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };
 template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }
 )";
@@ -174,11 +179,6 @@ inline std::string defaultValueForType(
     return mapTypeNode(arena, symbols, currentModuleId, resolved) + "{}";
 }
 
-inline std::string cppFnName(std::string_view name) {
-    if (name == "main") return "cbMain";
-    return std::string(name);
-}
-
 inline std::string joinStrings(const std::vector<std::string>& items, std::string_view sep = ", ") {
     std::string out;
     for (size_t i = 0; i < items.size(); ++i) {
@@ -225,7 +225,7 @@ inline std::string fnSignature(
         paramItems.push_back(mapType(arena, symbols, currentModuleId, p.typeId, p.isByref) + " " + p.name);
     }
     const std::string key = resolveSymbolKey(symbols, currentModuleId, fn.name);
-    std::string cppName = cppFnName(fn.name);
+    std::string cppName = makeCppFnName(currentModuleId, fn.name, fn.isExtern);
     if (symbols.functions.count(key) > 0) {
         cppName = symbols.functions.at(key).cppName;
     }
@@ -463,7 +463,7 @@ inline std::string emitExpr(
             }
 
             const std::optional<FnSymbol> fnSym = resolveFuncCall(arena, call, symbols, state.currentModuleId, scope);
-            std::string targetCppName = cppFnName(fnName);
+            std::string targetCppName = makeCppFnName("", fnName);
             if (fnSym.has_value()) {
                 targetCppName = fnSym->cppName;
             }
@@ -480,7 +480,7 @@ inline std::string emitExpr(
                 std::string targetModId;
                 if (isModuleAliasInScope(symbols, state.currentModuleId, tgtIdent.name, scope, targetModId)) {
                     const std::optional<FnSymbol> fnSym = resolveFuncCall(arena, call, symbols, state.currentModuleId, scope);
-                    std::string targetCppName = cppFnName(methodName);
+                    std::string targetCppName = makeCppFnName(targetModId, methodName);
                     if (fnSym.has_value()) {
                         targetCppName = fnSym->cppName;
                     }
@@ -560,7 +560,7 @@ inline std::string buildErrorBubbleReturn(
     std::string elem = "{}";
     if (tnode.name == "str" && tnode.typeArgs.empty()) {
         elem = "std::string{}";
-    } else if (symbols.types.find(tnode.name) != symbols.types.end()) {
+    } else if (tnode.name == "list" || tnode.name == "dict" || symbols.types.find(tnode.name) != symbols.types.end()) {
         elem = mapTypeNode(arena, symbols, currentModuleId, tnode) + "{}";
     }
     args = elem + ", " + std::string(errVar);
@@ -641,11 +641,11 @@ inline void emitFallibleAssignment(
     state.valCounter += 1;
     const uint32_t cid = state.valCounter;
 
-    const bool has_value = (fnSym.returnType != INVALID_ID && !isVoidType(arena, fnSym.returnType));
+    const bool hasValue = (fnSym.returnType != INVALID_ID && !isVoidType(arena, fnSym.returnType));
     const std::string valTmp = "_val" + std::to_string(cid);
     const std::string errVar = "_err" + std::to_string(cid);
 
-    if (has_value) {
+    if (hasValue) {
         emitLine(state, "auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
     } else {
         emitLine(state, "auto " + errVar + " = " + callCpp + ";");
@@ -660,14 +660,14 @@ inline void emitFallibleAssignment(
             TypeId retT = symbols.typeAuto;
             if (stmt.hasDeclaredType) {
                 retT = resolveAlias(arena, symbols, state.currentModuleId, stmt.declaredType);
-            } else if (has_value) {
+            } else if (hasValue) {
                 retT = resolveAlias(arena, symbols, fnSym.moduleId, fnSym.returnType);
             }
             const bool isNewDecl = stmt.isDim || stmt.isConst || (declaredVars.find(name) == declaredVars.end());
             scope[name] = VarSymbol{name, retT, false, stmt.isConst};
             declaredVars.insert(name);
             std::string rhs = "0";
-            if (has_value) {
+            if (hasValue) {
                 rhs = valTmp;
             }
             if (isNewDecl) {
@@ -682,7 +682,7 @@ inline void emitFallibleAssignment(
         } else {
             const std::string lhsCpp = emitExpr(arena, symbols, tid, scope, state);
             std::string rhs = "0";
-            if (has_value) {
+            if (hasValue) {
                 rhs = valTmp;
             }
             emitLine(state, lhsCpp + " = " + rhs + ";");
@@ -810,7 +810,7 @@ inline void emitReturn(
     const std::unordered_map<std::string, VarSymbol>& scope,
     EmitterState& state
 ) {
-    if (!stmt.has_value) {
+    if (!stmt.hasValue) {
         if (fn.isFallible && (fn.returnType == INVALID_ID || isVoidType(arena, fn.returnType))) {
             emitLine(state, R"(return CbError{"", 0};)");
         } else {
@@ -966,6 +966,44 @@ inline void emitStmt(
             emitLine(state, "}");
             return;
         }
+    }
+
+    if (std::holds_alternative<WhileStmt>(payload)) {
+        const auto& whileS = std::get<WhileStmt>(payload);
+        std::optional<FnSymbol> fallibleCondFn = std::nullopt;
+        if (whileS.condition < arena.exprs.size() &&
+            std::holds_alternative<FuncCall>(arena.exprs[whileS.condition].payload)) {
+            const auto& call = std::get<FuncCall>(arena.exprs[whileS.condition].payload);
+            const auto fnOpt = resolveFuncCall(arena, call, symbols, state.currentModuleId, scope);
+            if (fnOpt.has_value() && fnOpt->isFallible) {
+                fallibleCondFn = fnOpt;
+            }
+        }
+        auto whileScope = scope;
+        auto whileDecls = declaredVars;
+        if (fallibleCondFn.has_value()) {
+            emitLine(state, "while (true) {");
+            state.indentLevel += 1;
+            const std::string callCpp = emitExpr(arena, symbols, whileS.condition, whileScope, state);
+            state.valCounter += 1;
+            const uint32_t cid = state.valCounter;
+            const std::string valTmp = "_val" + std::to_string(cid);
+            const std::string errVar = "_err" + std::to_string(cid);
+            emitLine(state, "auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
+            emitActiveErrorHandlerOrBubble(arena, symbols, fn, errVar, whileScope, whileDecls, state);
+            emitLine(state, "if (!" + valTmp + ") { break; }");
+            emitStmtList(arena, symbols, fn, whileS.body, whileScope, whileDecls, state);
+            state.indentLevel -= 1;
+            emitLine(state, "}");
+        } else {
+            const std::string condCpp = emitExpr(arena, symbols, whileS.condition, scope, state);
+            emitLine(state, "while (" + condCpp + ") {");
+            state.indentLevel += 1;
+            emitStmtList(arena, symbols, fn, whileS.body, whileScope, whileDecls, state);
+            state.indentLevel -= 1;
+            emitLine(state, "}");
+        }
+        return;
     }
 
     if (std::holds_alternative<SelectStmt>(payload)) {
@@ -1195,11 +1233,43 @@ inline std::string emitProgram(
         emitLine(state);
     }
 
-    if (symbols.functions.find(symbolKey("", "main")) != symbols.functions.end()) {
-        emitLine(state, "int main() {");
+    const auto mainIt = symbols.functions.find(symbolKey("", "main"));
+    if (mainIt != symbols.functions.end()) {
+        const FnSymbol& mainSym = mainIt->second;
+        const bool mainReturnsInt = (mainSym.returnType == symbols.typeInt);
+        emitLine(state, "int main(int argc, char** argv) {");
         state.indentLevel += 1;
-        emitLine(state, "cbMain();");
-        emitLine(state, "return 0;");
+        emitLine(state, "auto& _cbArgs = cbRuntimeArgs();");
+        emitLine(state, "_cbArgs.clear();");
+        emitLine(state, "for (int _i = 0; _i < argc; ++_i) {");
+        state.indentLevel += 1;
+        emitLine(state, "_cbArgs.emplace_back(argv[_i]);");
+        state.indentLevel -= 1;
+        emitLine(state, "}");
+        if (mainSym.isFallible && mainReturnsInt) {
+            emitLine(state, "auto [_mainRc, _mainErr] = cbMain();");
+            emitLine(state, "if (cbHasError(_mainErr)) {");
+            state.indentLevel += 1;
+            emitLine(state, R"(std::cerr << "Unhandled error (code=" << _mainErr.code << "): " << _mainErr.msg << std::endl;)");
+            emitLine(state, "return 1;");
+            state.indentLevel -= 1;
+            emitLine(state, "}");
+            emitLine(state, "return _mainRc;");
+        } else if (mainSym.isFallible) {
+            emitLine(state, "auto _mainErr = cbMain();");
+            emitLine(state, "if (cbHasError(_mainErr)) {");
+            state.indentLevel += 1;
+            emitLine(state, R"(std::cerr << "Unhandled error (code=" << _mainErr.code << "): " << _mainErr.msg << std::endl;)");
+            emitLine(state, "return 1;");
+            state.indentLevel -= 1;
+            emitLine(state, "}");
+            emitLine(state, "return 0;");
+        } else if (mainReturnsInt) {
+            emitLine(state, "return cbMain();");
+        } else {
+            emitLine(state, "cbMain();");
+            emitLine(state, "return 0;");
+        }
         state.indentLevel -= 1;
         emitLine(state, "}");
     }

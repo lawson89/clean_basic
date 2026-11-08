@@ -223,8 +223,13 @@ struct DeferStmt {
     std::vector<StmtId> body;
 };
 
+struct WhileStmt {
+    ExprId condition = INVALID_ID;
+    std::vector<StmtId> body;
+};
+
 struct ReturnStmt {
-    bool has_value = false;
+    bool hasValue = false;
     ExprId value = INVALID_ID;
 };
 
@@ -237,6 +242,7 @@ using StmtVariant = std::variant<
     ExprStmt,
     IfStmt,
     ForStmt,
+    WhileStmt,
     SelectStmt,
     ErrorBlock,
     DeferStmt,
@@ -415,7 +421,7 @@ inline std::string normalizeRelPath(std::string_view rawPath) {
     size_t start = 0;
     while (start <= rawPath.size()) {
         size_t end = start;
-        while (end < rawPath.size() && rawPath[end] != '/' && rawPath[end] != '\0') {
+        while (end < rawPath.size() && rawPath[end] != '/' && rawPath[end] != static_cast<char>(92)) {
             end += 1;
         }
         const std::string_view seg = rawPath.substr(start, end - start);
@@ -471,7 +477,7 @@ inline std::string detectExecutablePath() {
     if (len > 0 && len < buf.size()) {
         std::error_code ec;
         const std::filesystem::path p(std::string(buf.data(), static_cast<size_t>(len)));
-        return p.genericString();
+        return p.generic_string();
     }
     return "";
 #elif defined(__APPLE__)
@@ -481,9 +487,9 @@ inline std::string detectExecutablePath() {
         std::error_code ec;
         const std::filesystem::path p = std::filesystem::canonical(std::filesystem::path(buf.data()), ec);
         if (!ec) {
-            return p.genericString();
+            return p.generic_string();
         }
-        return std::filesystem::path(buf.data()).genericString();
+        return std::filesystem::path(buf.data()).generic_string();
     }
     return "";
 #else

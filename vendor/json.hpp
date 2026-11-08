@@ -13,7 +13,7 @@
 #include <variant>
 #include <vector>
 
-namespace cb_vendor_json {
+namespace cbVendorJson {
 
 using JsonId = uint32_t;
 constexpr JsonId JSON_INVALID_ID = UINT32_MAX;
@@ -725,6 +725,6 @@ inline std::string serializeJson(const JsonArena& arena, JsonId id) {
     return out;
 }
 
-} // namespace cb_vendor_json
+} // namespace cbVendorJson
 
 #endif // CB_VENDOR_JSON_HPP

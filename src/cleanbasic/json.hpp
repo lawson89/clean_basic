@@ -14,43 +14,43 @@
 
 namespace cb {
 
-using cb_vendor_json::JsonId;
-using cb_vendor_json::JSON_INVALID_ID;
-using cb_vendor_json::JsonNull;
-using cb_vendor_json::JsonBool;
-using cb_vendor_json::JsonNumber;
-using cb_vendor_json::JsonString;
-using cb_vendor_json::JsonArray;
-using cb_vendor_json::JsonField;
-using cb_vendor_json::JsonObject;
-using cb_vendor_json::JsonVariant;
-using cb_vendor_json::JsonArena;
-using cb_vendor_json::JsonParseResult;
+using cbVendorJson::JsonId;
+using cbVendorJson::JSON_INVALID_ID;
+using cbVendorJson::JsonNull;
+using cbVendorJson::JsonBool;
+using cbVendorJson::JsonNumber;
+using cbVendorJson::JsonString;
+using cbVendorJson::JsonArray;
+using cbVendorJson::JsonField;
+using cbVendorJson::JsonObject;
+using cbVendorJson::JsonVariant;
+using cbVendorJson::JsonArena;
+using cbVendorJson::JsonParseResult;
 
-using cb_vendor_json::jsonAddNode;
-using cb_vendor_json::jsonAddNull;
-using cb_vendor_json::jsonAddBool;
-using cb_vendor_json::jsonAddInt;
-using cb_vendor_json::jsonAddFloat;
-using cb_vendor_json::jsonAddString;
-using cb_vendor_json::jsonAddArray;
-using cb_vendor_json::jsonAddObject;
-using cb_vendor_json::jsonArrayPush;
-using cb_vendor_json::jsonObjectSet;
+using cbVendorJson::jsonAddNode;
+using cbVendorJson::jsonAddNull;
+using cbVendorJson::jsonAddBool;
+using cbVendorJson::jsonAddInt;
+using cbVendorJson::jsonAddFloat;
+using cbVendorJson::jsonAddString;
+using cbVendorJson::jsonAddArray;
+using cbVendorJson::jsonAddObject;
+using cbVendorJson::jsonArrayPush;
+using cbVendorJson::jsonObjectSet;
 
-using cb_vendor_json::jsonGetField;
-using cb_vendor_json::jsonGetString;
-using cb_vendor_json::jsonGetInt;
-using cb_vendor_json::jsonGetFloat;
-using cb_vendor_json::jsonGetBool;
-using cb_vendor_json::jsonIsNull;
+using cbVendorJson::jsonGetField;
+using cbVendorJson::jsonGetString;
+using cbVendorJson::jsonGetInt;
+using cbVendorJson::jsonGetFloat;
+using cbVendorJson::jsonGetBool;
+using cbVendorJson::jsonIsNull;
 
-using cb_vendor_json::JSON_BACKSLASH;
-using cb_vendor_json::JSON_DQUOTE;
-using cb_vendor_json::jsonHexDigitValue;
-using cb_vendor_json::parseJson;
-using cb_vendor_json::serializeJsonInto;
-using cb_vendor_json::serializeJson;
+using cbVendorJson::JSON_BACKSLASH;
+using cbVendorJson::JSON_DQUOTE;
+using cbVendorJson::jsonHexDigitValue;
+using cbVendorJson::parseJson;
+using cbVendorJson::serializeJsonInto;
+using cbVendorJson::serializeJson;
 
 // ==========================================
 // JSON-RPC 2.0 Content-Length Framing

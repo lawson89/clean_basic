@@ -164,27 +164,28 @@ if (Is "target" an Identifier matching an imported module alias
 endif
 
 partition "UFCS Resolution (target is a value expression)" {
+  :Infer receiver type: recvTid = inferExprType(target)
+  and resolve alias to canonical recvTypeKey;
+
   :UFCS Step 1 (Current Module):
   Look up symbolKey(currentModuleId, name);
-  if (Found in current module?) then (yes)
+  if (Found in current module AND first param matches recvTypeKey?) then (yes)
     :Return FnSymbol (private or pub allowed);
     stop
   endif
 
   :UFCS Step 2 (Receiver's Defining Module):
-  Infer receiver type: recvTid = inferExprType(target)
-  Extract defining module recvModId from recvTid;
+  Extract defining module recvModId from recvTypeKey
+  (or map "str" -> "std/str" when std/str is imported);
   if (recvModId != "" AND symbolKey(recvModId, name) exists?) then (yes)
-    if (Function isPub?) then (yes)
+    if (Function isPub AND first param matches recvTypeKey?) then (yes)
       :Return FnSymbol;
       stop
     else (no)
-      :Return std::nullopt (private to defining module);
+      :Return std::nullopt (private or incompatible receiver);
       stop
     endif
   endif
-
-
 }
 
 :Return std::nullopt;

@@ -8,7 +8,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <systemError>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -46,7 +46,7 @@ inline bool cbFsValidSlot(int handle) {
 
 inline void cbFsStripCr(std::string& line) {
     if (!line.empty() && line.back() == '\r') {
-        line.popBack();
+        line.pop_back();
     }
 }
 
@@ -54,15 +54,15 @@ inline std::tuple<std::string, CbError> cbFsRead(const std::string& path) {
     if (path.empty()) {
         return {std::string(""), CbError{"Cannot read empty file path", 400}};
     }
-    std::errorCode ec;
+    std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {
         return {std::string(""), CbError{"File not found: " + path, 404}};
     }
-    if (std::filesystem::isDirectory(path, ec)) {
+    if (std::filesystem::is_directory(path, ec)) {
         return {std::string(""), CbError{"Path is a directory, not a file: " + path, 400}};
     }
     std::ifstream in(path, std::ios::in | std::ios::binary);
-    if (!in.isOpen()) {
+    if (!in.is_open()) {
         return {std::string(""), CbError{"Failed to open file for reading: " + path, 500}};
     }
     std::ostringstream ss;
@@ -77,15 +77,15 @@ inline std::tuple<std::vector<std::string>, CbError> cbFsLines(const std::string
     if (path.empty()) {
         return {std::vector<std::string>{}, CbError{"Cannot read lines from empty file path", 400}};
     }
-    std::errorCode ec;
+    std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {
         return {std::vector<std::string>{}, CbError{"File not found: " + path, 404}};
     }
-    if (std::filesystem::isDirectory(path, ec)) {
+    if (std::filesystem::is_directory(path, ec)) {
         return {std::vector<std::string>{}, CbError{"Path is a directory, not a file: " + path, 400}};
     }
     std::ifstream in(path, std::ios::in | std::ios::binary);
-    if (!in.isOpen()) {
+    if (!in.is_open()) {
         return {std::vector<std::string>{}, CbError{"Failed to open file for reading lines: " + path, 500}};
     }
     std::vector<std::string> result;
@@ -105,7 +105,7 @@ inline CbError cbFsWrite(const std::string& path, const std::string& content) {
         return CbError{"Cannot write to empty file path", 400};
     }
     std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::trunc);
-    if (!out.isOpen()) {
+    if (!out.is_open()) {
         return CbError{"Failed to open file for writing: " + path, 500};
     }
     out.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -121,7 +121,7 @@ inline CbError cbFsAppend(const std::string& path, const std::string& content) {
         return CbError{"Cannot append to empty file path", 400};
     }
     std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::app);
-    if (!out.isOpen()) {
+    if (!out.is_open()) {
         return CbError{"Failed to open file for appending: " + path, 500};
     }
     out.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -136,11 +136,11 @@ inline CbError cbFsCopy(const std::string& src, const std::string& dst) {
     if (src.empty() || dst.empty()) {
         return CbError{"Source and destination paths cannot be empty", 400};
     }
-    std::errorCode ec;
-    const bool ok = std::filesystem::copyFile(
+    std::error_code ec;
+    const bool ok = std::filesystem::copy_file(
         src,
         dst,
-        std::filesystem::copyOptions::overwriteExisting,
+        std::filesystem::copy_options::overwrite_existing,
         ec
     );
     if (!ok || ec) {
@@ -155,11 +155,11 @@ inline std::tuple<CbFile, CbError> cbFsOpenMode(const std::string& path, const s
     }
     std::ios_base::openmode openFlags = std::ios::binary;
     if (mode == "r") {
-        std::errorCode ec;
+        std::error_code ec;
         if (!std::filesystem::exists(path, ec) || ec) {
             return {CbFile{-1}, CbError{"File not found: " + path, 404}};
         }
-        if (std::filesystem::isDirectory(path, ec)) {
+        if (std::filesystem::is_directory(path, ec)) {
             return {CbFile{-1}, CbError{"Path is a directory, not a file: " + path, 400}};
         }
         openFlags = std::ios::in | std::ios::binary;
@@ -171,7 +171,7 @@ inline std::tuple<CbFile, CbError> cbFsOpenMode(const std::string& path, const s
         return {CbFile{-1}, CbError{"Invalid file open mode '" + mode + "'; expected 'r', 'w', or 'a'", 400}};
     }
 
-    std::lockGuard<std::mutex> lock(cbFsSlotMutex());
+    std::lock_guard<std::mutex> lock(cbFsSlotMutex());
     auto& tbl = cbFsSlotTable();
     size_t slotIdx = tbl.size();
     for (size_t i = 0; i < tbl.size(); ++i) {
@@ -185,12 +185,12 @@ inline std::tuple<CbFile, CbError> cbFsOpenMode(const std::string& path, const s
     }
 
     auto& slot = tbl[slotIdx];
-    if (slot.stream.isOpen()) {
+    if (slot.stream.is_open()) {
         slot.stream.close();
     }
     slot.stream.clear();
     slot.stream.open(path, openFlags);
-    if (!slot.stream.isOpen()) {
+    if (!slot.stream.is_open()) {
         slot.inUse = false;
         return {CbFile{-1}, CbError{"Failed to open file: " + path, 500}};
     }
@@ -208,7 +208,7 @@ inline std::tuple<bool, CbError> cbFsReadLine(CbFile f, std::string& outLine) {
         return {false, CbError{"Invalid or closed file handle", 400}};
     }
     auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.isOpen()) {
+    if (!s.is_open()) {
         outLine.clear();
         return {false, CbError{"File stream is not open", 400}};
     }
@@ -231,13 +231,13 @@ inline bool cbFsEof(CbFile f) {
         return true;
     }
     auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.isOpen()) {
+    if (!s.is_open()) {
         return true;
     }
     if (s.eof()) {
         return true;
     }
-    return s.peek() == std::charTraits<char>::eof();
+    return s.peek() == std::char_traits<char>::eof();
 }
 
 inline CbError cbFsWriteStream(CbFile f, const std::string& text) {
@@ -245,7 +245,7 @@ inline CbError cbFsWriteStream(CbFile f, const std::string& text) {
         return CbError{"Invalid or closed file handle", 400};
     }
     auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.isOpen()) {
+    if (!s.is_open()) {
         return CbError{"File stream is not open", 400};
     }
     s.write(text.data(), static_cast<std::streamsize>(text.size()));
@@ -264,7 +264,7 @@ inline CbError cbFsFlush(CbFile f) {
         return CbError{"Invalid or closed file handle", 400};
     }
     auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.isOpen()) {
+    if (!s.is_open()) {
         return CbError{"File stream is not open", 400};
     }
     s.flush();
@@ -278,14 +278,14 @@ inline bool cbFsIsOpen(CbFile f) {
     if (!cbFsValidSlot(f.handle)) {
         return false;
     }
-    return cbFsSlotTable()[static_cast<size_t>(f.handle)].stream.isOpen();
+    return cbFsSlotTable()[static_cast<size_t>(f.handle)].stream.is_open();
 }
 
 inline void cbFsClose(CbFile& f) {
-    std::lockGuard<std::mutex> lock(cbFsSlotMutex());
+    std::lock_guard<std::mutex> lock(cbFsSlotMutex());
     if (cbFsValidSlot(f.handle)) {
         auto& slot = cbFsSlotTable()[static_cast<size_t>(f.handle)];
-        if (slot.stream.isOpen()) {
+        if (slot.stream.is_open()) {
             slot.stream.close();
         }
         slot.stream.clear();
@@ -298,7 +298,7 @@ inline bool cbFsExists(const std::string& path) {
     if (path.empty()) {
         return false;
     }
-    std::errorCode ec;
+    std::error_code ec;
     const bool res = std::filesystem::exists(path, ec);
     if (ec) {
         return false;
@@ -310,8 +310,8 @@ inline bool cbFsIsFile(const std::string& path) {
     if (path.empty()) {
         return false;
     }
-    std::errorCode ec;
-    const bool res = std::filesystem::isRegularFile(path, ec);
+    std::error_code ec;
+    const bool res = std::filesystem::is_regular_file(path, ec);
     if (ec) {
         return false;
     }
@@ -322,8 +322,8 @@ inline bool cbFsIsDir(const std::string& path) {
     if (path.empty()) {
         return false;
     }
-    std::errorCode ec;
-    const bool res = std::filesystem::isDirectory(path, ec);
+    std::error_code ec;
+    const bool res = std::filesystem::is_directory(path, ec);
     if (ec) {
         return false;
     }
@@ -334,8 +334,8 @@ inline std::tuple<int, CbError> cbFsSize(const std::string& path) {
     if (path.empty()) {
         return {0, CbError{"Cannot get size of empty path", 400}};
     }
-    std::errorCode ec;
-    const auto sz = std::filesystem::fileSize(path, ec);
+    std::error_code ec;
+    const auto sz = std::filesystem::file_size(path, ec);
     if (ec) {
         return {0, CbError{"Failed to get file size for '" + path + "': " + ec.message(), 404}};
     }
@@ -346,19 +346,19 @@ inline std::tuple<std::vector<std::string>, CbError> cbFsDir(const std::string& 
     if (path.empty()) {
         return {std::vector<std::string>{}, CbError{"Cannot list empty directory path", 400}};
     }
-    std::errorCode ec;
+    std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {
         return {std::vector<std::string>{}, CbError{"Directory not found: " + path, 404}};
     }
-    if (!std::filesystem::isDirectory(path, ec) || ec) {
+    if (!std::filesystem::is_directory(path, ec) || ec) {
         return {std::vector<std::string>{}, CbError{"Path is not a directory: " + path, 400}};
     }
     std::vector<std::string> entries;
-    std::filesystem::directoryIterator it(path, ec);
+    std::filesystem::directory_iterator it(path, ec);
     if (ec) {
         return {std::vector<std::string>{}, CbError{"Failed to iterate directory '" + path + "': " + ec.message(), 500}};
     }
-    const std::filesystem::directoryIterator endIt;
+    const std::filesystem::directory_iterator endIt;
     while (it != endIt) {
         entries.push_back(it->path().filename().string());
         it.increment(ec);
@@ -374,8 +374,8 @@ inline CbError cbFsMkdir(const std::string& path) {
     if (path.empty()) {
         return CbError{"Cannot create directory with empty path", 400};
     }
-    std::errorCode ec;
-    std::filesystem::createDirectories(path, ec);
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
     if (ec) {
         return CbError{"Failed to create directory '" + path + "': " + ec.message(), 500};
     }
@@ -386,8 +386,8 @@ inline CbError cbFsRemove(const std::string& path) {
     if (path.empty()) {
         return CbError{"Cannot remove empty path", 400};
     }
-    std::errorCode ec;
-    std::filesystem::removeAll(path, ec);
+    std::error_code ec;
+    std::filesystem::remove_all(path, ec);
     if (ec) {
         return CbError{"Failed to remove path '" + path + "': " + ec.message(), 500};
     }
@@ -402,19 +402,19 @@ inline std::string cbFsJoinPath(const std::string& a, const std::string& b) {
         return a;
     }
     const std::filesystem::path joined = std::filesystem::path(a) / std::filesystem::path(b);
-    return joined.genericString();
+    return joined.generic_string();
 }
 
 inline std::string cbFsParentDir(const std::string& path) {
-    return std::filesystem::path(path).parentPath().genericString();
+    return std::filesystem::path(path).parent_path().generic_string();
 }
 
 inline std::string cbFsFileName(const std::string& path) {
-    return std::filesystem::path(path).filename().genericString();
+    return std::filesystem::path(path).filename().generic_string();
 }
 
 inline std::string cbFsExt(const std::string& path) {
-    return std::filesystem::path(path).extension().genericString();
+    return std::filesystem::path(path).extension().generic_string();
 }
 
 #endif // CLEANBASIC_STDLIB_FS_BRIDGE_HPP

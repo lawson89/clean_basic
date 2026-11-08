@@ -1489,14 +1489,12 @@ inline void collectUfcsCompletionsForType(
     if (recvTid == INVALID_ID || recvTid >= snap.arena.types.size()) {
         return;
     }
-    const TypeId resolvedRecv = resolveAlias(snap.arena, snap.symbols, currentModuleId, recvTid);
-    if (resolvedRecv == INVALID_ID || resolvedRecv >= snap.arena.types.size()) {
-        return;
+    const TypeNode resolvedRecvNode = resolveAliasNode(snap.arena, snap.symbols, currentModuleId, recvTid);
+    std::string recvTypeKey = resolvedRecvNode.name;
+    if (!recvTypeKey.empty() && !isBuiltinTypeName(recvTypeKey)) {
+        recvTypeKey = resolveSymbolKey(snap.symbols, currentModuleId, recvTypeKey);
     }
-    const std::string& recvTypeKey = snap.arena.types[resolvedRecv].name;
-    const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);
-
-
+    const std::string recvModId = resolveUfcsDefiningModule(snap.symbols, currentModuleId, recvTypeKey);
 
     for (const auto& kv : snap.symbols.functions) {
         const FnSymbol& fn = kv.second;
@@ -1508,12 +1506,7 @@ inline void collectUfcsCompletionsForType(
         if (!inCurrentMod && !inDefiningMod) {
             continue;
         }
-
-        const TypeId p0Resolved = resolveAlias(snap.arena, snap.symbols, fn.moduleId, fn.params[0].typeId);
-        if (p0Resolved == INVALID_ID || p0Resolved >= snap.arena.types.size()) {
-            continue;
-        }
-        if (snap.arena.types[p0Resolved].name != recvTypeKey) {
+        if (!ufcsParamMatchesReceiver(snap.arena, snap.symbols, fn, recvTypeKey)) {
             continue;
         }
 
@@ -1789,7 +1782,7 @@ inline void collectGeneralScopeCompletions(
     const std::vector<std::string> keywords = {
         "fn", "end fn", "pub", "extern", "type", "end type", "alias", "import",
         "import header", "import link", "dim", "const", "byref", "as",
-        "if", "else if", "else", "end if", "for", "to", "step", "in", "end for",
+        "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while",
         "select case", "case", "case else", "end select", "on error", "end error",
         "defer", "end defer", "return", "break", "can error", "and", "or", "not",
         "true", "false", "null"

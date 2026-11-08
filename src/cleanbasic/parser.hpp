@@ -668,11 +668,21 @@ inline StmtId parseDeferStmt(const std::vector<Token>& tokens, ParserState& stat
     return addStmt(state.arena, start.line, start.col, DeferStmt{std::move(body)});
 }
 
+inline StmtId parseWhileStmt(const std::vector<Token>& tokens, ParserState& state) {
+    const Token start = match(tokens, state, "KEYWORD", "while");
+    const ExprId cond = parseExpr(tokens, state);
+    expectNewlineOrEof(tokens, state);
+    std::vector<StmtId> body = parseStmtBlockUntil(tokens, state, {"end while"}, "Unclosed 'while' block, expected 'end while'");
+    match(tokens, state, "KEYWORD", "end while");
+    expectNewlineOrEof(tokens, state);
+    return addStmt(state.arena, start.line, start.col, WhileStmt{cond, std::move(body)});
+}
+
 inline StmtId parseReturnStmt(const std::vector<Token>& tokens, ParserState& state) {
     const Token start = match(tokens, state, "KEYWORD", "return");
     ReturnStmt stmt{};
     if (!check(tokens, state, "NEWLINE") && !check(tokens, state, "EOF")) {
-        stmt.has_value = true;
+        stmt.hasValue = true;
         stmt.value = parseExpr(tokens, state);
     }
     expectNewlineOrEof(tokens, state);
@@ -699,6 +709,9 @@ inline StmtId parseStatement(const std::vector<Token>& tokens, ParserState& stat
     }
     if (check(tokens, state, "KEYWORD", "for")) {
         return parseForStmt(tokens, state);
+    }
+    if (check(tokens, state, "KEYWORD", "while")) {
+        return parseWhileStmt(tokens, state);
     }
     if (check(tokens, state, "KEYWORD", "select case")) {
         return parseSelectStmt(tokens, state);

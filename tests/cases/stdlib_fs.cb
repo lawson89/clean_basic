@@ -1,8 +1,8 @@
 ' EXPECT_CPP: #include "
 ' EXPECT_CPP: fs_bridge.hpp"
-' EXPECT_CPP: cbStdFsWrite(
-' EXPECT_CPP: cbStdFsOpen(
-' EXPECT_CPP: cbStdFsClose(
+' EXPECT_CPP: cb_std_fs__write(
+' EXPECT_CPP: cb_std_fs__open(
+' EXPECT_CPP: cb_std_fs__close(
 ' EXPECT_OUT: Path helpers: dir=build/testArtifacts/stdlibFsSandbox, file=notes.txt, ext=.txt
 ' EXPECT_OUT: Whole-file lines=3, first=alpha, copiedSize=18
 ' EXPECT_OUT: Streamed lines=3: [L1] [L2] [L3], eofAfter=true
