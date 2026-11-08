@@ -12,16 +12,16 @@
 When generating C++ code from CleanBasic, the emitter strictly enforces this procedural, memory-safe data-oriented subset:
 
 #### 1. State and Behavior (No Classes)
-* **Data:** State is emitted using POD `struct` definitions with public data members only and zero constructors/destructors.
-* **Logic:** Free functions inside global or namespace scope implement all behavior. Functions take structs by value (`T`) or mutable reference (`T&` for `byref`).
+* **Data:** State is emitted using POD `struct` definitions with public data members only and zero constructors/destructors. CleanBasic `int` standardizes on 64-bit signed `int64_t`.
+* **Logic:** Free functions inside global or namespace scope implement all behavior. Read-only non-primitive parameters (`str`, `list[T]`, `dict[K, V]`, `err`, and user-defined `type` structs) are passed by `const T&` to eliminate deep copies while preserving value semantics; cheap scalar primitives (`int64_t`, `double`, `bool`, `void*`) pass by value; and mutable parameters require explicit `byref` (`T&`).
 
 #### 2. Memory and Value Semantics (No Raw Pointers)
 * **No Raw Pointers:** Emitted CleanBasic code never emits raw `T*` user pointers, `new`, or `delete` (except for the built-in opaque `cptr` handle mapped to `void*` for C FFI).
-* **Stack Value Semantics:** Default to value copying and stack allocation. Dynamically sized collections use `std::vector` and `std::unordered_map`.
+* **Stack Value Semantics:** Default to value semantics and stack allocation. Dynamically sized collections use `std::vector` and `std::unordered_map`.
 
 #### 3. Error Handling & Cleanup
 * **Zero Exceptions:** Emitted code does not use `throw`, `try`, or `catch`.
-* **Structured Return Tuples:** Functions declared with `can error` return `CbError` (void functions) or `std::tuple<T, CbError>` (value functions).
+* **Structured Return Tuples & [[nodiscard]]:** Functions declared with `can error` return `CbError` (void functions) or `std::tuple<T, CbError>` (value functions). Both `CbError` and fallible functions are marked `[[nodiscard]]` so unhandled errors are rejected at C++ compile time.
 * **RAII Defer Guards:** `defer` blocks lower to stack-allocated `cbDefer` RAII lambdas executed deterministically in LIFO order upon scope exit.
 
 #### 4. Control Flow Lowering

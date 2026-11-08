@@ -21,7 +21,7 @@ constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#include <cstdint>
 #include <utility>
 #include <functional>
 
-struct CbError {
+struct [[nodiscard]] CbError {
     std::string msg = "";
     int64_t code = 0;
 };
@@ -94,7 +94,7 @@ public:
     }
 
     std::string mapBaseType(std::string_view modId, const TypeNode& t) const {
-        if (t.name == "int") return "int";
+        if (t.name == "int") return "int64_t";
         if (t.name == "float") return "double";
         if (t.name == "bool") return "bool";
         if (t.name == "str") return "std::string";
@@ -103,7 +103,7 @@ public:
         if (t.name == "auto") return "auto";
         if (t.name == "cptr") return "void*";
         if (t.name == "list") {
-            std::string elem = "int";
+            std::string elem = "int64_t";
             if (!t.typeArgs.empty()) {
                 elem = mapType(modId, t.typeArgs[0]);
             }
@@ -114,7 +114,7 @@ public:
             if (t.typeArgs.size() > 0) {
                 k = mapType(modId, t.typeArgs[0]);
             }
-            std::string v = "int";
+            std::string v = "int64_t";
             if (t.typeArgs.size() > 1) {
                 v = mapType(modId, t.typeArgs[1]);
             }
@@ -183,12 +183,43 @@ public:
         return "std::tuple<" + joinStrings(retCpp) + ">";
     }
 
+    bool isPassByConstRefType(std::string_view modId, const TypeNode& resolved) const {
+        const TypeNode actual = resolveAliasFromNode(arena, symbols, modId, resolved);
+        if (actual.name == "int" || actual.name == "float" ||
+            actual.name == "bool" || actual.name == "cptr" ||
+            actual.name == "void" || actual.name == "auto") {
+            return false;
+        }
+        return true;
+    }
+
+    bool isPassByConstRefType(std::string_view modId, TypeId tid) const {
+        if (tid >= arena.types.size()) return false;
+        const TypeNode resolved = resolveAliasNode(arena, symbols, modId, tid);
+        return isPassByConstRefType(modId, resolved);
+    }
+
+    std::string mapParamType(std::string_view modId, const Param& p) const {
+        const TypeNode resolved = resolveAliasNode(arena, symbols, modId, p.typeId);
+        const std::string baseCpp = mapBaseType(modId, resolved);
+        if (p.isByref) {
+            return baseCpp + "&";
+        }
+        if (isPassByConstRefType(modId, resolved)) {
+            return "const " + baseCpp + "&";
+        }
+        return baseCpp;
+    }
+
     std::string fnSignature(std::string_view modId, const FnDecl& fn) const {
-        const std::string retStr = fnReturnCppType(modId, fn);
+        std::string retStr = fnReturnCppType(modId, fn);
+        if (fn.isFallible && !fn.isExtern) {
+            retStr = "[[nodiscard]] " + retStr;
+        }
         std::vector<std::string> paramItems;
         paramItems.reserve(fn.params.size());
         for (const auto& p : fn.params) {
-            paramItems.push_back(mapType(modId, p.typeId, p.isByref) + " " + p.name);
+            paramItems.push_back(mapParamType(modId, p) + " " + p.name);
         }
         const std::string key = resolveSymbolKey(symbols, modId, fn.name);
         std::string cppName = makeCppFnName(modId, fn.name, fn.isExtern);
@@ -270,6 +301,36 @@ inline std::string fnReturnCppType(
 ) {
     Emitter emitter(arena, symbols);
     return emitter.fnReturnCppType(currentModuleId, fn);
+}
+
+inline bool isPassByConstRefType(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const TypeNode& resolved
+) {
+    Emitter emitter(arena, symbols);
+    return emitter.isPassByConstRefType(currentModuleId, resolved);
+}
+
+inline bool isPassByConstRefType(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeId tid
+) {
+    Emitter emitter(arena, symbols);
+    return emitter.isPassByConstRefType(currentModuleId, tid);
+}
+
+inline std::string mapParamType(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const Param& p
+) {
+    Emitter emitter(arena, symbols);
+    return emitter.mapParamType(currentModuleId, p);
 }
 
 inline std::string fnSignature(

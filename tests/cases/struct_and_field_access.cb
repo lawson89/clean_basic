@@ -1,6 +1,6 @@
 ' EXPECT_CPP: struct Point {
-' EXPECT_CPP: int x{};
-' EXPECT_CPP: int y{};
+' EXPECT_CPP: int64_t x{};
+' EXPECT_CPP: int64_t y{};
 ' EXPECT_CPP: pt.x
 ' FORBID_CPP: class Point
 ' EXPECT_OUT: 1

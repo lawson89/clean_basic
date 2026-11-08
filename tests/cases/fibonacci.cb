@@ -1,5 +1,5 @@
-' EXPECT_CPP: int fibIterative(int n)
-' EXPECT_CPP: int fibRecursive(int n)
+' EXPECT_CPP: int64_t fibIterative(int64_t n)
+' EXPECT_CPP: int64_t fibRecursive(int64_t n)
 ' FORBID_CPP: std::shared_ptr
 ' EXPECT_OUT: Iterative Fib(10) = 55
 ' EXPECT_OUT: Recursive Fib(10) = 55

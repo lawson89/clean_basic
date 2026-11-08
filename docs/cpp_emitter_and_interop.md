@@ -53,7 +53,7 @@ Every generated `build.cpp` begins with a lightweight, zero-allocation runtime p
 #include <utility>
 #include <functional>
 
-struct CbError {
+struct [[nodiscard]] CbError {
     std::string msg = "";
     int64_t code = 0;
 };
@@ -92,23 +92,24 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 
 | CleanBasic Type / Signature | Emitted C++17 Type | Default Initializer (`defaultValueForType`) | Notes |
 | :--- | :--- | :--- | :--- |
-| `int` | `int` | `0` | Standard signed integer value. |
+| `int` | `int64_t` | `0` | Standard 64-bit signed integer value. |
 | `float` | `double` | `0.0` | 64-bit IEEE-754 floating-point value. |
 | `bool` | `bool` | `false` | Emits `"true"` / `"false"` via `cbToStr`. |
 | `str` | `std::string` | `std::string("")` | Value-semantics string; literals emit `std::string("...")`. |
 | `cptr` | `void*` | `void*{}` (`nullptr`) | Opaque C pointer for C/C++ FFI interop. |
-| `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`). |
-| `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; `.push(x)` / `.append(x)` lowers to `.push_back(x)`. |
+| `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`); marked `[[nodiscard]]`. |
+| `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; `.push(x)` lowers to `.push_back(x)`. |
 | `dict[K, V]` | `std::unordered_map<MappedK, MappedV>` | `std::unordered_map<...>{}` | Hash table; supports `for k, v in d` structured binding loops. |
-| User `type Foo` (root) | `struct Foo` | `Foo{}` | Pure value semantics (stack allocated, passed by value unless `byref`). |
+| User `type Foo` (root) | `struct Foo` | `Foo{}` | Pure value semantics (stack allocated, passed by const ref or `byref`). |
 | User `type Foo` (module `m/a`) | `struct cb_m_a__Foo` | `cb_m_a__Foo{}` | Mangled module-scoped POD struct. |
 | `extern type Bar` | `Bar` | `Bar{}` | Unmangled external C/C++ type from `import header`. |
-| Parameter `p as T` | `MappedT p` | — | Pass-by-value (safe clone). |
+| Parameter `p as T` (scalar) | `MappedT p` | — | Cheap scalar primitives (`int64_t`, `double`, `bool`, `void*`) pass by value. |
+| Parameter `p as T` (non-primitive) | `const MappedT& p` | — | Read-only zero-copy reference for `str`, `list`, `dict`, `err`, and structs. |
 | Parameter `byref p as T` | `MappedT& p` | — | Pass-by-mutable-reference (`isByref = true`). |
 | `fn f()` (infallible void) | `void f()` | — | Standard void function. |
 | `fn f() as T` (infallible value) | `MappedT f()` | — | Single return value. |
-| `fn f() can error` (fallible void) | `CbError f()` | — | Returns `CbError{"", 0}` on success, `CbError{msg, code}` on error. |
-| `fn f() as T can error` (fallible value) | `std::tuple<MappedT, CbError> f()` | — | Unpacked via C++17 structured bindings `auto [_val1, _err1] = f();`. |
+| `fn f() can error` (fallible void) | `[[nodiscard]] CbError f()` | — | Returns `CbError{"", 0}` on success, `CbError{msg, code}` on error. |
+| `fn f() as T can error` (fallible value) | `[[nodiscard]] std::tuple<MappedT, CbError> f()` | — | Unpacked via C++17 structured bindings `auto [_val1, _err1] = f();`. |
 
 ---
 
@@ -146,7 +147,7 @@ end fn
 
 **Emitted C++17:**
 ```cpp
-std::tuple<int, CbError> processNetwork() {
+[[nodiscard]] std::tuple<int64_t, CbError> processNetwork() {
     auto [_val1, _err1] = connect(std::string("192.168.1.1"));
     if (cbHasError(_err1)) return { {}, _err1 };
     auto conn = _val1;

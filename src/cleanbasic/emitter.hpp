@@ -138,8 +138,23 @@ inline std::string Emitter::emitExpr(
     }
 
     if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
-        return emitExpr(iaccess->target, scope) + "[" +
-            emitExpr(iaccess->index, scope) + "]";
+        const TypeId tgtTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId);
+        const TypeNode resolvedTgt = resolveAliasNode(arena, symbols, currentModuleId, tgtTid);
+        const std::string tgtCpp = emitExpr(iaccess->target, scope);
+        const std::string idxCpp = emitExpr(iaccess->index, scope);
+        if (resolvedTgt.name == "dict") {
+            bool isConstDict = false;
+            if (const auto* ident = arena.getExpr<Identifier>(iaccess->target)) {
+                const auto it = scope.find(ident->name);
+                if (it != scope.end() && it->second.isConst) {
+                    isConstDict = true;
+                }
+            }
+            if (isConstDict) {
+                return tgtCpp + ".at(" + idxCpp + ")";
+            }
+        }
+        return tgtCpp + "[" + idxCpp + "]";
     }
 
     if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
@@ -173,13 +188,13 @@ inline std::string Emitter::emitExpr(
                 const auto* access = arena.getExpr<FieldAccess>(call->callee);
                 const std::string recvCpp = emitExpr(access->target, scope);
                 if (fnSym->name == "len") {
-                    return "static_cast<int>(" + recvCpp + ".size())";
+                    return "static_cast<int64_t>(" + recvCpp + ".size())";
                 } else if (fnSym->name == "push") {
                     return recvCpp + ".push_back(" + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "toStr") {
                     return "cbToStr(" + recvCpp + ")";
                 } else if (fnSym->name == "toInt") {
-                    return "static_cast<int>(" + recvCpp + ")";
+                    return "static_cast<int64_t>(" + recvCpp + ")";
                 } else if (fnSym->name == "toFloat") {
                     return "static_cast<double>(" + recvCpp + ")";
                 }
@@ -597,7 +612,7 @@ inline void Emitter::emitStmt(
             auto loopDecls = declaredVars;
             loopDecls.insert(loopVar);
 
-            emitLine("for (int " + loopVar + " = " + startCpp + "; " + loopVar + " " + cmpOp + " " + endCpp + "; " + loopVar + " += " + stepCpp + ") {");
+            emitLine("for (int64_t " + loopVar + " = " + startCpp + "; " + loopVar + " " + cmpOp + " " + endCpp + "; " + loopVar + " += " + stepCpp + ") {");
             indentLevel += 1;
             emitStmtList(fn, forS->body, loopScope, loopDecls);
             indentLevel -= 1;
@@ -766,7 +781,7 @@ inline void Emitter::emitFnDecl(const FnDecl& fn) {
     for (const auto& p : fn.params) {
         if (scope.find(p.name) == scope.end()) {
             const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);
-            scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref};
+            scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
         }
         declaredVars.insert(p.name);
     }
@@ -899,7 +914,7 @@ inline std::string Emitter::emitProgram(const Program& program) {
             emitLine("return 1;");
             indentLevel -= 1;
             emitLine("}");
-            emitLine("return _mainRc;");
+            emitLine("return static_cast<int>(_mainRc);");
         } else if (mainSym.isFallible) {
             emitLine("auto _mainErr = cbMain();");
             emitLine("if (cbHasError(_mainErr)) {");
@@ -910,7 +925,7 @@ inline std::string Emitter::emitProgram(const Program& program) {
             emitLine("}");
             emitLine("return 0;");
         } else if (mainReturnsInt) {
-            emitLine("return cbMain();");
+            emitLine("return static_cast<int>(cbMain());");
         } else {
             emitLine("cbMain();");
             emitLine("return 0;");

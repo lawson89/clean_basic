@@ -103,9 +103,9 @@ inline std::vector<size_t> cbStrUtf8Offsets(const std::string& s) {
     return offsets;
 }
 
-inline int cbStrUtf8Len(const std::string& s) {
+inline int64_t cbStrUtf8Len(const std::string& s) {
     size_t i = 0;
-    int count = 0;
+    int64_t count = 0;
     while (i < s.size()) {
         i += cbStrUtf8Step(s, i);
         count += 1;
@@ -179,7 +179,7 @@ inline bool cbStrAsciiEndsWithIgnoreCase(const std::string& s, const std::string
     return true;
 }
 
-inline int cbStrAsciiFindIgnoreCase(const std::string& s, const std::string& sub) {
+inline int64_t cbStrAsciiFindIgnoreCase(const std::string& s, const std::string& sub) {
     if (sub.empty()) {
         return 0;
     }
@@ -202,15 +202,15 @@ inline int cbStrAsciiFindIgnoreCase(const std::string& s, const std::string& sub
             }
         }
         if (matched) {
-            return static_cast<int>(i);
+            return static_cast<int64_t>(i);
         }
     }
     return -1;
 }
 
-inline int cbStrAsciiRfindIgnoreCase(const std::string& s, const std::string& sub) {
+inline int64_t cbStrAsciiRfindIgnoreCase(const std::string& s, const std::string& sub) {
     if (sub.empty()) {
-        return static_cast<int>(s.size());
+        return static_cast<int64_t>(s.size());
     }
     if (sub.size() > s.size()) {
         return -1;
@@ -232,7 +232,7 @@ inline int cbStrAsciiRfindIgnoreCase(const std::string& s, const std::string& su
             }
         }
         if (matched) {
-            return static_cast<int>(i);
+            return static_cast<int64_t>(i);
         }
     }
     return -1;
@@ -249,7 +249,7 @@ inline bool cbStrContains(const std::string& s, const std::string& sub) {
     return s.find(sub) != std::string::npos;
 }
 
-inline int cbStrFind(const std::string& s, const std::string& sub) {
+inline int64_t cbStrFind(const std::string& s, const std::string& sub) {
     if (sub.empty()) {
         return 0;
     }
@@ -257,25 +257,25 @@ inline int cbStrFind(const std::string& s, const std::string& sub) {
     if (pos == std::string::npos) {
         return -1;
     }
-    return static_cast<int>(pos);
+    return static_cast<int64_t>(pos);
 }
 
-inline int cbStrRfind(const std::string& s, const std::string& sub) {
+inline int64_t cbStrRfind(const std::string& s, const std::string& sub) {
     if (sub.empty()) {
-        return static_cast<int>(s.size());
+        return static_cast<int64_t>(s.size());
     }
     const size_t pos = s.rfind(sub);
     if (pos == std::string::npos) {
         return -1;
     }
-    return static_cast<int>(pos);
+    return static_cast<int64_t>(pos);
 }
 
-inline int cbStrCount(const std::string& s, const std::string& sub) {
+inline int64_t cbStrCount(const std::string& s, const std::string& sub) {
     if (sub.empty() || s.empty()) {
         return 0;
     }
-    int occurrences = 0;
+    int64_t occurrences = 0;
     size_t pos = 0;
     while (pos <= s.size()) {
         const size_t found = s.find(sub, pos);
@@ -455,7 +455,7 @@ inline std::string cbStrTrimChars(const std::string& s, const std::string& chars
     return s.substr(offsets[startCp], offsets[endCp] - offsets[startCp]);
 }
 
-inline std::string cbStrBuildUtf8Pad(int neededCp, const std::string& pad) {
+inline std::string cbStrBuildUtf8Pad(int64_t neededCp, const std::string& pad) {
     if (neededCp <= 0) {
         return "";
     }
@@ -468,7 +468,7 @@ inline std::string cbStrBuildUtf8Pad(int neededCp, const std::string& pad) {
         return std::string(static_cast<size_t>(neededCp), ' ');
     }
     std::string out;
-    int added = 0;
+    int64_t added = 0;
     size_t idx = 0;
     while (added < neededCp) {
         out += padChars[idx];
@@ -481,32 +481,32 @@ inline std::string cbStrBuildUtf8Pad(int neededCp, const std::string& pad) {
     return out;
 }
 
-inline std::string cbStrPadLeft(const std::string& s, int width, const std::string& pad) {
-    const int currentCp = cbStrUtf8Len(s);
+inline std::string cbStrPadLeft(const std::string& s, int64_t width, const std::string& pad) {
+    const int64_t currentCp = cbStrUtf8Len(s);
     if (width <= 0 || width <= currentCp) {
         return s;
     }
     return cbStrBuildUtf8Pad(width - currentCp, pad) + s;
 }
 
-inline std::string cbStrPadRight(const std::string& s, int width, const std::string& pad) {
-    const int currentCp = cbStrUtf8Len(s);
+inline std::string cbStrPadRight(const std::string& s, int64_t width, const std::string& pad) {
+    const int64_t currentCp = cbStrUtf8Len(s);
     if (width <= 0 || width <= currentCp) {
         return s;
     }
     return s + cbStrBuildUtf8Pad(width - currentCp, pad);
 }
 
-inline std::string cbStrSlice(const std::string& s, int start, int stop) {
-    const int len = static_cast<int>(s.size());
-    int clampedStart = start;
+inline std::string cbStrSlice(const std::string& s, int64_t start, int64_t stop) {
+    const int64_t len = static_cast<int64_t>(s.size());
+    int64_t clampedStart = start;
     if (clampedStart < 0) {
         clampedStart = 0;
     }
     if (clampedStart > len) {
         clampedStart = len;
     }
-    int clampedStop = stop;
+    int64_t clampedStop = stop;
     if (clampedStop < clampedStart) {
         clampedStop = clampedStart;
     }
@@ -519,12 +519,12 @@ inline std::string cbStrSlice(const std::string& s, int start, int stop) {
     );
 }
 
-inline std::string cbStrLeft(const std::string& s, int n) {
+inline std::string cbStrLeft(const std::string& s, int64_t n) {
     if (n <= 0 || s.empty()) {
         return "";
     }
     size_t bytePos = 0;
-    int count = 0;
+    int64_t count = 0;
     while (bytePos < s.size() && count < n) {
         bytePos += cbStrUtf8Step(s, bytePos);
         count += 1;
@@ -532,12 +532,12 @@ inline std::string cbStrLeft(const std::string& s, int n) {
     return s.substr(0, bytePos);
 }
 
-inline std::string cbStrRight(const std::string& s, int n) {
+inline std::string cbStrRight(const std::string& s, int64_t n) {
     if (n <= 0 || s.empty()) {
         return "";
     }
     const std::vector<size_t> offsets = cbStrUtf8Offsets(s);
-    const int cpLen = static_cast<int>(offsets.size() - 1);
+    const int64_t cpLen = static_cast<int64_t>(offsets.size() - 1);
     if (n >= cpLen) {
         return s;
     }
@@ -545,16 +545,16 @@ inline std::string cbStrRight(const std::string& s, int n) {
     return s.substr(startByte);
 }
 
-inline std::string cbStrMid(const std::string& s, int start, int count) {
+inline std::string cbStrMid(const std::string& s, int64_t start, int64_t count) {
     if (count <= 0 || s.empty()) {
         return "";
     }
-    int clampedStart = start;
+    int64_t clampedStart = start;
     if (clampedStart < 0) {
         clampedStart = 0;
     }
     size_t bytePos = 0;
-    int cpIdx = 0;
+    int64_t cpIdx = 0;
     while (bytePos < s.size() && cpIdx < clampedStart) {
         bytePos += cbStrUtf8Step(s, bytePos);
         cpIdx += 1;
@@ -563,7 +563,7 @@ inline std::string cbStrMid(const std::string& s, int start, int count) {
         return "";
     }
     const size_t startByte = bytePos;
-    int taken = 0;
+    int64_t taken = 0;
     while (bytePos < s.size() && taken < count) {
         bytePos += cbStrUtf8Step(s, bytePos);
         taken += 1;
@@ -571,12 +571,12 @@ inline std::string cbStrMid(const std::string& s, int start, int count) {
     return s.substr(startByte, bytePos - startByte);
 }
 
-inline std::string cbStrCharAt(const std::string& s, int idx) {
+inline std::string cbStrCharAt(const std::string& s, int64_t idx) {
     if (idx < 0 || s.empty()) {
         return "";
     }
     size_t bytePos = 0;
-    int cpIdx = 0;
+    int64_t cpIdx = 0;
     while (bytePos < s.size() && cpIdx < idx) {
         bytePos += cbStrUtf8Step(s, bytePos);
         cpIdx += 1;
@@ -588,15 +588,15 @@ inline std::string cbStrCharAt(const std::string& s, int idx) {
     return s.substr(bytePos, step);
 }
 
-inline int cbStrByteAt(const std::string& s, int idx) {
+inline int64_t cbStrByteAt(const std::string& s, int64_t idx) {
     if (idx < 0 || static_cast<size_t>(idx) >= s.size()) {
         return -1;
     }
     const unsigned char b = static_cast<unsigned char>(s[static_cast<size_t>(idx)]);
-    return static_cast<int>(b);
+    return static_cast<int64_t>(b);
 }
 
-inline std::string cbStrFromChar(int code) {
+inline std::string cbStrFromChar(int64_t code) {
     if (code < 0 || code > 0x10FFFF) {
         return "";
     }
@@ -680,13 +680,13 @@ inline std::string cbStrAsciiUpper(const std::string& s) {
     return out;
 }
 
-inline std::string cbStrRepeat(const std::string& s, int count) {
+inline std::string cbStrRepeat(const std::string& s, int64_t count) {
     if (count <= 0 || s.empty()) {
         return "";
     }
     std::string out;
     out.reserve(s.size() * static_cast<size_t>(count));
-    for (int i = 0; i < count; ++i) {
+    for (int64_t i = 0; i < count; ++i) {
         out += s;
     }
     return out;
@@ -708,7 +708,7 @@ inline std::string cbStrReverse(const std::string& s) {
     return out;
 }
 
-inline std::tuple<int, CbError> cbStrToInt(const std::string& s) {
+inline std::tuple<int64_t, CbError> cbStrToInt(const std::string& s) {
     const std::string trimmed = cbStrTrim(s);
     if (trimmed.empty()) {
         return {0, CbError{"Cannot parse empty string as int", 400}};
@@ -732,12 +732,7 @@ inline std::tuple<int, CbError> cbStrToInt(const std::string& s) {
     if (iss.fail() || !iss.eof()) {
         return {0, CbError{"Integer out of range: '" + s + "'", 400}};
     }
-    const int64_t minI = static_cast<int64_t>(std::numeric_limits<int>::min());
-    const int64_t maxI = static_cast<int64_t>(std::numeric_limits<int>::max());
-    if (val < minI || val > maxI) {
-        return {0, CbError{"Integer out of range: '" + s + "'", 400}};
-    }
-    return {static_cast<int>(val), CbError{"", 0}};
+    return {val, CbError{"", 0}};
 }
 
 inline std::tuple<double, CbError> cbStrToFloat(const std::string& s) {

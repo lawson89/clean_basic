@@ -601,10 +601,10 @@ end fn
     REQUIRE(res.ok);
 
     const std::string& cpp = res.cppCode;
-    CHECK(cpp.find("struct CbError {") != std::string::npos);
+    CHECK(cpp.find("struct [[nodiscard]] CbError {") != std::string::npos);
     CHECK(cpp.find("template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };") != std::string::npos);
     CHECK(cpp.find("template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }") != std::string::npos);
-    CHECK(cpp.find("std::tuple<int, CbError> processData()") != std::string::npos);
+    CHECK(cpp.find("[[nodiscard]] std::tuple<int64_t, CbError> processData()") != std::string::npos);
     CHECK(cpp.find(R"raw(auto [_val1, _err1] = connect(std::string("data.db"));)raw") != std::string::npos);
     CHECK(cpp.find("if (cbHasError(_err1)) return { {}, _err1 };") != std::string::npos);
     CHECK(cpp.find("auto db = _val1;") != std::string::npos);
@@ -631,7 +631,7 @@ end fn
 )";
         const auto ergRes = cb::transpileSource(ergonomicCode, "ergonomic.cb");
         REQUIRE(ergRes.ok);
-        CHECK(ergRes.cppCode.find("for (int i = 0; i <= 3; i += 1) {") != std::string::npos);
+        CHECK(ergRes.cppCode.find("for (int64_t i = 0; i <= 3; i += 1) {") != std::string::npos);
         CHECK(ergRes.cppCode.find(R"raw((std::cout << std::string("i=") << i << std::string(" ok=") << cbToStr(ok) << std::endl);)raw") != std::string::npos);
         CHECK(ergRes.cppCode.find(R"raw((std::string("Score: ") + cbToStr(score)))raw") != std::string::npos);
         CHECK(ergRes.cppCode.find(R"raw((cbToStr(score) + std::string(" points")))raw") != std::string::npos);
@@ -678,7 +678,7 @@ end fn
         const std::string emitted = cb::emitProgram(constArena, anaIm.symbols, parseIm.program);
         CHECK(constArena.types.size() == typesAfterAnalysis);
         CHECK(emitted.find("struct Box {") != std::string::npos);
-        CHECK(emitted.find("int compute()") != std::string::npos);
+        CHECK(emitted.find("int64_t compute()") != std::string::npos);
     }
 }
 
@@ -1430,7 +1430,7 @@ end fn
 )";
         const auto res = cb::transpileSource(src, "multiline.cb");
         REQUIRE(res.ok);
-        CHECK(res.cppCode.find("Config makeConfig(std::string host, int port, int retries)") != std::string::npos);
+        CHECK(res.cppCode.find("Config makeConfig(const std::string& host, int64_t port, int64_t retries)") != std::string::npos);
     }
 
     SECTION("Line and column numbers remain exact inside and after multiline bracketed blocks") {
@@ -2579,4 +2579,113 @@ end fn
         CHECK(res.error.message.find("'.append()' is removed; use '.push()'") != std::string::npos);
     }
 }
+
+TEST_CASE("Emitted C++17 safest subset: const T&, [[nodiscard]], int64_t, and mutability enforcement", "[emitter][analyzer]") {
+    SECTION("Read-only parameters emit const T&, primitives emit value, byref emits T&") {
+        const std::string code = R"(
+type Point
+    x as int
+    y as int
+end type
+
+fn inspect(
+    s as str,
+    nums as list[int],
+    lookup as dict[str, int],
+    pt as Point,
+    n as int,
+    f as float,
+    flag as bool,
+    byref outPt as Point
+) as int
+    return n
+end fn
+
+fn main()
+end fn
+)";
+        const auto res = cb::transpileSource(code, "paramPassing.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("int64_t inspect(const std::string& s, const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& lookup, const Point& pt, int64_t n, double f, bool flag, Point& outPt)") != std::string::npos);
+    }
+
+    SECTION("Fallible functions emit [[nodiscard]] and CbError is [[nodiscard]]") {
+        const std::string code = R"(
+fn failVoid() can error
+    error("fail")
+end fn
+
+fn failVal() as int can error
+    return 42
+end fn
+
+fn main()
+    on error e
+        return
+    end error
+    failVoid()
+    dim x = failVal()
+end fn
+)";
+        const auto res = cb::transpileSource(code, "fallibleNodiscard.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("struct [[nodiscard]] CbError {") != std::string::npos);
+        CHECK(res.cppCode.find("[[nodiscard]] CbError failVoid()") != std::string::npos);
+        CHECK(res.cppCode.find("[[nodiscard]] std::tuple<int64_t, CbError> failVal()") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects reassigning non-byref parameter") {
+        const std::string code = R"(
+fn test(p as int)
+    p = 10
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badParamReassign.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Cannot reassign const variable 'p'") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects field mutation on non-byref parameter or const struct") {
+        const std::string code = R"(
+type Point
+    x as int
+end type
+fn test(p as Point)
+    p.x = 10
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badFieldMut.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Cannot mutate const variable 'p'") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects calling .push() on non-byref list parameter") {
+        const std::string code = R"(
+fn test(nums as list[int])
+    nums.push(1)
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badPushMut.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Cannot call '.push()' on const variable 'nums'") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects passing non-byref parameter to byref parameter") {
+        const std::string code = R"(
+type Point
+    x as int
+end type
+fn mutate(byref p as Point)
+    p.x = 10
+end fn
+fn test(p as Point)
+    mutate(p)
+end fn
+)";
+        const auto res = cb::transpileSource(code, "badByrefPass.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Cannot pass const variable 'p' to byref parameter 'p'") != std::string::npos);
+    }
+}
+
 

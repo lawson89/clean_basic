@@ -11,11 +11,11 @@
 
 struct CbJsonDoc {
     cbVendorJson::JsonArena arena;
-    int root = -1;
+    int64_t root = -1;
 };
 
 struct CbJsonVal {
-    int id = -1;
+    int64_t id = -1;
 };
 
 inline CbJsonDoc cbJsonNewDoc() {
@@ -31,7 +31,7 @@ inline std::tuple<CbJsonDoc, CbError> cbJsonParse(const std::string& text) {
     }
     CbJsonDoc doc{};
     doc.arena = std::move(res.arena);
-    doc.root = static_cast<int>(res.root);
+    doc.root = static_cast<int64_t>(res.root);
     return {std::move(doc), CbError{"", 0}};
 }
 
@@ -55,31 +55,31 @@ inline std::string cbJsonStringify(const CbJsonDoc& doc) {
 }
 
 inline CbJsonVal cbJsonNewObject(CbJsonDoc& doc) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddObject(doc.arena))};
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddObject(doc.arena))};
 }
 
 inline CbJsonVal cbJsonNewArray(CbJsonDoc& doc) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddArray(doc.arena))};
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddArray(doc.arena))};
 }
 
 inline CbJsonVal cbJsonNewStr(CbJsonDoc& doc, const std::string& val) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddString(doc.arena, val))};
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddString(doc.arena, val))};
 }
 
-inline CbJsonVal cbJsonNewInt(CbJsonDoc& doc, int val) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddInt(doc.arena, static_cast<int64_t>(val)))};
+inline CbJsonVal cbJsonNewInt(CbJsonDoc& doc, int64_t val) {
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddInt(doc.arena, val))};
 }
 
 inline CbJsonVal cbJsonNewFloat(CbJsonDoc& doc, double val) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddFloat(doc.arena, val))};
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddFloat(doc.arena, val))};
 }
 
 inline CbJsonVal cbJsonNewBool(CbJsonDoc& doc, bool val) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddBool(doc.arena, val))};
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddBool(doc.arena, val))};
 }
 
 inline CbJsonVal cbJsonNewNull(CbJsonDoc& doc) {
-    return CbJsonVal{static_cast<int>(cbVendorJson::jsonAddNull(doc.arena))};
+    return CbJsonVal{static_cast<int64_t>(cbVendorJson::jsonAddNull(doc.arena))};
 }
 
 inline void cbJsonObjectSet(CbJsonDoc& doc, CbJsonVal obj, const std::string& key, CbJsonVal val) {
@@ -133,7 +133,7 @@ inline std::tuple<CbJsonVal, CbError> cbJsonGetField(
     if (fid == cbVendorJson::JSON_INVALID_ID) {
         return {CbJsonVal{-1}, CbError{"Missing JSON object field '" + key + "'", 404}};
     }
-    return {CbJsonVal{static_cast<int>(fid)}, CbError{"", 0}};
+    return {CbJsonVal{static_cast<int64_t>(fid)}, CbError{"", 0}};
 }
 
 inline std::tuple<std::string, CbError> cbJsonGetStr(const CbJsonDoc& doc, CbJsonVal val) {
@@ -150,7 +150,7 @@ inline std::tuple<std::string, CbError> cbJsonGetStr(const CbJsonDoc& doc, CbJso
     return {res.value(), CbError{"", 0}};
 }
 
-inline std::tuple<int, CbError> cbJsonGetInt(const CbJsonDoc& doc, CbJsonVal val) {
+inline std::tuple<int64_t, CbError> cbJsonGetInt(const CbJsonDoc& doc, CbJsonVal val) {
     if (val.id < 0) {
         return {0, CbError{"Invalid JSON value handle", 422}};
     }
@@ -161,7 +161,7 @@ inline std::tuple<int, CbError> cbJsonGetInt(const CbJsonDoc& doc, CbJsonVal val
     if (!res.has_value()) {
         return {0, CbError{"JSON value is not a number", 422}};
     }
-    return {static_cast<int>(res.value()), CbError{"", 0}};
+    return {res.value(), CbError{"", 0}};
 }
 
 inline std::tuple<double, CbError> cbJsonGetFloat(const CbJsonDoc& doc, CbJsonVal val) {
@@ -202,7 +202,7 @@ inline bool cbJsonIsNull(const CbJsonDoc& doc, CbJsonVal val) {
     );
 }
 
-inline int cbJsonArrayLen(const CbJsonDoc& doc, CbJsonVal arr) {
+inline int64_t cbJsonArrayLen(const CbJsonDoc& doc, CbJsonVal arr) {
     if (arr.id < 0) {
         return 0;
     }
@@ -213,13 +213,13 @@ inline int cbJsonArrayLen(const CbJsonDoc& doc, CbJsonVal arr) {
     if (!std::holds_alternative<cbVendorJson::JsonArray>(doc.arena.nodes[uid])) {
         return 0;
     }
-    return static_cast<int>(std::get<cbVendorJson::JsonArray>(doc.arena.nodes[uid]).elements.size());
+    return static_cast<int64_t>(std::get<cbVendorJson::JsonArray>(doc.arena.nodes[uid]).elements.size());
 }
 
 inline std::tuple<CbJsonVal, CbError> cbJsonArrayAt(
     const CbJsonDoc& doc,
     CbJsonVal arr,
-    int index
+    int64_t index
 ) {
     if (arr.id < 0 || index < 0) {
         return {CbJsonVal{-1}, CbError{"JSON array index out of bounds", 404}};
@@ -234,7 +234,7 @@ inline std::tuple<CbJsonVal, CbError> cbJsonArrayAt(
     if (uIdx >= elems.size()) {
         return {CbJsonVal{-1}, CbError{"JSON array index out of bounds", 404}};
     }
-    return {CbJsonVal{static_cast<int>(elems[uIdx])}, CbError{"", 0}};
+    return {CbJsonVal{static_cast<int64_t>(elems[uIdx])}, CbError{"", 0}};
 }
 
 #endif // CLEANBASIC_STDLIB_JSON_BRIDGE_HPP

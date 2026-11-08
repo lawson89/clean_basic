@@ -85,21 +85,21 @@ inline std::string cbOsPlatform() {
 #endif
 }
 
-inline int cbOsClock() {
+inline int64_t cbOsClock() {
     static const auto startTime = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
-    return static_cast<int>(elapsedMs);
+    return static_cast<int64_t>(elapsedMs);
 }
 
-inline void cbOsSleep(int ms) {
+inline void cbOsSleep(int64_t ms) {
     if (ms <= 0) {
         return;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-inline int cbOsRun(const std::string& cmd) {
+inline int64_t cbOsRun(const std::string& cmd) {
     const int status = std::system(cmd.c_str());
     if (status < 0) {
         return status;
@@ -112,8 +112,8 @@ inline int cbOsRun(const std::string& cmd) {
     return status;
 }
 
-inline void cbOsExit(int code) {
-    std::exit(code);
+inline void cbOsExit(int64_t code) {
+    std::exit(static_cast<int>(code));
 }
 
 #endif // CLEANBASIC_STDLIB_OS_BRIDGE_HPP

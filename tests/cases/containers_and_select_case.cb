@@ -1,5 +1,5 @@
-' EXPECT_CPP: int testContainers(std::vector<int> nums, std::unordered_map<std::string, int> lookup)
-' EXPECT_CPP: static_cast<int>(nums.size())
+' EXPECT_CPP: int64_t testContainers(const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& lookup)
+' EXPECT_CPP: static_cast<int64_t>(nums.size())
 ' FORBID_CPP: std::list
 ' EXPECT_OUT: first: 10
 ' EXPECT_OUT: empty: 0

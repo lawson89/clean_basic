@@ -1,7 +1,7 @@
 ' EXPECT_CPP: struct cb_player__Player {
-' EXPECT_CPP: void cb_player__heal(cb_player__Player& p, int amount)
-' EXPECT_CPP: const int maxPotion = 50;
-' EXPECT_CPP: int usesLeft = 3;
+' EXPECT_CPP: void cb_player__heal(cb_player__Player& p, int64_t amount)
+' EXPECT_CPP: const int64_t maxPotion = 50;
+' EXPECT_CPP: int64_t usesLeft = 3;
 ' EXPECT_CPP: usesLeft = 2;
 ' EXPECT_CPP: cb_player__Player stackHero = cb_player__Player{std::string("Alice"), 10};
 ' EXPECT_CPP: cb_player__heal(stackHero, maxPotion);

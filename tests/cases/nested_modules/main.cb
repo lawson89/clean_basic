@@ -1,8 +1,8 @@
 ' EXPECT_CPP: struct cb_entities_hero__Unit {
 ' EXPECT_CPP: struct cb_entities_enemy__Unit {
-' EXPECT_CPP: void cb_entities_hero__boost(cb_entities_hero__Unit& u, int amount)
-' EXPECT_CPP: void cb_entities_enemy__boost(cb_entities_enemy__Unit& u, int amount)
-' EXPECT_CPP: int cb_combat_battle__clash(cb_entities_hero__Unit& h, cb_entities_enemy__Unit& e, int dmg)
+' EXPECT_CPP: void cb_entities_hero__boost(cb_entities_hero__Unit& u, int64_t amount)
+' EXPECT_CPP: void cb_entities_enemy__boost(cb_entities_enemy__Unit& u, int64_t amount)
+' EXPECT_CPP: int64_t cb_combat_battle__clash(cb_entities_hero__Unit& h, cb_entities_enemy__Unit& e, int64_t dmg)
 ' FORBID_CPP: throw
 ' EXPECT_OUT: Paladin HP: 105
 ' EXPECT_OUT: Goblin HP: 25, Threat: 4

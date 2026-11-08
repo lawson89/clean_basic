@@ -14,7 +14,7 @@
 #include <vector>
 
 struct CbFile {
-    int handle = -1;
+    int64_t handle = -1;
 };
 
 struct CbFileSlot {
@@ -32,7 +32,7 @@ inline std::mutex& cbFsSlotMutex() {
     return mtx;
 }
 
-inline bool cbFsValidSlot(int handle) {
+inline bool cbFsValidSlot(int64_t handle) {
     if (handle < 0) {
         return false;
     }
@@ -195,7 +195,7 @@ inline std::tuple<CbFile, CbError> cbFsOpenMode(const std::string& path, const s
         return {CbFile{-1}, CbError{"Failed to open file: " + path, 500}};
     }
     slot.inUse = true;
-    return {CbFile{static_cast<int>(slotIdx)}, CbError{"", 0}};
+    return {CbFile{static_cast<int64_t>(slotIdx)}, CbError{"", 0}};
 }
 
 inline std::tuple<CbFile, CbError> cbFsOpen(const std::string& path) {
@@ -330,7 +330,7 @@ inline bool cbFsIsDir(const std::string& path) {
     return res;
 }
 
-inline std::tuple<int, CbError> cbFsSize(const std::string& path) {
+inline std::tuple<int64_t, CbError> cbFsSize(const std::string& path) {
     if (path.empty()) {
         return {0, CbError{"Cannot get size of empty path", 400}};
     }
@@ -339,7 +339,7 @@ inline std::tuple<int, CbError> cbFsSize(const std::string& path) {
     if (ec) {
         return {0, CbError{"Failed to get file size for '" + path + "': " + ec.message(), 404}};
     }
-    return {static_cast<int>(sz), CbError{"", 0}};
+    return {static_cast<int64_t>(sz), CbError{"", 0}};
 }
 
 inline std::tuple<std::vector<std::string>, CbError> cbFsDir(const std::string& path) {

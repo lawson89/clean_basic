@@ -52,6 +52,30 @@ public:
         throw makeError("AnalyzerError", std::string(msg), fileName, line, col);
     }
 
+    struct RootVarInfo {
+        std::string name;
+        bool isConst = false;
+        bool found = false;
+    };
+
+    RootVarInfo findRootVar(ExprId exprId, const std::unordered_map<std::string, VarSymbol>& scope) const {
+        if (exprId >= arena.exprs.size()) return {};
+        if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
+            const auto it = scope.find(ident->name);
+            if (it != scope.end()) {
+                return RootVarInfo{it->second.name, it->second.isConst, true};
+            }
+            return RootVarInfo{ident->name, false, false};
+        }
+        if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
+            return findRootVar(fa->target, scope);
+        }
+        if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
+            return findRootVar(ia->target, scope);
+        }
+        return {};
+    }
+
     void checkFallibleUsage(
         const FnDecl& fn,
         ExprId exprId,
@@ -130,17 +154,75 @@ public:
                         if (call->args.size() != 1) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'.push()' requires exactly 1 argument.");
                         }
+                        if (const auto* calleeFa = arena.getExpr<FieldAccess>(call->callee)) {
+                            const auto root = findRootVar(calleeFa->target, scope);
+                            if (root.found && root.isConst) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '.push()' on const variable '" + root.name + "'.");
+                            }
+                        }
                     } else {
                         // len, toStr, toInt, toFloat
                         if (!call->args.empty()) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'." + fnSym.name + "()' takes 0 arguments.");
                         }
                     }
-                } else if (fnSym.isFallible && !allowTopLevelFallible) {
-                    if (!fn.isFallible) {
-                        std::string msg = "Function '" + fn.name + "' calls fallible function '" + fnSym.name +
-                            "' without an 'on error' block, but '" + fn.name + "' does not declare 'can error' in its signature.";
-                        setAnalyzerError(exprNode.line, exprNode.col, msg);
+                } else {
+                    bool isUfcs = false;
+                    ExprId ufcsRecv = INVALID_ID;
+                    if (const auto* calleeFa = arena.getExpr<FieldAccess>(call->callee)) {
+                        std::string targetModId;
+                        bool isModCall = false;
+                        if (const auto* tgtIdent = arena.getExpr<Identifier>(calleeFa->target)) {
+                            if (isModuleAliasInScope(symbols, moduleId, tgtIdent->name, scope, targetModId)) {
+                                isModCall = true;
+                            }
+                        }
+                        if (!isModCall) {
+                            isUfcs = true;
+                            ufcsRecv = calleeFa->target;
+                        }
+                    }
+
+                    if (isUfcs && !fnSym.params.empty()) {
+                        if (fnSym.params[0].isByref) {
+                            const auto root = findRootVar(ufcsRecv, scope);
+                            if (root.found && root.isConst) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + fnSym.params[0].name + "'.");
+                            }
+                        }
+                    }
+
+                    const size_t paramOffset = isUfcs ? 1 : 0;
+                    for (size_t aIdx = 0; aIdx < call->args.size(); ++aIdx) {
+                        const size_t pIdx = paramOffset + aIdx;
+                        if (pIdx < fnSym.params.size()) {
+                            if (fnSym.params[pIdx].isByref) {
+                                const auto root = findRootVar(call->args[aIdx], scope);
+                                if (root.found && root.isConst) {
+                                    setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + fnSym.params[pIdx].name + "'.");
+                                }
+                            }
+                        }
+                    }
+
+                    for (const auto& namedArg : call->namedArgs) {
+                        for (const auto& p : fnSym.params) {
+                            if (p.name == namedArg.name && p.isByref) {
+                                const auto root = findRootVar(namedArg.value, scope);
+                                if (root.found && root.isConst) {
+                                    setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + p.name + "'.");
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    if (fnSym.isFallible && !allowTopLevelFallible) {
+                        if (!fn.isFallible) {
+                            std::string msg = "Function '" + fn.name + "' calls fallible function '" + fnSym.name +
+                                "' without an 'on error' block, but '" + fn.name + "' does not declare 'can error' in its signature.";
+                            setAnalyzerError(exprNode.line, exprNode.col, msg);
+                        }
                     }
                 }
 
@@ -279,6 +361,14 @@ public:
                         setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                     }
                 }
+            } else {
+                const auto& tgtNode = arena.exprs[vassign->target];
+                const auto root = findRootVar(vassign->target, scope);
+                if (root.found && root.isConst) {
+                    std::string msg = "Cannot mutate const variable '" + root.name + "'.";
+                    setAnalyzerError(tgtNode.line, tgtNode.col, msg);
+                }
+                validateExprCalls(fn, vassign->target, scope, false);
             }
 
             validateExprCalls(fn, vassign->value, scope, true);
@@ -440,7 +530,8 @@ public:
         std::unordered_map<std::string, VarSymbol> scope;
         for (const auto& param : fn.params) {
             const TypeId resolvedTid = resolveAlias(arena, symbols, moduleId, param.typeId);
-            bindLocalVar(scope, param.name, resolvedTid, param.isByref, false, param.line, param.col);
+            const bool isConst = !param.isByref;
+            bindLocalVar(scope, param.name, resolvedTid, param.isByref, isConst, param.line, param.col);
         }
 
         analyzeBlock(fn, fn.body, scope, false);
