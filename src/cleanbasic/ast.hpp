@@ -47,6 +47,8 @@ struct Param {
     std::string name;
     TypeId typeId = INVALID_ID;
     bool isByref = false;
+    bool hasDefault = false;
+    ExprId defaultValue = INVALID_ID;
 };
 
 struct FieldDecl {
@@ -54,6 +56,8 @@ struct FieldDecl {
     uint32_t col = 1;
     std::string name;
     TypeId typeId = INVALID_ID;
+    bool hasDefault = false;
+    ExprId defaultValue = INVALID_ID;
 };
 
 // ==========================================
@@ -229,7 +233,6 @@ struct ForStmt {
 struct SelectCase {
     uint32_t line = 1;
     uint32_t col = 1;
-    ExprId matchExpr = INVALID_ID;
     std::vector<ExprId> matchExprs;
     std::vector<StmtId> body;
 };
@@ -336,6 +339,14 @@ struct EnumDecl {
     bool hasExplicitIntType = false;
 };
 
+struct ConstDecl {
+    std::string name;
+    bool hasDeclaredType = false;
+    TypeId declaredType = INVALID_ID;
+    ExprId value = INVALID_ID;
+    bool isPub = false;
+};
+
 struct FnDecl {
     std::string name;
     std::vector<Param> params;
@@ -351,6 +362,7 @@ using DeclVariant = std::variant<
     AliasDecl,
     TypeDecl,
     EnumDecl,
+    ConstDecl,
     FnDecl
 >;
 
@@ -565,42 +577,12 @@ inline std::string stripModulePrefix(std::string_view name) {
     return std::string(name);
 }
 
-inline const TypeNode& getTypeNode(const AstArena& arena, TypeId tid) {
-    return arena.getType(tid);
-}
-
-inline bool isVoidType(const AstArena& arena, TypeId tid) {
-    return arena.isVoid(tid);
-}
-
 inline TypeId findType(
     const AstArena& arena,
     std::string_view name,
     const std::vector<TypeId>& typeArgs = {}
 ) {
     return arena.findType(name, typeArgs);
-}
-
-inline TypeId addType(AstArena& arena, TypeNode node) {
-    return arena.addType(std::move(node));
-}
-
-inline TypeId findOrAddType(
-    AstArena& arena,
-    std::string_view name,
-    const std::vector<TypeId>& typeArgs = {},
-    uint32_t line = 1,
-    uint32_t col = 1
-) {
-    return arena.findOrAddType(name, typeArgs, line, col);
-}
-
-inline ExprId addExpr(AstArena& arena, uint32_t line, uint32_t col, ExprVariant payload) {
-    return arena.addExpr(line, col, std::move(payload));
-}
-
-inline StmtId addStmt(AstArena& arena, uint32_t line, uint32_t col, StmtVariant payload) {
-    return arena.addStmt(line, col, std::move(payload));
 }
 
 inline std::string normalizeRelPath(std::string_view rawPath) {
@@ -866,18 +848,11 @@ inline std::string makeCppFnName(std::string_view moduleId, std::string_view nam
     return "cb_" + sanitizeModuleId(moduleId) + "__" + std::string(name);
 }
 
-inline DeclId addDecl(
-    AstArena& arena,
-    uint32_t line,
-    uint32_t col,
-    DeclVariant payload,
-    std::string_view moduleId = "",
-    std::string_view fileName = "main.cb",
-    uint32_t endLine = 0,
-    uint32_t nameLine = 0,
-    uint32_t nameCol = 0
-) {
-    return arena.addDecl(line, col, std::move(payload), moduleId, fileName, endLine, nameLine, nameCol);
+inline std::string makeCppConstName(std::string_view moduleId, std::string_view name) {
+    if (moduleId.empty()) {
+        return std::string(name);
+    }
+    return "cb_" + sanitizeModuleId(moduleId) + "__" + std::string(name);
 }
 
 // ==========================================
@@ -885,32 +860,12 @@ inline DeclId addDecl(
 // ==========================================
 
 template <typename T>
-inline bool isExpr(const AstArena& arena, ExprId id) {
-    return id != INVALID_ID && id < arena.exprs.size() && std::holds_alternative<T>(arena.exprs[id].payload);
-}
-
-template <typename T>
-inline bool isStmt(const AstArena& arena, StmtId id) {
-    return id != INVALID_ID && id < arena.stmts.size() && std::holds_alternative<T>(arena.stmts[id].payload);
-}
-
-template <typename T>
 inline bool isDecl(const AstArena& arena, DeclId id) {
     return id != INVALID_ID && id < arena.decls.size() && std::holds_alternative<T>(arena.decls[id].payload);
 }
 
 template <typename T>
-inline const T& asExpr(const AstArena& arena, ExprId id) {
-    return std::get<T>(arena.exprs[id].payload);
-}
-
-template <typename T>
 inline const T& asStmt(const AstArena& arena, StmtId id) {
-    return std::get<T>(arena.stmts[id].payload);
-}
-
-template <typename T>
-inline T& asStmtMut(AstArena& arena, StmtId id) {
     return std::get<T>(arena.stmts[id].payload);
 }
 

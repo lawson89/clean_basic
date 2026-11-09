@@ -230,6 +230,32 @@ inline void cbBytesWriteU64Be(std::vector<uint8_t>& b, int64_t val, int64_t offs
     }
 }
 
+template <typename T>
+inline T cbListPop(std::vector<T>& v) {
+    if (v.empty()) {
+        return T{};
+    }
+    T val = std::move(v.back());
+    v.pop_back();
+    return val;
+}
+
+inline int64_t cbBytesPop(std::vector<uint8_t>& b) {
+    if (b.empty()) {
+        return 0;
+    }
+    int64_t val = static_cast<int64_t>(b.back());
+    b.pop_back();
+    return val;
+}
+
+inline bool cbRangeCond(int64_t curr, int64_t end, int64_t step) {
+    if (step < 0) {
+        return curr >= end;
+    }
+    return curr <= end;
+}
+
 inline std::vector<std::string>& cbRuntimeArgs() {
     static std::vector<std::string> args;
     return args;
@@ -377,6 +403,9 @@ public:
         if (resolved.name == "bool") return "false";
         if (resolved.name == "str") return "std::string("")";
         if (resolved.name == "bytes") return "std::vector<uint8_t>{}";
+        if (isEnumType(symbols, tid, arena, modId)) {
+            return "static_cast<" + mapTypeNode(modId, resolved) + ">(0)";
+        }
         return mapTypeNode(modId, resolved) + "{}";
     }
 
@@ -456,7 +485,7 @@ public:
     std::string emitAsStrExpr(ExprId exprId, const std::unordered_map<std::string, VarSymbol>& scope);
     std::vector<std::string> emitExprList(const std::vector<ExprId>& exprIds, const std::unordered_map<std::string, VarSymbol>& scope);
     std::vector<std::string> orderStructFields(std::string_view typeName, const std::vector<ExprId>& posArgs, const std::vector<NamedArg>& namedArgs, const std::unordered_map<std::string, VarSymbol>& scope);
-    std::string emitCallArgsJoined(const std::vector<ExprId>& posArgs, const std::vector<NamedArg>& namedArgs, const std::unordered_map<std::string, VarSymbol>& scope);
+    std::string emitCallArgsJoined(const FnSymbol& fnSym, const std::vector<ExprId>& posArgs, const std::vector<NamedArg>& namedArgs, const std::unordered_map<std::string, VarSymbol>& scope);
     std::string buildErrorCallValue(const FuncCall& call, const std::unordered_map<std::string, VarSymbol>& scope);
     std::string buildErrorBubbleReturn(const FnDecl& fn, std::string_view errVar);
     void emitStmt(const FnDecl& fn, StmtId stmtId, std::unordered_map<std::string, VarSymbol>& scope, std::unordered_set<std::string>& declaredVars);
@@ -468,103 +497,12 @@ public:
     void emitReturn(const FnDecl& fn, const ReturnStmt& stmt, const std::unordered_map<std::string, VarSymbol>& scope);
     void emitStructDecl(const TypeDecl& td);
     void emitEnumDecl(const EnumDecl& ed);
+    void emitConstDecl(const ConstDecl& cd);
     void emitFnDecl(const FnDecl& fn);
     std::string emitProgram(const Program& program);
 };
 
 using EmitterState = Emitter;
-
-inline std::string mapType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    TypeId tid,
-    bool isByref = false
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.mapType(currentModuleId, tid, isByref);
-}
-
-inline std::string mapBaseType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const TypeNode& t
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.mapBaseType(currentModuleId, t);
-}
-
-inline std::string mapTypeNode(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const TypeNode& resolved,
-    bool isByref = false
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.mapTypeNode(currentModuleId, resolved, isByref);
-}
-
-inline std::string defaultValueForType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    TypeId tid
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.defaultValueForType(currentModuleId, tid);
-}
-
-inline std::string fnReturnCppType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const FnDecl& fn
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.fnReturnCppType(currentModuleId, fn);
-}
-
-inline bool isPassByConstRefType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const TypeNode& resolved
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.isPassByConstRefType(currentModuleId, resolved);
-}
-
-inline bool isPassByConstRefType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    TypeId tid
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.isPassByConstRefType(currentModuleId, tid);
-}
-
-inline std::string mapParamType(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const Param& p
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.mapParamType(currentModuleId, p);
-}
-
-inline std::string fnSignature(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const FnDecl& fn
-) {
-    Emitter emitter(arena, symbols);
-    return emitter.fnSignature(currentModuleId, fn);
-}
 
 } // namespace cb
 

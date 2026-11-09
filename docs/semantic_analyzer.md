@@ -74,6 +74,10 @@ CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 
 * **`.len() as int`**: Supported on `list[T]`, `dict[K, V]`, `str`, and `bytes`. Returns the number of elements or characters.
 * **`.push(item as T)`**: Supported on `list[T]` and `bytes` (octet). Appends an item to the end of the list.
+* **`.pop() as T`**: Supported on `list[T]` and `bytes` (returns `int`). Removes and returns the last element.
+* **`.clear()`**: Supported on `list[T]`, `dict[K, V]`, and `bytes`. Removes all elements in place.
+* **`dict.has(key as K) as bool`**: Returns `true` if `key` exists in the dictionary without mutating it.
+* **`dict.remove(key as K) as bool`**: Removes `key` from the dictionary and returns `true` if an entry was removed.
 * **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
 * **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
 * **`bytes` Methods**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, etc.

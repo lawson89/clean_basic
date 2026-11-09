@@ -44,6 +44,10 @@ inline TypeId inferExprType(
         if (it != scope.end()) {
             return it->second.typeId;
         }
+        const auto cOpt = resolveConstSymbol(symbols, currentModuleId, scope, ident->name);
+        if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
+            return cOpt->typeId;
+        }
         return symbols.typeAuto;
     }
 
@@ -74,27 +78,16 @@ inline TypeId inferExprType(
     }
 
     if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
-        if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess->target)) {
-            if (scope.find(tgtIdent->name) == scope.end()) {
-                const auto enumOpt = resolveEnumSymbol(arena, symbols, currentModuleId, tgtIdent->name);
-                if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
-                    const TypeId tid = arena.findType(enumOpt->key, {});
-                    if (tid != INVALID_ID) return tid;
-                }
+        const auto enumOpt = resolveEnumMemberAccess(arena, symbols, currentModuleId, scope, *faccess);
+        if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
+            const TypeId tid = arena.findType(enumOpt->key, {});
+            if (tid != INVALID_ID) {
+                return tid;
             }
         }
-        if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess->target)) {
-            if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
-                std::string targetModId;
-                if (isModuleAliasInScope(symbols, currentModuleId, modIdent->name, scope, targetModId)) {
-                    const std::string enumKey = symbolKey(targetModId, innerFa->fieldName);
-                    const auto it = symbols.enums.find(enumKey);
-                    if (it != symbols.enums.end() && it->second.memberValues.count(faccess->fieldName) > 0) {
-                        const TypeId tid = arena.findType(it->second.key, {});
-                        if (tid != INVALID_ID) return tid;
-                    }
-                }
-            }
+        const auto cOpt = resolveModuleConstAccess(arena, symbols, currentModuleId, scope, *faccess);
+        if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
+            return cOpt->typeId;
         }
         const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
@@ -110,7 +103,7 @@ inline TypeId inferExprType(
     if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
         const TypeId targetTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId);
         if (targetTid < arena.types.size()) {
-            const auto& tnode = arena.types[targetTid];
+            const TypeNode tnode = resolveAliasNode(arena, symbols, currentModuleId, targetTid);
             if (tnode.name == "list" && !tnode.typeArgs.empty()) {
                 return tnode.typeArgs[0];
             }

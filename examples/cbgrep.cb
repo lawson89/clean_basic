@@ -72,9 +72,9 @@ fn searchStdin(pattern as str, opts as GrepOptions, showPath as bool) as int
     dim lineNum = 0
     dim line = ""
     while os.readLine(line)
-        lineNum = lineNum + 1
+        lineNum += 1
         if lineMatches(line, pattern, opts)
-            matchedCount = matchedCount + 1
+            matchedCount += 1
             if not opts.countOnly
                 print(formatMatchLine("(standard input)", showPath, lineNum, line, opts))
             end if
@@ -96,9 +96,9 @@ fn searchFile(path as str, pattern as str, opts as GrepOptions, showPath as bool
     dim lineNum = 0
     dim line = ""
     while f.readLine(line)
-        lineNum = lineNum + 1
+        lineNum += 1
         if lineMatches(line, pattern, opts)
-            matchedCount = matchedCount + 1
+            matchedCount += 1
             if not opts.countOnly
                 print(formatMatchLine(path, showPath, lineNum, line, opts))
             end if
@@ -137,9 +137,9 @@ fn searchDir(dirPath as str, pattern as str, opts as GrepOptions, byref hadError
         end if
         dim childPath = fs.joinPath(dirPath, name)
         if fs.isDir(childPath)
-            total = total + searchDir(childPath, pattern, opts, hadError)
+            total += searchDir(childPath, pattern, opts, hadError)
         else if fs.isFile(childPath)
-            total = total + searchFileSafe(childPath, pattern, opts, true, hadError)
+            total += searchFileSafe(childPath, pattern, opts, true, hadError)
         end if
     end for
     return total
@@ -186,14 +186,14 @@ fn main() as int
         dim showPath = targets.len() > 1
         for target in targets
             if target == "-"
-                totalMatches = totalMatches + searchStdin(pattern, opts, showPath)
+                totalMatches += searchStdin(pattern, opts, showPath)
             else if not fs.exists(target)
                 os.eprint("cbgrep: " & target & ": No such file or directory")
                 hadError = true
             else if fs.isDir(target)
-                totalMatches = totalMatches + searchDir(target, pattern, opts, hadError)
+                totalMatches += searchDir(target, pattern, opts, hadError)
             else
-                totalMatches = totalMatches + searchFileSafe(target, pattern, opts, showPath, hadError)
+                totalMatches += searchFileSafe(target, pattern, opts, showPath, hadError)
             end if
         end for
     end if

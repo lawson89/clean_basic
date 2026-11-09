@@ -73,6 +73,20 @@ struct AliasSymbol {
     uint32_t endLine = 1;
 };
 
+struct ConstSymbol {
+    std::string name;
+    std::string moduleId;
+    std::string key;
+    TypeId typeId = INVALID_ID;
+    ExprId value = INVALID_ID;
+    bool isPub = false;
+    std::string cppName;
+    std::string fileName = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t endLine = 1;
+};
+
 struct VarSymbol {
     std::string name;
     TypeId typeId = INVALID_ID;
@@ -88,6 +102,7 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
     std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, EnumSymbol> enums;
+    std::unordered_map<std::string, ConstSymbol> constants;
     std::unordered_map<std::string, FnSymbol> functions;
     std::vector<std::string> headers;
     std::vector<std::string> linkLibs;
@@ -201,7 +216,7 @@ inline std::string resolveSymbolKey(
     }
 
     const std::string key = symbolKey(currentModuleId, name);
-    if (symbols.types.count(key) > 0 || symbols.aliases.count(key) > 0 || symbols.functions.count(key) > 0) {
+    if (symbols.types.count(key) > 0 || symbols.enums.count(key) > 0 || symbols.aliases.count(key) > 0 || symbols.functions.count(key) > 0 || symbols.constants.count(key) > 0) {
         return key;
     }
     if (isBuiltinSymbolName(name)) {
@@ -260,6 +275,11 @@ inline TypeNode resolveAliasFromNode(
         const auto tit = symbols.types.find(typeKey);
         if (tit != symbols.types.end()) {
             curr.name = tit->second.key;
+        } else {
+            const auto eit = symbols.enums.find(typeKey);
+            if (eit != symbols.enums.end()) {
+                curr.name = eit->second.key;
+            }
         }
     }
 
@@ -397,6 +417,49 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             FnSymbol fs{};
             fs.name = "push";
             fs.returnType = symbols.typeVoid;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "pop") {
+        if (recvTypeKey == "list") {
+            TypeId elemType = symbols.typeInt;
+            if (!resolvedRecvNode.typeArgs.empty()) {
+                elemType = resolvedRecvNode.typeArgs[0];
+            }
+            FnSymbol fs{};
+            fs.name = "pop";
+            fs.returnType = elemType;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "pop";
+            fs.returnType = symbols.typeInt;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "clear") {
+        if (recvTypeKey == "list" || recvTypeKey == "dict" || recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "clear";
+            fs.returnType = symbols.typeVoid;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "has") {
+        if (recvTypeKey == "dict") {
+            FnSymbol fs{};
+            fs.name = "has";
+            fs.returnType = symbols.typeBool;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "remove") {
+        if (recvTypeKey == "dict") {
+            FnSymbol fs{};
+            fs.name = "remove";
+            fs.returnType = symbols.typeBool;
             fs.isBuiltinReceiver = true;
             return fs;
         }
@@ -557,12 +620,100 @@ inline std::optional<EnumSymbol> resolveEnumSymbol(
     return std::nullopt;
 }
 
+inline std::optional<EnumSymbol> resolveEnumMemberAccess(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    const FieldAccess& faccess
+) {
+    if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess.target)) {
+        if (scope.find(tgtIdent->name) == scope.end()) {
+            const auto enumOpt = resolveEnumSymbol(arena, symbols, currentModuleId, tgtIdent->name);
+            if (enumOpt.has_value()) {
+                return enumOpt;
+            }
+        }
+    }
+    if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess.target)) {
+        if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
+            std::string targetModId;
+            if (isModuleAliasInScope(symbols, currentModuleId, modIdent->name, scope, targetModId)) {
+                const std::string enumKey = symbolKey(targetModId, innerFa->fieldName);
+                const auto it = symbols.enums.find(enumKey);
+                if (it != symbols.enums.end()) {
+                    return it->second;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+inline std::optional<ConstSymbol> resolveConstSymbol(
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    std::string_view identName
+) {
+    if (scope.find(std::string(identName)) != scope.end()) {
+        return std::nullopt;
+    }
+    const std::string key = symbolKey(currentModuleId, identName);
+    const auto it = symbols.constants.find(key);
+    if (it != symbols.constants.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<ConstSymbol> resolveModuleConstAccess(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    const FieldAccess& faccess
+) {
+    if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess.target)) {
+        std::string targetModId;
+        if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent->name, scope, targetModId)) {
+            const std::string constKey = symbolKey(targetModId, faccess.fieldName);
+            const auto it = symbols.constants.find(constKey);
+            if (it != symbols.constants.end()) {
+                return it->second;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 inline bool isEnumType(const GlobalSymbolTable& symbols, TypeId tid, const AstArena& arena, std::string_view currentModuleId) {
     if (tid >= arena.types.size()) return false;
     const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
     if (symbols.enums.find(resolved.name) != symbols.enums.end()) return true;
     const std::string k = resolveSymbolKey(symbols, currentModuleId, resolved.name);
     return symbols.enums.find(k) != symbols.enums.end();
+}
+
+inline bool fnMatchesArgCount(const FnSymbol& fn, size_t totalArgs, bool isUfcs = false) {
+    size_t startIdx = 0;
+    if (isUfcs) {
+        startIdx = 1;
+    }
+    if (startIdx > fn.params.size()) {
+        return false;
+    }
+    const size_t maxArgs = fn.params.size() - startIdx;
+    if (totalArgs > maxArgs) {
+        return false;
+    }
+    size_t minArgs = 0;
+    for (size_t i = startIdx; i < fn.params.size(); ++i) {
+        if (!fn.params[i].hasDefault) {
+            minArgs += 1;
+        }
+    }
+    return totalArgs >= minArgs;
 }
 
 inline std::optional<FnSymbol> resolveFuncCall(
@@ -572,16 +723,25 @@ inline std::optional<FnSymbol> resolveFuncCall(
     std::string_view currentModuleId,
     const std::unordered_map<std::string, VarSymbol>& scope = {}
 ) {
+    const size_t totalArgs = call.args.size() + call.namedArgs.size();
     if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
         const std::string key = resolveSymbolKey(symbols, currentModuleId, ident->name);
         const auto it = symbols.functions.find(key);
         if (it != symbols.functions.end()) {
             if (!it->second.overloads.empty()) {
-                if (it->second.params.size() == call.args.size()) {
+                if (it->second.params.size() == totalArgs) {
                     return it->second;
                 }
                 for (const auto& ov : it->second.overloads) {
-                    if (ov.params.size() == call.args.size()) {
+                    if (ov.params.size() == totalArgs) {
+                        return ov;
+                    }
+                }
+                if (fnMatchesArgCount(it->second, totalArgs, false)) {
+                    return it->second;
+                }
+                for (const auto& ov : it->second.overloads) {
+                    if (fnMatchesArgCount(ov, totalArgs, false)) {
                         return ov;
                     }
                 }
@@ -599,11 +759,19 @@ inline std::optional<FnSymbol> resolveFuncCall(
                 const auto it = symbols.functions.find(key);
                 if (it != symbols.functions.end()) {
                     if (!it->second.overloads.empty()) {
-                        if (it->second.params.size() == call.args.size()) {
+                        if (it->second.params.size() == totalArgs) {
                             return it->second;
                         }
                         for (const auto& ov : it->second.overloads) {
-                            if (ov.params.size() == call.args.size()) {
+                            if (ov.params.size() == totalArgs) {
+                                return ov;
+                            }
+                        }
+                        if (fnMatchesArgCount(it->second, totalArgs, false)) {
+                            return it->second;
+                        }
+                        for (const auto& ov : it->second.overloads) {
+                            if (fnMatchesArgCount(ov, totalArgs, false)) {
                                 return ov;
                             }
                         }

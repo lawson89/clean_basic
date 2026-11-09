@@ -37,10 +37,11 @@ struct LexResult {
 | `TYPE_KW` | `int`, `float`, `bool`, `str`, `bytes`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
 | `NUMBER` | `42`, `3.14159`, `0` | Integer or decimal floating-point numeric literals. |
-| `STRING` | `"Alice"`, `"IP cannot be empty"` | Double-quoted string literals (retaining outer quotes until stripped by `stripQuotes` in the parser; supports `\` escape sequences). |
+| `STRING` | `"Alice"`, `"IP cannot be empty"` | Double-quoted string literals (retaining outer quotes until stripped by `stripQuotes` in the parser; supports `\` escape sequences). Interpolated strings (`$"Hello {user.name}!"`) are desugared directly in the lexer into parenthesized `&` concatenation expressions `("Hello " & (user.name) & "!")` with `{{` and `}}` brace escaping. |
 | `BYTES` | `b"GIF89a"`, `B"\x7fELF"` | Byte string literals prefixed with `b"` or `B"`. |
 | `OP_CMP` | `==`, `!=`, `<`, `>`, `<=`, `>=` | Relational and equality comparison operators. |
-| `OP_ARITH` | `+`, `-`, `*`, `/`, `&` | Arithmetic operators and the `&` string concatenation operator. |
+| `OP_ARITH` | `+`, `-`, `*`, `/`, `%`, `&` | Arithmetic operators (including integer modulo `%`) and the `&` string concatenation operator. |
+| `COMPOUND_ASSIGN` | `+=`, `-=`, `*=`, `/=`, `%=`, `&=` | Compound assignment operators (desugared in the parser to `VarAssignment`). |
 | `ASSIGN` | `=` | Variable assignment, default/alias binding, and named argument separator. |
 | `COLON` | `:` | Key-value separator inside dictionary literals (`{k: v}`). |
 | `COMMA` | `,` | Parameter, argument, list, dictionary, and loop variable separator. |
@@ -154,9 +155,11 @@ At the top level of a `.cb` file, only four declaration families are legal:
    * `[pub] enum Name [as int] ... end enum` for enumeration types.
    * `[pub] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
    * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`pub`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
-5. **Functions (`FnDecl`)**:
-   * `[pub] [extern] fn name([byref] p as Type, ...) [as ReturnType] [can error]`
-   * Note: `as err` is also accepted as a shorthand for a void fallible function (`isFallible = true`, `returnType = void`), alongside standard `[as ReturnType] can error`.
+5. **Module Constants (`ConstDecl`)**:
+   * `[pub] const name [as Type] = Expr` declares a module-level constant.
+6. **Functions (`FnDecl`)**:
+   * `[pub] [extern] fn name([byref] p as Type [= defaultExpr], ...) [as ReturnType] [can error]`
+   * Fallible functions declare `can error` at the end of the signature (the legacy `as err` return shorthand is rejected with a `ParseError`).
    * If `isExtern` is true and `end fn` is not present, `parseFnDecl()` returns a bodyless extern `FnDecl` immediately after the signature line.
 
 ### 3.2 Statements (`parseStatement`)

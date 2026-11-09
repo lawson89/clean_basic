@@ -181,7 +181,11 @@ inline void addUniqueCompletionItem(std::vector<CompletionItemEntry>& items, std
 }
 
 inline void addCompletionEntry(std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen, std::string_view label, int64_t kind, std::string_view detail, std::string_view insertText = "", std::string_view documentation = "") {
-    addUniqueCompletionItem(items, seen, CompletionItemEntry{std::string(label), kind, std::string(detail), insertText.empty() ? std::string(label) : std::string(insertText), std::string(documentation)});
+    std::string finalInsertText(insertText);
+    if (finalInsertText.empty()) {
+        finalInsertText = std::string(label);
+    }
+    addUniqueCompletionItem(items, seen, CompletionItemEntry{std::string(label), kind, std::string(detail), finalInsertText, std::string(documentation)});
 }
 
 inline void collectModuleSymbolCompletions(const LspDocumentSnapshot& snap, std::string_view targetModuleId, std::string_view prefix, bool requirePub, bool includeFunctions, bool includeModuleAliases, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
@@ -197,10 +201,22 @@ inline void collectModuleSymbolCompletions(const LspDocumentSnapshot& snap, std:
         if (ts.moduleId != targetModuleId || (requirePub && !ts.isPub) || (!requirePub && isBuiltinTypeName(ts.name))) continue;
         if (matchesCompletionPrefix(ts.name, prefix)) addCompletionEntry(items, seen, ts.name, 22, "type " + ts.name, ts.name, formatTypeHoverMarkdown(snap.arena, ts));
     }
+    for (const auto& kv : snap.symbols.enums) {
+        const EnumSymbol& es = kv.second;
+        if (es.moduleId != targetModuleId || (requirePub && !es.isPub)) continue;
+        if (matchesCompletionPrefix(es.name, prefix)) addCompletionEntry(items, seen, es.name, 13, "enum " + es.name, es.name, formatEnumHoverMarkdown(es));
+    }
     for (const auto& kv : snap.symbols.aliases) {
         const AliasSymbol& al = kv.second;
         if (al.moduleId != targetModuleId || (requirePub && !al.isPub)) continue;
         if (matchesCompletionPrefix(al.name, prefix)) addCompletionEntry(items, seen, al.name, 25, "alias " + al.name + " = " + formatCleanbasicType(snap.arena, al.targetType), al.name, formatAliasHoverMarkdown(snap.arena, snap.symbols, al));
+    }
+    if (includeFunctions) {
+        for (const auto& kv : snap.symbols.constants) {
+            const ConstSymbol& cs = kv.second;
+            if (cs.moduleId != targetModuleId || (requirePub && !cs.isPub)) continue;
+            if (matchesCompletionPrefix(cs.name, prefix)) addCompletionEntry(items, seen, cs.name, 21, "const as " + formatCleanbasicType(snap.arena, cs.typeId), cs.name, formatConstHoverMarkdown(snap.arena, cs));
+        }
     }
     if (includeModuleAliases) {
         const auto modMapIt = snap.symbols.modules.find(std::string(targetModuleId));
@@ -238,8 +254,33 @@ inline void collectUfcsCompletionsForType(const LspDocumentSnapshot& snap, std::
 }
 
 inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_view currentModuleId, const std::optional<std::string>& enclosingFnKey, std::string_view receiverName, std::string_view prefix, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
-    const auto varTidOpt = resolveVariableTypeInFn(snap, enclosingFnKey, receiverName);
+    auto varTidOpt = resolveVariableTypeInFn(snap, enclosingFnKey, receiverName);
     if (!varTidOpt.has_value()) {
+        const auto cIt = snap.symbols.constants.find(symbolKey(currentModuleId, receiverName));
+        if (cIt != snap.symbols.constants.end()) {
+            varTidOpt = cIt->second.typeId;
+        }
+    }
+    if (!varTidOpt.has_value()) {
+        if (receiverName == "bytes") {
+            if (matchesCompletionPrefix("fromHex", prefix)) {
+                addCompletionEntry(items, seen, "fromHex", 2, "fn(hex as str) as bytes can error");
+            }
+            return;
+        }
+        const auto enumOpt = resolveEnumSymbol(snap.arena, snap.symbols, currentModuleId, receiverName);
+        if (enumOpt.has_value() && (enumOpt->moduleId == currentModuleId || enumOpt->isPub)) {
+            for (const auto& m : enumOpt->members) {
+                if (!matchesCompletionPrefix(m.name, prefix)) continue;
+                std::string detail = "enum member";
+                const auto vit = enumOpt->memberValues.find(m.name);
+                if (vit != enumOpt->memberValues.end()) {
+                    detail = "= " + std::to_string(vit->second);
+                }
+                addCompletionEntry(items, seen, m.name, 20, detail);
+            }
+            return;
+        }
         const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
         if (modMapIt != snap.symbols.modules.end()) {
             const auto aliasIt = modMapIt->second.find(std::string(receiverName));
@@ -250,20 +291,50 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
     const TypeId recvTid = resolveAlias(snap.arena, snap.symbols, currentModuleId, varTidOpt.value());
     if (recvTid == INVALID_ID || recvTid >= snap.arena.types.size()) return;
     const TypeNode& recvNode = snap.arena.types[recvTid];
+    const bool recvIsEnum = isEnumType(snap.symbols, recvTid, snap.arena, currentModuleId);
 
     // Built-in receiver methods
-    if (recvNode.name == "list" || recvNode.name == "dict" || recvNode.name == "str") {
+    if (recvNode.name == "list" || recvNode.name == "dict" || recvNode.name == "str" || recvNode.name == "bytes") {
         if (matchesCompletionPrefix("len", prefix)) addCompletionEntry(items, seen, "len", 2, "fn() as int");
     }
     if (recvNode.name == "list") {
         std::string elemType = "T";
         if (!recvNode.typeArgs.empty()) elemType = formatCleanbasicType(snap.arena, recvNode.typeArgs[0]);
         if (matchesCompletionPrefix("push", prefix)) addCompletionEntry(items, seen, "push", 2, "fn(item as " + elemType + ")");
+        if (matchesCompletionPrefix("pop", prefix)) addCompletionEntry(items, seen, "pop", 2, "fn() as " + elemType);
+        if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
     }
-    if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvNode.name == "str" || recvNode.name == "err") {
+    if (recvNode.name == "dict") {
+        std::string keyType = "K";
+        if (!recvNode.typeArgs.empty()) keyType = formatCleanbasicType(snap.arena, recvNode.typeArgs[0]);
+        if (matchesCompletionPrefix("has", prefix)) addCompletionEntry(items, seen, "has", 2, "fn(key as " + keyType + ") as bool");
+        if (matchesCompletionPrefix("remove", prefix)) addCompletionEntry(items, seen, "remove", 2, "fn(key as " + keyType + ") as bool");
+        if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
+    }
+    if (recvNode.name == "bytes") {
+        if (matchesCompletionPrefix("push", prefix)) addCompletionEntry(items, seen, "push", 2, "fn(byteVal as int)");
+        if (matchesCompletionPrefix("pop", prefix)) addCompletionEntry(items, seen, "pop", 2, "fn() as int");
+        if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
+        if (matchesCompletionPrefix("slice", prefix)) addCompletionEntry(items, seen, "slice", 2, "fn(start as int, stop as int) as bytes");
+        if (matchesCompletionPrefix("sliceFrom", prefix)) addCompletionEntry(items, seen, "sliceFrom", 2, "fn(start as int) as bytes");
+        if (matchesCompletionPrefix("toUtf8", prefix)) addCompletionEntry(items, seen, "toUtf8", 2, "fn() as str can error");
+        if (matchesCompletionPrefix("toHex", prefix)) addCompletionEntry(items, seen, "toHex", 2, "fn() as str");
+        const std::vector<std::string> readMethods = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
+        for (const auto& rm : readMethods) {
+            if (matchesCompletionPrefix(rm, prefix)) addCompletionEntry(items, seen, rm, 2, "fn(offset as int) as int can error");
+        }
+        const std::vector<std::string> writeMethods = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
+        for (const auto& wm : writeMethods) {
+            if (matchesCompletionPrefix(wm, prefix)) addCompletionEntry(items, seen, wm, 2, "fn(offset as int, value as int) can error");
+        }
+    }
+    if (recvNode.name == "str") {
+        if (matchesCompletionPrefix("toBytes", prefix)) addCompletionEntry(items, seen, "toBytes", 2, "fn() as bytes");
+    }
+    if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvNode.name == "str" || recvNode.name == "err" || recvIsEnum) {
         if (matchesCompletionPrefix("toStr", prefix)) addCompletionEntry(items, seen, "toStr", 2, "fn() as str");
     }
-    if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool") {
+    if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvIsEnum) {
         if (matchesCompletionPrefix("toInt", prefix)) addCompletionEntry(items, seen, "toInt", 2, "fn() as int");
     }
     if (recvNode.name == "int" || recvNode.name == "float") {
@@ -343,14 +414,18 @@ inline void collectNamedArgumentCompletions(const LspDocumentSnapshot& snap, std
     const auto fnOpt = resolveCallFnSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
     if (fnOpt.has_value()) {
         const FnSymbol& fn = fnOpt.value().fn;
-        for (size_t i = (fnOpt.value().isUfcs ? 1 : 0); i < fn.params.size(); ++i) {
+        size_t startIdx = 0;
+        if (fnOpt.value().isUfcs) {
+            startIdx = 1;
+        }
+        for (size_t i = startIdx; i < fn.params.size(); ++i) {
             if (matchesCompletionPrefix(fn.params[i].name, callCtx.argPrefix)) addCompletionEntry(items, seen, fn.params[i].name + "=", 6, "as " + formatCleanbasicType(snap.arena, fn.params[i].typeId));
         }
     }
 }
 
 inline void collectTypeAnnotationCompletions(const LspDocumentSnapshot& snap, std::string_view currentModuleId, std::string_view prefix, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
-    const std::vector<std::string> builtinTypes = {"int", "float", "str", "bool", "cptr", "err", "list", "dict"};
+    const std::vector<std::string> builtinTypes = {"int", "float", "str", "bytes", "bool", "cptr", "err", "list", "dict"};
     for (const auto& bt : builtinTypes) if (matchesCompletionPrefix(bt, prefix)) addCompletionEntry(items, seen, bt, 14, "built-in type");
     if (snap.valid) collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, false, true, items, seen);
 }
@@ -372,7 +447,7 @@ inline void collectGeneralScopeCompletions(const LspDocumentSnapshot& snap, std:
         if (docOpt.has_value()) doc = docOpt.value();
         addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
     }
-    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "on error", "end error", "defer", "end defer", "return", "break", "can error", "and", "or", "not", "true", "false", "null"};
+    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "enum", "end enum", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "on error", "end error", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
     for (const auto& kw : keywords) if (matchesCompletionPrefix(kw, prefix)) addCompletionEntry(items, seen, kw, 14, "keyword");
 }
 
@@ -425,7 +500,11 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
             std::string doc;
             const auto docOpt = formatBuiltinHoverMarkdown("error");
             if (docOpt.has_value()) doc = docOpt.value();
-            return SignatureHelpData{"fn error(msg as str, code as int) as err", doc, {"msg as str", "code as int"}, callCtx.activeParam > 1 ? 1 : callCtx.activeParam};
+            uint32_t activeIdx = callCtx.activeParam;
+            if (activeIdx > 1) {
+                activeIdx = 1;
+            }
+            return SignatureHelpData{"fn error(msg as str, code as int) as err", doc, {"msg as str", "code as int"}, activeIdx};
         }
         if (callCtx.calleeName == "print") return SignatureHelpData{"fn print(values...)", "", {"values..."}, 0};
     } else {
@@ -460,11 +539,23 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
     if (fnOpt.has_value()) {
         const FnSymbol& fn = fnOpt.value().fn;
         std::vector<Param> visibleParams;
-        for (size_t i = (fnOpt.value().isUfcs ? 1 : 0); i < fn.params.size(); ++i) visibleParams.push_back(fn.params[i]);
+        size_t startIdx = 0;
+        if (fnOpt.value().isUfcs) {
+            startIdx = 1;
+        }
+        for (size_t i = startIdx; i < fn.params.size(); ++i) {
+            visibleParams.push_back(fn.params[i]);
+        }
         SignatureHelpData sig{};
         sig.label = "fn " + fn.name + formatFnDetailSignature(snap.arena, visibleParams, fn.returnType, fn.isFallible);
         sig.documentation = formatFnHoverMarkdown(snap.arena, fn);
-        for (const auto& p : visibleParams) sig.paramLabels.push_back((p.isByref ? "byref " : "") + p.name + " as " + formatCleanbasicType(snap.arena, p.typeId));
+        for (const auto& p : visibleParams) {
+            std::string byrefPrefix;
+            if (p.isByref) {
+                byrefPrefix = "byref ";
+            }
+            sig.paramLabels.push_back(byrefPrefix + p.name + " as " + formatCleanbasicType(snap.arena, p.typeId));
+        }
         sig.activeParameter = callCtx.activeParam;
         if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
         return sig;

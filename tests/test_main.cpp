@@ -2951,3 +2951,469 @@ end fn
     }
 }
 
+TEST_CASE("String interpolation zero-AST lexer desugaring and diagnostics", "[lexer][interpolation]") {
+    SECTION("Desugars interpolated string into exact parenthesized concatenation token stream") {
+        const auto lexRes = cb::tokenize(R"CB($"Hello {user.name}!")CB", "interp.cb");
+        REQUIRE(lexRes.ok);
+        std::vector<std::pair<std::string, std::string>> actual;
+        for (const auto& t : lexRes.tokens) {
+            if (t.kind != "EOF") {
+                actual.emplace_back(t.kind, t.value);
+            }
+        }
+        const std::vector<std::pair<std::string, std::string>> expected = {
+            {"LPAREN", "("},
+            {"STRING", R"CB("Hello ")CB"},
+            {"OP_ARITH", "&"},
+            {"LPAREN", "("},
+            {"IDENT", "user"},
+            {"DOT", "."},
+            {"IDENT", "name"},
+            {"RPAREN", ")"},
+            {"OP_ARITH", "&"},
+            {"STRING", R"CB("!")CB"},
+            {"RPAREN", ")"}
+        };
+        CHECK(actual == expected);
+    }
+
+    SECTION("Supports expressions, precedence, {{ / }} escaping, nested interpolation, and dict literals") {
+        const std::string code = R"CB(
+enum Status
+    ready
+    busy
+end enum
+
+type User
+    name as str
+    score as int
+end type
+
+fn greet(u as User) as str
+    return $"User {u.name} has {u.score + 5} pts (valid={u.score >= 10 and not false})"
+end fn
+
+fn main()
+    dim u = User(name="Alice", score=95)
+    dim st = Status.ready
+    dim msg = $"{greet(u)} | status={st} | braces={{literal}} | nested={$"inner({1 + 2})"} | dict={({"x": 7})["x"]}"
+    print(msg)
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "interpFull.cb");
+        INFO("Transpile diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("cbToStr((u.score + 5))") != std::string::npos);
+        CHECK(res.cppCode.find("cbToStr(((u.score >= 10) && (!false)))") != std::string::npos);
+        CHECK(res.cppCode.find(R"CB(std::string(" | braces={literal} | nested="))CB") != std::string::npos);
+    }
+
+    SECTION("Reports clear LexerError diagnostics for invalid interpolated strings") {
+        const auto emptyHole = cb::tokenize(R"CB(dim s = $"Hello {}")CB", "emptyHole.cb");
+        CHECK_FALSE(emptyHole.ok);
+        CHECK(emptyHole.error.kind == "LexerError");
+        CHECK(emptyHole.error.message.find("Empty interpolation hole '{}'") != std::string::npos);
+
+        const auto wsHole = cb::tokenize(R"CB(dim s = $"Hello {   }")CB", "wsHole.cb");
+        CHECK_FALSE(wsHole.ok);
+        CHECK(wsHole.error.kind == "LexerError");
+        CHECK(wsHole.error.message.find("Empty interpolation hole '{}'") != std::string::npos);
+
+        const auto loneCloseBrace = cb::tokenize(R"CB(dim s = $"Hello } world")CB", "loneBrace.cb");
+        CHECK_FALSE(loneCloseBrace.ok);
+        CHECK(loneCloseBrace.error.kind == "LexerError");
+        CHECK(loneCloseBrace.error.message.find("Unescaped '}'") != std::string::npos);
+
+        const auto untermStr = cb::tokenize(R"CB(dim s = $"Hello world
+)CB", "untermInterp.cb");
+        CHECK_FALSE(untermStr.ok);
+        CHECK(untermStr.error.kind == "LexerError");
+        CHECK(untermStr.error.message.find("Unterminated interpolated string literal") != std::string::npos);
+
+        const auto untermHole = cb::tokenize(R"CB(dim s = $"Hello {name)CB", "untermHole.cb");
+        CHECK_FALSE(untermHole.ok);
+        CHECK(untermHole.error.kind == "LexerError");
+        CHECK(untermHole.error.message.find("Unterminated interpolation block '{...}'") != std::string::npos);
+    }
+}
+
+TEST_CASE("Fallible UFCS scope forwarding, enum aliases, for-in over bytes/aliases, and LSP enum/bytes parity", "[analyzer][emitter][lsp]") {
+    SECTION("Rejects unhandled fallible UFCS receiver calls and bubbles them in can error functions") {
+        const std::string badUfcs = R"CB(
+fn decodeUnhandled()
+    dim raw = b"hello"
+    dim s = raw.toUtf8()
+    print(s)
+end fn
+)CB";
+        const auto badRes = cb::transpileSource(badUfcs, "badUfcs.cb");
+        CHECK_FALSE(badRes.ok);
+        CHECK(badRes.error.kind == "AnalyzerError");
+        CHECK(badRes.error.message.find("Unhandled error") != std::string::npos);
+
+        const std::string goodUfcs = R"CB(
+enum Mode
+    fast
+    safe
+end enum
+
+alias ModeAlias = Mode
+alias IntList = list[int]
+
+fn parseAndSum(raw as bytes, nums as IntList) as ModeAlias can error
+    dim decoded = raw.toUtf8()
+    dim total = 0
+    for b in raw
+        total = total + b
+    end for
+    for n in nums
+        total = total + n
+    end for
+    if total > 0 and decoded.len() > 0
+        return Mode.fast
+    end if
+    return Mode.safe
+end fn
+)CB";
+        const auto goodRes = cb::transpileSource(goodUfcs, "goodUfcs.cb");
+        INFO("Transpile diagnostic: " << cb::formatDiagnostic(goodRes.error));
+        REQUIRE(goodRes.ok);
+        CHECK(goodRes.cppCode.find("auto [_val1, _err1] = cbBytesToUtf8(raw);") != std::string::npos);
+        CHECK(goodRes.cppCode.find("if (cbHasError(_err1)) return { static_cast<Mode>(0), _err1 };") != std::string::npos);
+    }
+
+    SECTION("LSP supports enum symbols/hover/completions and bytes receiver completions") {
+        cb::LspServerState state{};
+        const std::string uri = "file:///ws/enum_bytes_lsp.cb";
+        const std::string text = R"CB(pub enum Color
+    red = 1
+    blue = 2
+end enum
+fn demo()
+    dim buf = b"abc"
+    dim c = Color.red
+end fn
+)CB";
+        state.openDocuments[uri] = text;
+        std::ostringstream dummyOut;
+        cb::publishDocumentDiagnostics(state, uri, text, dummyOut);
+        const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(state, uri);
+        REQUIRE(snap.valid);
+
+        const cb::CursorTokenContext enumMemberCtx = cb::resolveCursorToken(text, "/ws/enum_bytes_lsp.cb", 7, 20);
+        REQUIRE(enumMemberCtx.found);
+        CHECK(enumMemberCtx.hasDotReceiver);
+        CHECK(enumMemberCtx.receiverName == "Color");
+        const cb::ResolvedCursorSymbol hoverInfo = cb::resolveCursorSymbolInfo(snap, "/ws/enum_bytes_lsp.cb", enumMemberCtx);
+        REQUIRE(hoverInfo.hoverMarkdown.has_value());
+        CHECK(hoverInfo.hoverMarkdown.value().find("(enum member) Color.red = 1") != std::string::npos);
+
+        std::vector<cb::CompletionItemEntry> dotEnumItems;
+        std::unordered_map<std::string, bool> seenEnum;
+        cb::collectDotCompletions(snap, "", std::string("demo"), "Color", "", dotEnumItems, seenEnum);
+        CHECK(dotEnumItems.size() == 2);
+
+        std::vector<cb::CompletionItemEntry> dotBytesItems;
+        std::unordered_map<std::string, bool> seenBytes;
+        cb::collectDotCompletions(snap, "", std::string("demo"), "buf", "toU", dotBytesItems, seenBytes);
+        REQUIRE(dotBytesItems.size() == 1);
+        CHECK(dotBytesItems[0].label == "toUtf8");
+
+        std::vector<cb::CompletionItemEntry> typeItems;
+        std::unordered_map<std::string, bool> seenTypes;
+        cb::collectTypeAnnotationCompletions(snap, "", "by", typeItems, seenTypes);
+        REQUIRE(!typeItems.empty());
+        CHECK(typeItems[0].label == "bytes");
+    }
+}
+
+TEST_CASE("Language clarity and utility polish: compound assignments, modulo, module constants, defaults, container methods, indexed loops, and guardrails", "[ergonomics][constants][defaults][containers][guardrails]") {
+    SECTION("Compound assignments (+=, -=, *=, /=, %=, &=) and modulo (%) desugar cleanly") {
+        const std::string code = R"CB(
+fn main()
+    dim x = 10
+    x += 5
+    x -= 3
+    x *= 4
+    x /= 6
+    x %= 5
+    dim msg = "count="
+    msg &= x
+    print(msg)
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "compound.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("x = (x + 5);") != std::string::npos);
+        CHECK(res.cppCode.find("x = (x - 3);") != std::string::npos);
+        CHECK(res.cppCode.find("x = (x * 4);") != std::string::npos);
+        CHECK(res.cppCode.find("x = (x / 6);") != std::string::npos);
+        CHECK(res.cppCode.find("x = (x % 5);") != std::string::npos);
+        CHECK(res.cppCode.find("msg = (msg + cbToStr(x));") != std::string::npos);
+    }
+
+    SECTION("Top-level [pub] const declarations, module qualification, visibility, and immutability") {
+        const std::string modSource = R"CB(
+pub const defaultPort = 8080
+const secretKey = "hidden"
+)CB";
+        const std::string mainSource = R"CB(
+import "cfg.cb"
+
+const localLimit as int = 100
+
+fn main()
+    dim p = cfg.defaultPort + localLimit
+    print(p)
+end fn
+)CB";
+        std::unordered_map<std::string, std::string> memFiles;
+        memFiles["cfg.cb"] = modSource;
+        memFiles["main.cb"] = mainSource;
+        const auto res = cb::transpileSource(mainSource, "main.cb", memFiles);
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("inline const int64_t cb_cfg__defaultPort = 8080;") != std::string::npos);
+        CHECK(res.cppCode.find("inline const int64_t localLimit = 100;") != std::string::npos);
+        CHECK(res.cppCode.find("(cb_cfg__defaultPort + localLimit)") != std::string::npos);
+
+        const std::string badPrivConst = R"CB(
+import "cfg.cb"
+fn main()
+    print(cfg.secretKey)
+end fn
+)CB";
+        const auto privRes = cb::transpileSource(badPrivConst, "main.cb", memFiles);
+        CHECK_FALSE(privRes.ok);
+        CHECK(privRes.error.message.find("Constant 'secretKey' is private to module 'cfg'") != std::string::npos);
+
+        const std::string badReassignConst = R"CB(
+const maxRetries = 3
+fn main()
+    maxRetries += 1
+end fn
+)CB";
+        const auto reassignRes = cb::transpileSource(badReassignConst, "reassignConst.cb");
+        CHECK_FALSE(reassignRes.ok);
+        CHECK(reassignRes.error.message.find("Cannot reassign const variable 'maxRetries'") != std::string::npos);
+    }
+
+    SECTION("Struct field defaults and function parameter defaults") {
+        const std::string code = R"CB(
+const defaultHost = "127.0.0.1"
+
+type ServerConfig
+    host as str = defaultHost
+    port as int = 8080
+    tls as bool = false
+end type
+
+fn connect(host as str = "localhost", port as int = 8080, timeoutMs as int = 5000) as str
+    return $"{host}:{port} (t={timeoutMs})"
+end fn
+
+fn main()
+    dim cfg1 = ServerConfig()
+    dim cfg2 = ServerConfig(port=9090)
+    dim s1 = connect()
+    dim s2 = connect("10.0.0.1", timeoutMs=1500)
+    print(cfg1.host, cfg2.port, s1, s2)
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "defaults.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("std::string host = defaultHost;") != std::string::npos);
+        CHECK(res.cppCode.find("int64_t port = 8080;") != std::string::npos);
+        CHECK(res.cppCode.find(R"CB(ServerConfig{defaultHost, 9090, false})CB") != std::string::npos);
+        CHECK(res.cppCode.find(R"CB(connect(std::string("localhost"), 8080, 5000))CB") != std::string::npos);
+        CHECK(res.cppCode.find(R"CB(connect(std::string("10.0.0.1"), 8080, 1500))CB") != std::string::npos);
+
+        const std::string badByrefDefault = R"CB(
+fn bump(byref x as int = 0)
+    x += 1
+end fn
+)CB";
+        const auto badByrefRes = cb::transpileSource(badByrefDefault, "badByref.cb");
+        CHECK_FALSE(badByrefRes.ok);
+        CHECK(badByrefRes.error.message.find("'byref' parameter 'x' cannot have a default value") != std::string::npos);
+
+        const std::string missingReqArg = R"CB(
+fn greet(name as str, suffix as str = "!")
+    print(name & suffix)
+end fn
+fn main()
+    greet()
+end fn
+)CB";
+        const auto missingRes = cb::transpileSource(missingReqArg, "missingArg.cb");
+        CHECK_FALSE(missingRes.ok);
+        CHECK(missingRes.error.message.find("Missing required argument for parameter 'name'") != std::string::npos);
+    }
+
+    SECTION("Container receiver methods (has, remove, clear, pop) and const receiver checks") {
+        const std::string code = R"CB(
+fn main()
+    dim d as dict[str, int] = {"a": 1, "b": 2}
+    if d.has("a")
+        dim removed = d.remove("a")
+    end if
+    d.clear()
+
+    dim items as list[str] = ["x", "y"]
+    dim lastItem = items.pop()
+    items.clear()
+
+    dim buf = b"abc"
+    dim lastByte = buf.pop()
+    buf.clear()
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "containers.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find(R"CB((d.count(std::string("a")) > 0))CB") != std::string::npos);
+        CHECK(res.cppCode.find(R"CB((d.erase(std::string("a")) > 0))CB") != std::string::npos);
+        CHECK(res.cppCode.find("d.clear();") != std::string::npos);
+        CHECK(res.cppCode.find("cbListPop(items)") != std::string::npos);
+        CHECK(res.cppCode.find("cbBytesPop(buf)") != std::string::npos);
+
+        const std::string badConstPop = R"CB(
+fn main()
+    const items as list[int] = [1, 2, 3]
+    dim x = items.pop()
+end fn
+)CB";
+        const auto badPopRes = cb::transpileSource(badConstPop, "badPop.cb");
+        CHECK_FALSE(badPopRes.ok);
+        CHECK(badPopRes.error.message.find("Cannot call '.pop()' on const variable 'items'") != std::string::npos);
+
+        const std::string badConstRemove = R"CB(
+fn main()
+    const d as dict[str, int] = {"a": 1}
+    dim ok = d.remove("a")
+end fn
+)CB";
+        const auto badRemRes = cb::transpileSource(badConstRemove, "badRemove.cb");
+        CHECK_FALSE(badRemRes.ok);
+        CHECK(badRemRes.error.message.find("Cannot call '.remove()' on const variable 'd'") != std::string::npos);
+    }
+
+    SECTION("Indexed for i, item in list/bytes and negative step countdown loops") {
+        const std::string code = R"CB(
+fn main()
+    dim names as list[str] = ["alice", "bob"]
+    for i, name in names
+        print($"{i}: {name}")
+    end for
+
+    dim raw = b"AB"
+    for idx, b in raw
+        print(idx + b)
+    end for
+
+    for n = 10 to 0 step -2
+        print(n)
+    end for
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "indexedFor.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("for (int64_t i = 0; i < static_cast<int64_t>(_iter_1.size()); ++i)") != std::string::npos);
+        CHECK(res.cppCode.find("for (int64_t n = 10; n >= 0; n += (-2))") != std::string::npos);
+    }
+
+    SECTION("Guardrails: retired 'as err' return shorthand, untyped empty []/{}, and non-cptr null") {
+        const std::string legacyAsErr = R"CB(
+fn checkVal(x as int) as err
+    return
+end fn
+)CB";
+        const auto errRes = cb::transpileSource(legacyAsErr, "legacyAsErr.cb");
+        CHECK_FALSE(errRes.ok);
+        CHECK(errRes.error.kind == "ParseError");
+        CHECK(errRes.error.message.find("Return type 'as err' is removed; use 'can error'") != std::string::npos);
+
+        const std::string untypedEmptyList = R"CB(
+fn main()
+    dim items = []
+end fn
+)CB";
+        const auto emptyListRes = cb::transpileSource(untypedEmptyList, "emptyList.cb");
+        CHECK_FALSE(emptyListRes.ok);
+        CHECK(emptyListRes.error.message.find("Cannot infer element type of empty list '[]'") != std::string::npos);
+
+        const std::string untypedEmptyDict = R"CB(
+fn main()
+    dim lookup = {}
+end fn
+)CB";
+        const auto emptyDictRes = cb::transpileSource(untypedEmptyDict, "emptyDict.cb");
+        CHECK_FALSE(emptyDictRes.ok);
+        CHECK(emptyDictRes.error.message.find("Cannot infer key/value types of empty dict '{}'") != std::string::npos);
+
+        const std::string badNullStr = R"CB(
+fn main()
+    dim s as str = null
+end fn
+)CB";
+        const auto nullStrRes = cb::transpileSource(badNullStr, "nullStr.cb");
+        CHECK_FALSE(nullStrRes.ok);
+        CHECK(nullStrRes.error.message.find("only 'cptr' can be 'null'") != std::string::npos);
+
+        const std::string validNullCptr = R"CB(
+fn main()
+    dim h as cptr = null
+    if h == null
+        print("null handle")
+    end if
+end fn
+)CB";
+        const auto okCptrRes = cb::transpileSource(validNullCptr, "okCptr.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(okCptrRes.error));
+        REQUIRE(okCptrRes.ok);
+        CHECK(okCptrRes.cppCode.find("void* h = nullptr;") != std::string::npos);
+        CHECK(okCptrRes.cppCode.find("(h == nullptr)") != std::string::npos);
+    }
+
+    SECTION("LSP surfaces top-level constants and new container receiver methods") {
+        cb::LspServerState state{};
+        const std::string uri = "file:///ws/const_and_containers.cb";
+        const std::string text = R"CB(pub const maxConnections = 128
+fn demo()
+    dim table as dict[str, int] = {"k": 1}
+    dim n = maxConnections
+end fn
+)CB";
+        state.openDocuments[uri] = text;
+        std::ostringstream dummyOut;
+        cb::publishDocumentDiagnostics(state, uri, text, dummyOut);
+        const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(state, uri);
+        REQUIRE(snap.valid);
+
+        const cb::CursorTokenContext constRefCtx = cb::resolveCursorToken(text, "/ws/const_and_containers.cb", 4, 15);
+        REQUIRE(constRefCtx.found);
+        const cb::ResolvedCursorSymbol constHover = cb::resolveCursorSymbolInfo(snap, "/ws/const_and_containers.cb", constRefCtx);
+        REQUIRE(constHover.hoverMarkdown.has_value());
+        CHECK(constHover.hoverMarkdown.value().find("pub const maxConnections as int") != std::string::npos);
+        REQUIRE(constHover.definition.has_value());
+        CHECK(constHover.definition->line == 1);
+
+        std::vector<cb::CompletionItemEntry> dictDotItems;
+        std::unordered_map<std::string, bool> seenDict;
+        cb::collectDotCompletions(snap, "", std::string("demo"), "table", "", dictDotItems, seenDict);
+        bool foundHas = false;
+        bool foundRemove = false;
+        bool foundClear = false;
+        for (const auto& item : dictDotItems) {
+            if (item.label == "has") foundHas = true;
+            if (item.label == "remove") foundRemove = true;
+            if (item.label == "clear") foundClear = true;
+        }
+        CHECK(foundHas);
+        CHECK(foundRemove);
+        CHECK(foundClear);
+    }
+}

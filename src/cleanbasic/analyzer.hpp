@@ -69,9 +69,17 @@ public:
             if (it != scope.end()) {
                 return RootVarInfo{it->second.name, it->second.isConst, true};
             }
+            const auto cOpt = resolveConstSymbol(symbols, moduleId, scope, ident->name);
+            if (cOpt.has_value()) {
+                return RootVarInfo{cOpt->name, true, true};
+            }
             return RootVarInfo{ident->name, false, false};
         }
         if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
+            const auto mcOpt = resolveModuleConstAccess(arena, symbols, moduleId, scope, *fa);
+            if (mcOpt.has_value()) {
+                return RootVarInfo{mcOpt->name, true, true};
+            }
             return findRootVar(fa->target, scope);
         }
         if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
@@ -80,15 +88,31 @@ public:
         return {};
     }
 
+    void validateNonNullTarget(
+        uint32_t line,
+        uint32_t col,
+        TypeId targetTid,
+        ExprId valExprId
+    ) const {
+        if (arena.getExpr<NullLiteral>(valExprId) == nullptr) {
+            return;
+        }
+        const TypeId resolvedTarget = resolveAlias(arena, symbols, moduleId, targetTid);
+        if (resolvedTarget != symbols.typeCptr) {
+            setAnalyzerError(line, col, "CleanBasic types use non-nullable value semantics; only 'cptr' can be 'null'.");
+        }
+    }
+
     void checkFallibleUsage(
         const FnDecl& fn,
         ExprId exprId,
+        const std::unordered_map<std::string, VarSymbol>& scope,
         bool hasActiveOnError,
         bool& outImplicitBubble
     ) {
         outImplicitBubble = false;
         if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-            const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId);
+            const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
             if (fnSymOpt.has_value()) {
                 const auto& fnSym = fnSymOpt.value();
                 if (fnSym.isFallible) {
@@ -164,6 +188,30 @@ public:
                                 setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '.push()' on const variable '" + root.name + "'.");
                             }
                         }
+                    } else if (fnSym.name == "pop" || fnSym.name == "clear") {
+                        if (!call->args.empty()) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'." + fnSym.name + "()' takes 0 arguments.");
+                        }
+                        if (const auto* calleeFa = arena.getExpr<FieldAccess>(call->callee)) {
+                            const auto root = findRootVar(calleeFa->target, scope);
+                            if (root.found && root.isConst) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '." + fnSym.name + "()' on const variable '" + root.name + "'.");
+                            }
+                        }
+                    } else if (fnSym.name == "has") {
+                        if (call->args.size() != 1) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'.has()' requires exactly 1 argument (key).");
+                        }
+                    } else if (fnSym.name == "remove") {
+                        if (call->args.size() != 1) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'.remove()' requires exactly 1 argument (key).");
+                        }
+                        if (const auto* calleeFa = arena.getExpr<FieldAccess>(call->callee)) {
+                            const auto root = findRootVar(calleeFa->target, scope);
+                            if (root.found && root.isConst) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '.remove()' on const variable '" + root.name + "'.");
+                            }
+                        }
                     } else if (fnSym.name == "slice") {
                         if (call->args.size() != 2) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'.slice()' requires exactly 2 arguments (start, end).");
@@ -229,6 +277,7 @@ public:
                     for (size_t aIdx = 0; aIdx < call->args.size(); ++aIdx) {
                         const size_t pIdx = paramOffset + aIdx;
                         if (pIdx < fnSym.params.size()) {
+                            validateNonNullTarget(exprNode.line, exprNode.col, fnSym.params[pIdx].typeId, call->args[aIdx]);
                             if (fnSym.params[pIdx].isByref) {
                                 const auto root = findRootVar(call->args[aIdx], scope);
                                 if (root.found && root.isConst) {
@@ -238,14 +287,43 @@ public:
                         }
                     }
 
+                    const bool isBuiltinPrint = (fnSym.name == "print" && fnSym.moduleId.empty());
                     for (const auto& namedArg : call->namedArgs) {
+                        bool foundParam = false;
                         for (const auto& p : fnSym.params) {
-                            if (p.name == namedArg.name && p.isByref) {
-                                const auto root = findRootVar(namedArg.value, scope);
-                                if (root.found && root.isConst) {
-                                    setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + p.name + "'.");
+                            if (p.name == namedArg.name) {
+                                foundParam = true;
+                                validateNonNullTarget(exprNode.line, exprNode.col, p.typeId, namedArg.value);
+                                if (p.isByref) {
+                                    const auto root = findRootVar(namedArg.value, scope);
+                                    if (root.found && root.isConst) {
+                                        setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + p.name + "'.");
+                                    }
                                 }
                                 break;
+                            }
+                        }
+                        if (!foundParam && !isBuiltinPrint) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "Unknown named argument '" + namedArg.name + "' in call to '" + fnSym.name + "'.");
+                        }
+                    }
+
+                    if (!isBuiltinPrint && fnSym.overloads.empty()) {
+                        const size_t totalProvided = paramOffset + call->args.size() + call->namedArgs.size();
+                        if (totalProvided > fnSym.params.size()) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "Too many arguments in call to '" + fnSym.name + "'.");
+                        }
+                        for (size_t pIdx = paramOffset + call->args.size(); pIdx < fnSym.params.size(); ++pIdx) {
+                            const auto& p = fnSym.params[pIdx];
+                            bool providedByName = false;
+                            for (const auto& na : call->namedArgs) {
+                                if (na.name == p.name) {
+                                    providedByName = true;
+                                    break;
+                                }
+                            }
+                            if (!providedByName && !p.hasDefault) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Missing required argument for parameter '" + p.name + "' in call to '" + fnSym.name + "'.");
                             }
                         }
                     }
@@ -277,6 +355,17 @@ public:
                     if (!structOpt->isPub && structOpt->moduleId != moduleId) {
                         std::string msg = "Type '" + structOpt->name + "' is private to module '" + structOpt->moduleId + "' (missing 'pub').";
                         setAnalyzerError(exprNode.line, exprNode.col, msg);
+                    }
+                    for (size_t aIdx = 0; aIdx < call->args.size() && aIdx < structOpt->fieldOrder.size(); ++aIdx) {
+                        validateNonNullTarget(exprNode.line, exprNode.col, structOpt->fieldOrder[aIdx].typeId, call->args[aIdx]);
+                    }
+                    for (const auto& na : call->namedArgs) {
+                        const auto fit = structOpt->fields.find(na.name);
+                        if (fit != structOpt->fields.end()) {
+                            validateNonNullTarget(exprNode.line, exprNode.col, fit->second, na.value);
+                        } else {
+                            setAnalyzerError(exprNode.line, exprNode.col, "Unknown field '" + na.name + "' in constructor for '" + structOpt->name + "'.");
+                        }
                     }
                 }
 
@@ -312,9 +401,17 @@ public:
             validateExprCalls(fn, bop->right, scope, false);
             const TypeId lt = inferExprType(arena, bop->left, symbols, scope, moduleId);
             const TypeId rt = inferExprType(arena, bop->right, symbols, scope, moduleId);
+            if (bop->op == "==" || bop->op == "!=") {
+                if (arena.getExpr<NullLiteral>(bop->left) != nullptr && rt != symbols.typeAuto) {
+                    validateNonNullTarget(exprNode.line, exprNode.col, rt, bop->left);
+                }
+                if (arena.getExpr<NullLiteral>(bop->right) != nullptr && lt != symbols.typeAuto) {
+                    validateNonNullTarget(exprNode.line, exprNode.col, lt, bop->right);
+                }
+            }
             const bool lEnum = isEnumType(symbols, lt, arena, moduleId);
             const bool rEnum = isEnumType(symbols, rt, arena, moduleId);
-            if (lEnum || rEnum) {
+            if (bop->op != "&" && (lEnum || rEnum)) {
                 if (lt != rt && lt != symbols.typeAuto && rt != symbols.typeAuto) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Cannot compare enum with mismatched type (use .toInt() for integer comparison).");
                 }
@@ -328,37 +425,22 @@ public:
         }
 
         if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
-            if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess->target)) {
-                if (scope.find(tgtIdent->name) == scope.end()) {
-                    const auto enumOpt = resolveEnumSymbol(arena, symbols, moduleId, tgtIdent->name);
-                    if (enumOpt.has_value()) {
-                        if (enumOpt->moduleId != moduleId && !enumOpt->isPub) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'pub').");
-                        }
-                        if (enumOpt->memberValues.count(faccess->fieldName) == 0) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' has no member '" + faccess->fieldName + "'.");
-                        }
-                        return;
-                    }
+            const auto enumOpt = resolveEnumMemberAccess(arena, symbols, moduleId, scope, *faccess);
+            if (enumOpt.has_value()) {
+                if (enumOpt->moduleId != moduleId && !enumOpt->isPub) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'pub').");
                 }
+                if (enumOpt->memberValues.count(faccess->fieldName) == 0) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' has no member '" + faccess->fieldName + "'.");
+                }
+                return;
             }
-            if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess->target)) {
-                if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
-                    std::string targetModId;
-                    if (isModuleAliasInScope(symbols, moduleId, modIdent->name, scope, targetModId)) {
-                        const std::string enumKey = symbolKey(targetModId, innerFa->fieldName);
-                        const auto it = symbols.enums.find(enumKey);
-                        if (it != symbols.enums.end()) {
-                            if (!it->second.isPub) {
-                                setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + it->second.name + "' is private to module '" + targetModId + "' (missing 'pub').");
-                            }
-                            if (it->second.memberValues.count(faccess->fieldName) == 0) {
-                                setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + it->second.name + "' has no member '" + faccess->fieldName + "'.");
-                            }
-                            return;
-                        }
-                    }
+            const auto cOpt = resolveModuleConstAccess(arena, symbols, moduleId, scope, *faccess);
+            if (cOpt.has_value()) {
+                if (cOpt->moduleId != moduleId && !cOpt->isPub) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "Constant '" + cOpt->name + "' is private to module '" + cOpt->moduleId + "' (missing 'pub').");
                 }
+                return;
             }
             validateExprCalls(fn, faccess->target, scope, false);
             return;
@@ -398,6 +480,24 @@ public:
         scope[name] = VarSymbol{name, tid, isByref, isConst, fileName, line, col, line};
     }
 
+    void validateEnumAssignment(
+        uint32_t line,
+        uint32_t col,
+        std::string_view varName,
+        TypeId targetTid,
+        TypeId valTid
+    ) const {
+        const TypeId resolvedTarget = resolveAlias(arena, symbols, moduleId, targetTid);
+        const TypeId resolvedVal = resolveAlias(arena, symbols, moduleId, valTid);
+        const bool varIsEnum = isEnumType(symbols, resolvedTarget, arena, moduleId);
+        const bool valIsEnum = isEnumType(symbols, resolvedVal, arena, moduleId);
+        if (varIsEnum && resolvedVal != symbols.typeAuto && resolvedVal != resolvedTarget) {
+            setAnalyzerError(line, col, "Cannot assign mismatched type to enum variable '" + std::string(varName) + "'.");
+        } else if (!varIsEnum && valIsEnum && resolvedTarget == symbols.typeInt) {
+            setAnalyzerError(line, col, "Cannot assign enum value to 'int' without explicit conversion (use .toInt()).");
+        }
+    }
+
     void analyzeStmt(
         const FnDecl& fn,
         StmtId stmtId,
@@ -411,29 +511,40 @@ public:
         const auto& stmtNode = arena.stmts[stmtId];
 
         if (auto* vassign = arena.getStmtMut<VarAssignment>(stmtId)) {
-            checkFallibleUsage(fn, vassign->value, hasActiveOnError, vassign->implicitBubble);
+            checkFallibleUsage(fn, vassign->value, scope, hasActiveOnError, vassign->implicitBubble);
 
             const TypeId valType = inferExprType(arena, vassign->value, symbols, scope, moduleId);
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
                 const auto& tgtNode = arena.exprs[vassign->target];
                 if (vassign->isDim || vassign->isConst) {
+                    if (!vassign->hasDeclaredType) {
+                        if (const auto* llit = arena.getExpr<ListLiteral>(vassign->value)) {
+                            if (llit->elements.empty()) {
+                                setAnalyzerError(stmtNode.line, stmtNode.col, "Cannot infer element type of empty list '[]'; specify an explicit type such as 'dim " + ident->name + " as list[int] = []'.");
+                            }
+                        }
+                        if (const auto* dlit = arena.getExpr<DictLiteral>(vassign->value)) {
+                            if (dlit->entries.empty()) {
+                                setAnalyzerError(stmtNode.line, stmtNode.col, "Cannot infer key/value types of empty dict '{}'; specify an explicit type such as 'dim " + ident->name + " as dict[str, int] = {}'.");
+                            }
+                        }
+                    }
                     TypeId varTid = symbols.typeInt;
                     if (vassign->hasDeclaredType) {
                         varTid = resolveAlias(arena, symbols, moduleId, vassign->declaredType);
                     } else if (valType != INVALID_ID) {
                         varTid = valType;
                     }
-                    const bool varIsEnum = isEnumType(symbols, varTid, arena, moduleId);
-                    const bool valIsEnum = isEnumType(symbols, valType, arena, moduleId);
-                    if (varIsEnum && valType != symbols.typeAuto && valType != varTid) {
-                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign mismatched type to enum variable '" + ident->name + "'.");
-                    } else if (!varIsEnum && valIsEnum && varTid == symbols.typeInt) {
-                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign enum value to 'int' without explicit conversion (use .toInt()).");
-                    }
+                    validateNonNullTarget(tgtNode.line, tgtNode.col, varTid, vassign->value);
+                    validateEnumAssignment(tgtNode.line, tgtNode.col, ident->name, varTid, valType);
                     bindLocalVar(scope, ident->name, varTid, false, vassign->isConst, tgtNode.line, tgtNode.col);
                 } else {
                     const auto existing = scope.find(ident->name);
                     if (existing == scope.end()) {
+                        const auto cOpt = resolveConstSymbol(symbols, moduleId, scope, ident->name);
+                        if (cOpt.has_value()) {
+                            setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot reassign const variable '" + ident->name + "'.");
+                        }
                         std::string msg = "Undeclared variable '" + ident->name + "'. Use 'dim' or 'const' to declare variables.";
                         setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                     }
@@ -441,13 +552,8 @@ public:
                         std::string msg = "Cannot reassign const variable '" + ident->name + "'.";
                         setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                     }
-                    const bool varIsEnum = isEnumType(symbols, existing->second.typeId, arena, moduleId);
-                    const bool valIsEnum = isEnumType(symbols, valType, arena, moduleId);
-                    if (varIsEnum && valType != symbols.typeAuto && valType != existing->second.typeId) {
-                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign mismatched type to enum variable '" + ident->name + "'.");
-                    } else if (!varIsEnum && valIsEnum && existing->second.typeId == symbols.typeInt) {
-                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign enum value to 'int' without explicit conversion (use .toInt()).");
-                    }
+                    validateNonNullTarget(tgtNode.line, tgtNode.col, existing->second.typeId, vassign->value);
+                    validateEnumAssignment(tgtNode.line, tgtNode.col, ident->name, existing->second.typeId, valType);
                 }
             } else {
                 const auto& tgtNode = arena.exprs[vassign->target];
@@ -456,6 +562,8 @@ public:
                     std::string msg = "Cannot mutate const variable '" + root.name + "'.";
                     setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                 }
+                const TypeId lhsTid = inferExprType(arena, vassign->target, symbols, scope, moduleId);
+                validateNonNullTarget(tgtNode.line, tgtNode.col, lhsTid, vassign->value);
                 validateExprCalls(fn, vassign->target, scope, false);
             }
 
@@ -464,7 +572,7 @@ public:
         }
 
         if (auto* estmt = arena.getStmtMut<ExprStmt>(stmtId)) {
-            checkFallibleUsage(fn, estmt->expr, hasActiveOnError, estmt->implicitBubble);
+            checkFallibleUsage(fn, estmt->expr, scope, hasActiveOnError, estmt->implicitBubble);
             validateExprCalls(fn, estmt->expr, scope, true);
             return;
         }
@@ -513,9 +621,25 @@ public:
                 validateExprCalls(fn, forStmt->iterable, scope, false);
                 const TypeId iterTid = inferExprType(arena, forStmt->iterable, symbols, scope, moduleId);
                 if (iterTid < arena.types.size()) {
-                    const auto& iterT = arena.types[iterTid];
+                    const TypeNode iterT = resolveAliasNode(arena, symbols, moduleId, iterTid);
                     if (iterT.name == "list" && !iterT.typeArgs.empty() && !forStmt->loopVars.empty()) {
-                        bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                        if (forStmt->loopVars.size() == 1) {
+                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                        } else if (forStmt->loopVars.size() == 2) {
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                        } else {
+                            setAnalyzerError(stmtNode.line, stmtNode.col, "List iteration supports at most 2 loop variables ('for item in list' or 'for i, item in list').");
+                        }
+                    } else if (iterT.name == "bytes" && !forStmt->loopVars.empty()) {
+                        if (forStmt->loopVars.size() == 1) {
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                        } else if (forStmt->loopVars.size() == 2) {
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                        } else {
+                            setAnalyzerError(stmtNode.line, stmtNode.col, "Bytes iteration supports at most 2 loop variables ('for b in data' or 'for i, b in data').");
+                        }
                     } else if (iterT.name == "dict" && iterT.typeArgs.size() == 2) {
                         if (forStmt->loopVars.size() >= 1) {
                             bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
@@ -546,7 +670,7 @@ public:
             }
             if (isFallibleCond) {
                 bool dummyBubble = false;
-                checkFallibleUsage(fn, whileStmt->condition, hasActiveOnError, dummyBubble);
+                checkFallibleUsage(fn, whileStmt->condition, scope, hasActiveOnError, dummyBubble);
                 validateExprCalls(fn, whileStmt->condition, scope, true);
             } else {
                 validateExprCalls(fn, whileStmt->condition, scope, false);
@@ -566,11 +690,7 @@ public:
             }
 
             for (const auto& scase : selStmt->cases) {
-                std::vector<ExprId> mExprs = scase.matchExprs;
-                if (mExprs.empty() && scase.matchExpr != INVALID_ID) {
-                    mExprs.push_back(scase.matchExpr);
-                }
-                for (const auto& mExpr : mExprs) {
+                for (const auto& mExpr : scase.matchExprs) {
                     validateExprCalls(fn, mExpr, scope, false);
                     const TypeId mExprTid = inferExprType(arena, mExpr, symbols, scope, moduleId);
                     if (mExprTid != targetTid && mExprTid != symbols.typeAuto) {
@@ -611,6 +731,8 @@ public:
                 } else if (!retStmt->hasValue && expectedHasValue) {
                     std::string msg = "Function '" + fn.name + "' expects a return value, but none was provided.";
                     setAnalyzerError(stmtNode.line, stmtNode.col, msg);
+                } else if (retStmt->hasValue && expectedHasValue) {
+                    validateNonNullTarget(stmtNode.line, stmtNode.col, fn.returnType, retStmt->value);
                 }
             }
             return;
@@ -763,7 +885,7 @@ public:
             }
         }
 
-        // Pass 1b: Resolve struct field types and register function signatures
+        // Pass 1b: Resolve struct field types, constants, and function signatures
         for (const DeclId did : program.declarations) {
             if (did >= arena.decls.size()) continue;
             const auto& declNode = arena.decls[did];
@@ -771,9 +893,54 @@ public:
             if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
                 const std::string key = symbolKey(declNode.moduleId, tdecl->name);
                 auto& tsym = symbols.types[key];
+                tsym.fieldOrder.clear();
+                tsym.fieldOrder.reserve(tdecl->fields.size());
                 for (const auto& fld : tdecl->fields) {
-                    tsym.fields[fld.name] = resolveAlias(arena, symbols, declNode.moduleId, fld.typeId);
+                    const TypeId resolvedFid = resolveAlias(arena, symbols, declNode.moduleId, fld.typeId);
+                    tsym.fields[fld.name] = resolvedFid;
+                    FieldDecl resolvedFld = fld;
+                    resolvedFld.typeId = resolvedFid;
+                    tsym.fieldOrder.push_back(std::move(resolvedFld));
                 }
+            } else if (const auto* cdecl = arena.getDecl<ConstDecl>(did)) {
+                const std::string key = symbolKey(declNode.moduleId, cdecl->name);
+                if (symbols.constants.count(key) > 0) {
+                    throw makeError("AnalyzerError", "Duplicate constant declaration '" + cdecl->name + "'.", declNode.fileName, declNode.line, declNode.col);
+                }
+                if (!cdecl->hasDeclaredType) {
+                    if (const auto* llit = arena.getExpr<ListLiteral>(cdecl->value)) {
+                        if (llit->elements.empty()) {
+                            throw makeError("AnalyzerError", "Cannot infer element type of empty list '[]'; specify an explicit type such as 'const " + cdecl->name + " as list[int] = []'.", declNode.fileName, declNode.line, declNode.col);
+                        }
+                    }
+                    if (const auto* dlit = arena.getExpr<DictLiteral>(cdecl->value)) {
+                        if (dlit->entries.empty()) {
+                            throw makeError("AnalyzerError", "Cannot infer key/value types of empty dict '{}'; specify an explicit type such as 'const " + cdecl->name + " as dict[str, int] = {}'.", declNode.fileName, declNode.line, declNode.col);
+                        }
+                    }
+                }
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                const TypeId inferredTid = inferExprType(arena, cdecl->value, symbols, emptyScope, declNode.moduleId);
+                TypeId constTid = inferredTid;
+                if (cdecl->hasDeclaredType) {
+                    constTid = resolveAlias(arena, symbols, declNode.moduleId, cdecl->declaredType);
+                }
+                if (arena.getExpr<NullLiteral>(cdecl->value) != nullptr && constTid != symbols.typeCptr) {
+                    throw makeError("AnalyzerError", "CleanBasic types use non-nullable value semantics; only 'cptr' can be 'null'.", declNode.fileName, declNode.line, declNode.col);
+                }
+                ConstSymbol csym{};
+                csym.name = cdecl->name;
+                csym.moduleId = declNode.moduleId;
+                csym.key = key;
+                csym.typeId = constTid;
+                csym.value = cdecl->value;
+                csym.isPub = cdecl->isPub;
+                csym.cppName = makeCppConstName(declNode.moduleId, cdecl->name);
+                csym.fileName = declNode.fileName;
+                csym.line = declNode.nameLine;
+                csym.col = declNode.nameCol;
+                csym.endLine = declNode.endLine;
+                symbols.constants[key] = std::move(csym);
             } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 FnSymbol fsym{};
                 fsym.name = fdecl->name;
@@ -805,14 +972,54 @@ public:
             }
         }
 
-        // Pass 2: Validate function bodies
+        // Pass 2: Validate top-level constants, defaults, and function bodies
         for (const DeclId did : program.declarations) {
             if (did >= arena.decls.size()) continue;
             const auto& declNode = arena.decls[did];
-            if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
+            fileName = declNode.fileName;
+            moduleId = declNode.moduleId;
+            if (const auto* cdecl = arena.getDecl<ConstDecl>(did)) {
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                const std::string key = symbolKey(declNode.moduleId, cdecl->name);
+                const TypeId valTid = inferExprType(arena, cdecl->value, symbols, emptyScope, moduleId);
+                TypeId targetTid = valTid;
+                if (symbols.constants.count(key) > 0) {
+                    targetTid = symbols.constants.at(key).typeId;
+                }
+                validateEnumAssignment(declNode.line, declNode.col, cdecl->name, targetTid, valTid);
+                FnDecl dummyFn{};
+                dummyFn.name = cdecl->name;
+                dummyFn.isFallible = false;
+                validateExprCalls(dummyFn, cdecl->value, emptyScope, false);
+            } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                FnDecl dummyFn{};
+                dummyFn.name = tdecl->name;
+                dummyFn.isFallible = false;
+                for (const auto& fld : tdecl->fields) {
+                    if (fld.hasDefault && fld.defaultValue != INVALID_ID) {
+                        const TypeId resolvedFid = resolveAlias(arena, symbols, moduleId, fld.typeId);
+                        const TypeId valTid = inferExprType(arena, fld.defaultValue, symbols, emptyScope, moduleId);
+                        validateNonNullTarget(fld.line, fld.col, resolvedFid, fld.defaultValue);
+                        validateEnumAssignment(fld.line, fld.col, fld.name, resolvedFid, valTid);
+                        validateExprCalls(dummyFn, fld.defaultValue, emptyScope, false);
+                    }
+                }
+            } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                FnDecl dummyFn{};
+                dummyFn.name = fdecl->name;
+                dummyFn.isFallible = false;
+                for (const auto& p : fdecl->params) {
+                    if (p.hasDefault && p.defaultValue != INVALID_ID) {
+                        const TypeId resolvedPid = resolveAlias(arena, symbols, moduleId, p.typeId);
+                        const TypeId valTid = inferExprType(arena, p.defaultValue, symbols, emptyScope, moduleId);
+                        validateNonNullTarget(p.line, p.col, resolvedPid, p.defaultValue);
+                        validateEnumAssignment(p.line, p.col, p.name, resolvedPid, valTid);
+                        validateExprCalls(dummyFn, p.defaultValue, emptyScope, false);
+                    }
+                }
                 if (!fdecl->isExtern) {
-                    fileName = declNode.fileName;
-                    moduleId = declNode.moduleId;
                     analyzeFn(*fdecl);
                 }
             }

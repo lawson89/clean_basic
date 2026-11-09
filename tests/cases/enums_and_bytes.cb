@@ -13,6 +13,8 @@
 ' EXPECT_OUT: Endian U16Le: 4660, U16Be: 4660, U32Le: 287454020
 ' EXPECT_OUT: Whole file bytes match: true
 ' EXPECT_OUT: Streamed bytes match: aabb and ccdd
+' EXPECT_OUT: Interp basic: Method=post, code=1, sum=30, ok=true
+' EXPECT_OUT: Interp braces & nested: {post: 200} / dict=42
 
 import "std/fs"
 
@@ -28,6 +30,10 @@ enum FileAccess as int
     write = 2
     readWrite = 3
 end enum
+
+fn lookupK(d as dict[str, int]) as int
+    return d["k"]
+end fn
 
 fn describeMethod(m as HttpMethod) as str
     select case m
@@ -128,5 +134,10 @@ fn main() as int
     testEnums()
     testBytesBuffers()
     testBinaryFiles()
+    dim m = HttpMethod.post
+    dim a = 10
+    dim b = 20
+    print($"Interp basic: Method={m}, code={m.toInt()}, sum={a + b}, ok={a < b and b == 20}")
+    print($"Interp braces & nested: {{{m}: {100 * 2}}} / {$"dict={lookupK({"k": 42})}"}")
     return 0
 end fn

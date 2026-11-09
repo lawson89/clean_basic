@@ -97,18 +97,93 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
     LexResult res{};
     res.ok = true;
     const std::string fileStr(fileName);
-    const char mulCh = static_cast<char>(42);
-    constexpr char singleQuote = static_cast<char>(39);
-    constexpr char backslashChar = static_cast<char>(92);
-    constexpr char nlCh = static_cast<char>(10);
-    constexpr char crCh = static_cast<char>(13);
-    constexpr char tabCh = static_cast<char>(9);
+    constexpr char mulCh = '*';
+    constexpr char singleQuote = '\'';
+    constexpr char backslashChar = '\\';
+    constexpr char nlCh = '\n';
+    constexpr char crCh = '\r';
+    constexpr char tabCh = '\t';
 
     uint32_t lineNum = 1;
     std::size_t lineStart = 0;
     uint32_t bracketDepth = 0;
     std::size_t i = 0;
     const std::size_t n = code.size();
+
+    struct InterpState {
+        uint32_t braceDepth = 0;
+        uint32_t openLine = 1;
+        uint32_t openCol = 1;
+        std::size_t openTokenCount = 0;
+    };
+    std::vector<InterpState> interpBraceDepths;
+
+    auto scanInterpolatedSegment = [&](uint32_t segStartCol) -> bool {
+        std::string segment(1, '"');
+        while (i < n && code[i] != nlCh) {
+            if (code[i] == backslashChar && i + 1 < n) {
+                segment.push_back(code[i]);
+                segment.push_back(code[i + 1]);
+                i += 2;
+                continue;
+            }
+            if (code[i] == '{') {
+                if (i + 1 < n && code[i + 1] == '{') {
+                    segment.push_back('{');
+                    i += 2;
+                    continue;
+                }
+                const uint32_t braceCol = static_cast<uint32_t>(i - lineStart + 1);
+                segment.push_back('"');
+                res.tokens.push_back(Token{"STRING", std::move(segment), lineNum, segStartCol});
+                res.tokens.push_back(Token{"OP_ARITH", "&", lineNum, braceCol});
+                bracketDepth += 1;
+                res.tokens.push_back(Token{"LPAREN", "(", lineNum, braceCol});
+                interpBraceDepths.push_back(InterpState{bracketDepth, lineNum, braceCol, res.tokens.size()});
+                i += 1;
+                return true;
+            }
+            if (code[i] == '}') {
+                if (i + 1 < n && code[i + 1] == '}') {
+                    segment.push_back('}');
+                    i += 2;
+                    continue;
+                }
+                const uint32_t braceCol = static_cast<uint32_t>(i - lineStart + 1);
+                res.ok = false;
+                res.error = makeError(
+                    "LexerError",
+                    "Unescaped '}' in interpolated string literal; use '}}' to escape a literal brace.",
+                    fileStr,
+                    lineNum,
+                    braceCol
+                );
+                return false;
+            }
+            if (code[i] == '"') {
+                const uint32_t closeCol = static_cast<uint32_t>(i - lineStart + 1);
+                segment.push_back('"');
+                res.tokens.push_back(Token{"STRING", std::move(segment), lineNum, segStartCol});
+                if (bracketDepth > 0) {
+                    bracketDepth -= 1;
+                }
+                res.tokens.push_back(Token{"RPAREN", ")", lineNum, closeCol});
+                i += 1;
+                return true;
+            }
+            segment.push_back(code[i]);
+            i += 1;
+        }
+        res.ok = false;
+        res.error = makeError(
+            "LexerError",
+            "Unterminated interpolated string literal",
+            fileStr,
+            lineNum,
+            segStartCol
+        );
+        return false;
+    };
 
     while (i < n) {
         const char ch = code[i];
@@ -196,13 +271,50 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             continue;
         }
 
+        // 5b. Interpolated string literal: $"..."
+        if (ch == '$' && i + 1 < n && code[i + 1] == '"') {
+            bracketDepth += 1;
+            res.tokens.push_back(Token{"LPAREN", "(", lineNum, col});
+            i += 2;
+            if (!scanInterpolatedSegment(col)) {
+                return res;
+            }
+            continue;
+        }
+
+        // 5c. Closing '}' of an active string interpolation hole
+        if (ch == '}' && !interpBraceDepths.empty() && bracketDepth == interpBraceDepths.back().braceDepth) {
+            if (res.tokens.size() == interpBraceDepths.back().openTokenCount) {
+                res.ok = false;
+                res.error = makeError(
+                    "LexerError",
+                    "Empty interpolation hole '{}' in interpolated string literal",
+                    fileStr,
+                    lineNum,
+                    col
+                );
+                return res;
+            }
+            interpBraceDepths.pop_back();
+            if (bracketDepth > 0) {
+                bracketDepth -= 1;
+            }
+            res.tokens.push_back(Token{"RPAREN", ")", lineNum, col});
+            res.tokens.push_back(Token{"OP_ARITH", "&", lineNum, col});
+            i += 1;
+            if (!scanInterpolatedSegment(col)) {
+                return res;
+            }
+            continue;
+        }
+
         // 5. String literal
         if (ch == '"') {
             const char quote = '"';
             const std::size_t startIdx = i;
             i += 1;
             bool closed = false;
-            while (i < n && code[i] != static_cast<char>(10)) {
+            while (i < n && code[i] != nlCh) {
                 if (code[i] == backslashChar && i + 1 < n) {
                     i += 2;
                     continue;
@@ -313,8 +425,16 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             continue;
         }
 
+        // 8b. Compound assignment operators: +=, -=, *=, /=, %=, &=
+        if ((ch == '+' || ch == '-' || ch == mulCh || ch == '/' || ch == '%' || ch == '&') &&
+            i + 1 < n && code[i + 1] == '=') {
+            res.tokens.push_back(Token{"COMPOUND_ASSIGN", std::string(code.substr(i, 2)), lineNum, col});
+            i += 2;
+            continue;
+        }
+
         // 9. Single-character arithmetic, concatenation, and punctuation
-        if (ch == '+' || ch == '-' || ch == mulCh || ch == '/' || ch == '&') {
+        if (ch == '+' || ch == '-' || ch == mulCh || ch == '/' || ch == '%' || ch == '&') {
             res.tokens.push_back(Token{"OP_ARITH", std::string(1, ch), lineNum, col});
             i += 1;
             continue;
@@ -339,6 +459,19 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
 
         // 10. Unknown character
         return LexResult{false, {}, makeError("LexerError", std::string("Unexpected character '") + ch + "'", fileStr, lineNum, col)};
+    }
+
+    if (!interpBraceDepths.empty()) {
+        const InterpState& unclosed = interpBraceDepths.back();
+        res.ok = false;
+        res.error = makeError(
+            "LexerError",
+            "Unterminated interpolation block '{...}' in interpolated string literal",
+            fileStr,
+            unclosed.openLine,
+            unclosed.openCol
+        );
+        return res;
     }
 
     uint32_t eofCol = 1u;

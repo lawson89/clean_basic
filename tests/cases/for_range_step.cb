@@ -1,13 +1,26 @@
 ' EXPECT_CPP: for (int64_t i = 0; i <= 10; i += 2) {
+' EXPECT_CPP: for (int64_t i = 10; i >= 2; i += (-2)) {
 ' EXPECT_CPP: for (auto& x : nums) {
 ' FORBID_CPP: throw
 ' EXPECT_OUT: inclusiveEvens: 30
+' EXPECT_OUT: countdownEvens: 30
 ' EXPECT_OUT: itemsSum: 60
+' EXPECT_OUT: indexedSum: 140
 
 fn sumEvens() as int
     dim total = 0
     for i = 0 to 10 step 2
-        total = total + i
+        if i % 2 == 0
+            total += i
+        end if
+    end for
+    return total
+end fn
+
+fn sumCountdownEvens() as int
+    dim total = 0
+    for i = 10 to 2 step -2
+        total += i
     end for
     return total
 end fn
@@ -16,12 +29,23 @@ fn sumItems() as int
     dim nums as list[int] = [10, 20, 30]
     dim sum = 0
     for x in nums
-        sum = sum + x
+        sum += x
+    end for
+    return sum
+end fn
+
+fn sumIndexedItems() as int
+    dim nums as list[int] = [10, 20, 30]
+    dim sum = 0
+    for idx, x in nums
+        sum += (idx + 1) * x
     end for
     return sum
 end fn
 
 fn main()
     print("inclusiveEvens: ", sumEvens())
+    print("countdownEvens: ", sumCountdownEvens())
     print("itemsSum: " & sumItems())
+    print("indexedSum: " & sumIndexedItems())
 end fn

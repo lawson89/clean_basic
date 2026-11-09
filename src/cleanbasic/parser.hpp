@@ -401,7 +401,7 @@ public:
     }
 
     ExprId parseMultiplicative() {
-        return parseBinaryOpLoop("OP_ARITH", {"*", "/"}, &Parser::parseUnary);
+        return parseBinaryOpLoop("OP_ARITH", {"*", "/", "%"}, &Parser::parseUnary);
     }
 
     ExprId parseAdditive() {
@@ -509,6 +509,21 @@ public:
         }
 
         const ExprId firstExpr = parseExpr();
+
+        if (check("COMPOUND_ASSIGN")) {
+            const Token opTok = match("COMPOUND_ASSIGN");
+            const std::string binOp = opTok.value.substr(0, opTok.value.size() - 1);
+            const ExprId rhsExpr = parseExpr();
+            expectNewlineOrEof();
+
+            const ExprId valExpr = arena.addExpr(opTok.line, opTok.col, BinaryOp{binOp, firstExpr, rhsExpr});
+            VarAssignment stmt{};
+            stmt.target = firstExpr;
+            stmt.hasDeclaredType = false;
+            stmt.declaredType = INVALID_ID;
+            stmt.value = valExpr;
+            return arena.addStmt(start.line, start.col, std::move(stmt));
+        }
 
         if (check("ASSIGN")) {
             match("ASSIGN");
@@ -650,11 +665,7 @@ public:
             std::vector<StmtId> caseBody = parseStmtBlockUntil(
                 {"case", "case else", "end select"}, "Unclosed 'case' in 'select case', expected 'end select'"
             );
-            ExprId firstMatch = INVALID_ID;
-            if (!matchExprs.empty()) {
-                firstMatch = matchExprs.front();
-            }
-            cases.push_back(SelectCase{caseTok.line, caseTok.col, firstMatch, std::move(matchExprs), std::move(caseBody)});
+            cases.push_back(SelectCase{caseTok.line, caseTok.col, std::move(matchExprs), std::move(caseBody)});
         }
 
         bool hasCaseElse = false;
@@ -846,6 +857,7 @@ public:
                 check("KEYWORD", "fn") ||
                 check("KEYWORD", "type") ||
                 check("KEYWORD", "enum") ||
+                check("KEYWORD", "const") ||
                 check("KEYWORD", "alias") ||
                 check("KEYWORD", "import") ||
                 check("KEYWORD", "import header") ||
@@ -871,6 +883,14 @@ public:
             fd.col = fieldTok.col;
             fd.name = fieldTok.value;
             fd.typeId = fieldType;
+            if (check("ASSIGN")) {
+                if (isExtern) {
+                    setParseError(current(), "Default field values are not allowed on 'extern type' declarations");
+                }
+                match("ASSIGN");
+                fd.hasDefault = true;
+                fd.defaultValue = parseExpr();
+            }
             fields.push_back(std::move(fd));
             expectNewlineOrEof();
         }
@@ -960,7 +980,38 @@ public:
         p.name = nameTok.value;
         p.typeId = tNode;
         p.isByref = isByref;
+        if (check("ASSIGN")) {
+            if (isByref) {
+                setParseError(current(), "'byref' parameter '" + nameTok.value + "' cannot have a default value");
+            }
+            match("ASSIGN");
+            p.hasDefault = true;
+            p.defaultValue = parseExpr();
+        }
         return p;
+    }
+
+    DeclId parseConstDecl(bool isPub, const Token& startTok) {
+        match("KEYWORD", "const");
+        const Token nameTok = match("IDENT");
+        bool hasDeclaredType = false;
+        TypeId declaredType = INVALID_ID;
+        if (check("KEYWORD", "as")) {
+            match("KEYWORD", "as");
+            hasDeclaredType = true;
+            declaredType = parseType();
+        }
+        match("ASSIGN");
+        const ExprId valExpr = parseExpr();
+        expectNewlineOrEof();
+
+        ConstDecl decl{};
+        decl.name = nameTok.value;
+        decl.hasDeclaredType = hasDeclaredType;
+        decl.declaredType = declaredType;
+        decl.value = valExpr;
+        decl.isPub = isPub;
+        return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, nameTok.line, nameTok.line, nameTok.col);
     }
 
     DeclId parseFnDecl(bool isPub, bool isExtern, const Token& startTok) {
@@ -986,11 +1037,9 @@ public:
         if (check("KEYWORD", "as")) {
             match("KEYWORD", "as");
             if (check("TYPE_KW", "err")) {
-                match("TYPE_KW", "err");
-                isFallible = true;
-            } else {
-                returnType = parseType();
+                setParseError(current(), "Return type 'as err' is removed; use 'can error' at the end of the function signature instead.");
             }
+            returnType = parseType();
         }
         if (check("KEYWORD", "can error")) {
             match("KEYWORD", "can error");
@@ -1070,11 +1119,18 @@ public:
             return parseEnumDecl(isPub, tok);
         }
 
+        if (check("KEYWORD", "const")) {
+            if (isExtern) {
+                setParseError(current(), "'extern' cannot be applied to 'const'");
+            }
+            return parseConstDecl(isPub, tok);
+        }
+
         if (check("KEYWORD", "fn")) {
             return parseFnDecl(isPub, isExtern, tok);
         }
 
-        setParseError(current(), "Expected top-level declaration ('import', 'alias', 'type', 'enum', or 'fn')");
+        setParseError(current(), "Expected top-level declaration ('import', 'const', 'alias', 'type', 'enum', or 'fn')");
     }
 
     Program parseProgram() {

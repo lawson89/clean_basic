@@ -4,6 +4,7 @@
 ' EXPECT_OUT: first: 10
 ' EXPECT_OUT: empty: 0
 ' EXPECT_OUT: score: 42
+' EXPECT_OUT: hasAlice: true, hasCharlie: false, popped: 30, removedBob: true, afterClear: 0
 
 fn testContainers(nums as list[int], lookup as dict[str, int]) as int
     select case nums.len()
@@ -22,4 +23,12 @@ fn main()
     print("first: " & testContainers(nums, scores))
     print("empty: ", testContainers(emptyNums, scores))
     print("score: " & scores["alice"])
+
+    dim hasAlice = scores.has("alice")
+    dim hasCharlie = scores.has("charlie")
+    dim popped = nums.pop()
+    dim removedBob = scores.remove("bob")
+    nums.clear()
+    scores.clear()
+    print($"hasAlice: {hasAlice}, hasCharlie: {hasCharlie}, popped: {popped}, removedBob: {removedBob}, afterClear: {nums.len() + scores.len()}")
 end fn

@@ -168,11 +168,23 @@ inline JsonId makeLspRange(
     uint32_t endLine1Based,
     uint32_t endCol1Based
 ) {
-    const int64_t sLine = startLine1Based > 0 ? static_cast<int64_t>(startLine1Based - 1) : 0;
-    const int64_t sCol = startCol1Based > 0 ? static_cast<int64_t>(startCol1Based - 1) : 0;
-    int64_t eLine = endLine1Based > 0 ? static_cast<int64_t>(endLine1Based - 1) : sLine;
+    int64_t sLine = 0;
+    if (startLine1Based > 0) {
+        sLine = static_cast<int64_t>(startLine1Based - 1);
+    }
+    int64_t sCol = 0;
+    if (startCol1Based > 0) {
+        sCol = static_cast<int64_t>(startCol1Based - 1);
+    }
+    int64_t eLine = sLine;
+    if (endLine1Based > 0) {
+        eLine = static_cast<int64_t>(endLine1Based - 1);
+    }
     if (eLine < sLine) eLine = sLine;
-    const int64_t eCol = endCol1Based > 0 ? static_cast<int64_t>(endCol1Based - 1) : sCol;
+    int64_t eCol = sCol;
+    if (endCol1Based > 0) {
+        eCol = static_cast<int64_t>(endCol1Based - 1);
+    }
 
     const JsonId startPos = jsonAddObject(arena);
     jsonObjectSet(arena, startPos, "line", jsonAddInt(arena, sLine));
@@ -195,7 +207,10 @@ inline JsonId makeLspLocation(
     uint32_t col1Based,
     size_t nameLen
 ) {
-    const uint32_t spanLen = nameLen > 0 ? static_cast<uint32_t>(nameLen) : 1;
+    uint32_t spanLen = 1;
+    if (nameLen > 0) {
+        spanLen = static_cast<uint32_t>(nameLen);
+    }
     const JsonId loc = jsonAddObject(arena);
     jsonObjectSet(arena, loc, "uri", jsonAddString(arena, filePathToUri(filePath)));
     jsonObjectSet(arena, loc, "range", makeLspRange(arena, line1Based, col1Based, line1Based, col1Based + spanLen));
@@ -232,7 +247,7 @@ inline std::string formatFnDetailSignature(
         out += params[i].name + " as " + formatCleanbasicType(arena, params[i].typeId);
     }
     out += ")";
-    if (!isVoidType(arena, returnType)) {
+    if (!arena.isVoid(returnType)) {
         out += " as " + formatCleanbasicType(arena, returnType);
     }
     if (isFallible) out += " can error";
@@ -264,6 +279,24 @@ inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymb
     return wrapVbCodeBlock(code);
 }
 
+inline std::string formatEnumHoverMarkdown(const EnumSymbol& es) {
+    std::string code;
+    if (es.isPub) {
+        code += "pub ";
+    }
+    code += "enum " + es.name + "\n";
+    for (const auto& m : es.members) {
+        code += "    " + m.name;
+        const auto vit = es.memberValues.find(m.name);
+        if (vit != es.memberValues.end()) {
+            code += " = " + std::to_string(vit->second);
+        }
+        code += "\n";
+    }
+    code += "end enum";
+    return wrapVbCodeBlock(code);
+}
+
 inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalSymbolTable& symbols, const AliasSymbol& al) {
     std::string code;
     if (al.isPub) code += "pub ";
@@ -276,6 +309,13 @@ inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalS
         md += "\nResolved type: " + wrapInlineCode(resolvedTarget);
     }
     return md;
+}
+
+inline std::string formatConstHoverMarkdown(const AstArena& arena, const ConstSymbol& cs) {
+    std::string code;
+    if (cs.isPub) code += "pub ";
+    code += "const " + cs.name + " as " + formatCleanbasicType(arena, cs.typeId);
+    return wrapVbCodeBlock(code);
 }
 
 inline std::string formatVarHoverMarkdown(const AstArena& arena, const VarSymbol& vs) {
@@ -305,7 +345,19 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
         return wrapVbCodeBlock("fn .toFloat() as float") + "\nConverts a numeric value to a float.";
     }
     if (name == "push") {
-        return wrapVbCodeBlock("fn .push(item as T)") + "\nAppends an item to the end of a list.";
+        return wrapVbCodeBlock("fn .push(item as T)") + "\nAppends an item to the end of a list or bytes buffer.";
+    }
+    if (name == "pop") {
+        return wrapVbCodeBlock("fn .pop() as T") + "\nRemoves and returns the last element from a list or bytes buffer.";
+    }
+    if (name == "clear") {
+        return wrapVbCodeBlock("fn .clear()") + "\nRemoves all elements from a list, dict, or bytes buffer.";
+    }
+    if (name == "has") {
+        return wrapVbCodeBlock("fn .has(key as K) as bool") + "\nReturns true if the dict contains the specified key.";
+    }
+    if (name == "remove") {
+        return wrapVbCodeBlock("fn .remove(key as K) as bool") + "\nRemoves the entry for key from a dict and returns true if it existed.";
     }
     return std::nullopt;
 }
@@ -352,7 +404,11 @@ inline std::optional<std::string> findModuleFilePath(const AstArena& arena, cons
             return cleanbasicRootDir() + "/stdlib/" + stdSub + "/" + stdSub + ".cb";
         }
         const std::string dir = parentDirOf(currentFilePath);
-        return normalizeRelPath((dir == "." ? "" : dir + "/") + std::string(importTarget));
+        std::string prefix;
+        if (dir != ".") {
+            prefix = dir + "/";
+        }
+        return normalizeRelPath(prefix + std::string(importTarget));
     }
     return std::nullopt;
 }
@@ -432,8 +488,14 @@ inline void publishDocumentDiagnostics(LspServerState& state, std::string_view u
     jsonObjectSet(arena, params, "uri", jsonAddString(arena, uri));
     const JsonId diagArr = jsonAddArray(arena);
     if (!checkRes.ok) {
-        const int64_t line0 = checkRes.error.line > 0 ? static_cast<int64_t>(checkRes.error.line - 1) : 0;
-        const int64_t col0 = checkRes.error.col > 0 ? static_cast<int64_t>(checkRes.error.col - 1) : 0;
+        int64_t line0 = 0;
+        if (checkRes.error.line > 0) {
+            line0 = static_cast<int64_t>(checkRes.error.line - 1);
+        }
+        int64_t col0 = 0;
+        if (checkRes.error.col > 0) {
+            col0 = static_cast<int64_t>(checkRes.error.col - 1);
+        }
         const JsonId startPos = jsonAddObject(arena);
         jsonObjectSet(arena, startPos, "line", jsonAddInt(arena, line0));
         jsonObjectSet(arena, startPos, "character", jsonAddInt(arena, col0));

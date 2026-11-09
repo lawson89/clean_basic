@@ -23,11 +23,13 @@ For deep-dive technical documentation on each compiler stage, consult:
 ```ebnf
 Program         ::= TopLevelDecl*
 
-TopLevelDecl    ::= ImportDecl | AliasDecl | TypeDecl | EnumDecl | FnDecl
+TopLevelDecl    ::= ImportDecl | ConstDecl | AliasDecl | TypeDecl | EnumDecl | FnDecl
 
 ImportDecl      ::= "import" (StringLiteral | QualifiedIdent) ["as" Identifier] NEWLINE
                   | "import header" StringLiteral NEWLINE
                   | "import link" StringLiteral NEWLINE
+
+ConstDecl       ::= ["pub"] "const" Identifier ["as" Type] "=" Expr NEWLINE
 
 AliasDecl       ::= ["pub"] "alias" Identifier "=" Type NEWLINE
 
@@ -36,21 +38,21 @@ EnumMember      ::= Identifier ["=" Expr] NEWLINE
 
 TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
                   | ["pub"] "extern" "type" Identifier NEWLINE
-FieldDecl       ::= Identifier "as" Type NEWLINE
+FieldDecl       ::= Identifier "as" Type ["=" Expr] NEWLINE
 
 FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
                     Statement*
                     "end fn" NEWLINE
                   | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
 ParamList       ::= Param ("," Param)* [","]
-Param           ::= ["byref"] Identifier "as" Type
+Param           ::= ["byref"] Identifier "as" Type ["=" Expr]
 
 Statement       ::= VarDecl | Assignment | ExprStmt
                   | IfStmt | ForStmt | SelectStmt
                   | ErrBlock | DeferBlock | ReturnStmt | BreakStmt | ContinueStmt
 
 VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr NEWLINE
-Assignment      ::= Expr "=" Expr NEWLINE
+Assignment      ::= Expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=") Expr NEWLINE
 ExprStmt        ::= Expr NEWLINE
 
 ErrBlock        ::= "on error" Identifier NEWLINE Statement* "end error" NEWLINE
@@ -84,7 +86,7 @@ AndExpr         ::= NotExpr ("and" NotExpr)*
 NotExpr         ::= "not" NotExpr | CmpExpr
 CmpExpr         ::= AddExpr (("==" | "!=" | "<" | ">" | "<=" | ">=") AddExpr)*
 AddExpr         ::= MulExpr (("+" | "-" | "&") MulExpr)*
-MulExpr         ::= UnaryExpr (("*" | "/") UnaryExpr)*
+MulExpr         ::= UnaryExpr (("*" | "/" | "%") UnaryExpr)*
 UnaryExpr       ::= ("+" | "-") UnaryExpr | PostfixExpr
 
 PostfixExpr     ::= PrimaryExpr
@@ -97,9 +99,10 @@ PrimaryExpr     ::= Literal | QualifiedIdent | "(" Expr ")"
 CallArgList     ::= CallArg ("," CallArg)* [","]
 CallArg         ::= [Identifier "="] Expr
 
-Literal         ::= NumberLiteral | StringLiteral | BytesLiteral
+Literal         ::= NumberLiteral | StringLiteral | InterpString | BytesLiteral
                   | "true" | "false" | "null"
                   | ListLiteral | DictLiteral
+InterpString    ::= '$"' (StringChar | "{{" | "}}" | "{" Expr "}")* '"'
 BytesLiteral    ::= 'b"' ... '"' | 'B"' ... '"'
 ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
 DictLiteral     ::= "{" [DictEntry ("," DictEntry)* [","]] "}"

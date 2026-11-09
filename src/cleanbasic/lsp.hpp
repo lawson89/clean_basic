@@ -46,7 +46,15 @@ inline void handleLspMessage(LspServerState& state, std::string_view payload, st
     }
     if (method == "initialized") { state.initialized = true; return; }
     if (method == "shutdown") { state.shutdownRequested = true; JsonArena outArena; writeJsonrpcResult(parsed.arena, reqId, outArena, jsonAddNull(outArena), out); return; }
-    if (method == "exit") { state.shouldExit = true; state.exitCode = state.shutdownRequested ? 0 : 1; return; }
+    if (method == "exit") {
+        state.shouldExit = true;
+        if (state.shutdownRequested) {
+            state.exitCode = 0;
+        } else {
+            state.exitCode = 1;
+        }
+        return;
+    }
     if (method == "textDocument/didOpen") {
         const JsonId textDoc = jsonGetField(parsed.arena, paramsId, "textDocument");
         const auto uriOpt = jsonGetString(parsed.arena, jsonGetField(parsed.arena, textDoc, "uri"));

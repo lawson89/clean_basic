@@ -28,8 +28,23 @@ inline void handleDocumentSymbolRequest(LspServerState& state, const JsonArena& 
                     jsonArrayPush(outArena, symbolsArr, symObj);
                 } else if (const auto* fn = snap.arena.getDecl<FnDecl>(did)) {
                     jsonArrayPush(outArena, symbolsArr, makeLspDocSymbol(outArena, fn->name, formatFnDetailSignature(snap.arena, fn->params, fn->returnType, fn->isFallible), 12, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
+                } else if (const auto* ed = snap.arena.getDecl<EnumDecl>(did)) {
+                    const JsonId symObj = makeLspDocSymbol(outArena, ed->name, "enum", 10, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol);
+                    const JsonId childrenArr = jsonAddArray(outArena);
+                    for (const auto& m : ed->members) {
+                        jsonArrayPush(outArena, childrenArr, makeLspDocSymbol(outArena, m.name, "member", 22, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
+                    }
+                    jsonObjectSet(outArena, symObj, "children", childrenArr);
+                    jsonArrayPush(outArena, symbolsArr, symObj);
                 } else if (const auto* al = snap.arena.getDecl<AliasDecl>(did)) {
                     jsonArrayPush(outArena, symbolsArr, makeLspDocSymbol(outArena, al->name, "= " + formatCleanbasicType(snap.arena, al->targetType), 26, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
+                } else if (const auto* cd = snap.arena.getDecl<ConstDecl>(did)) {
+                    std::string detail = "const";
+                    const std::string cKey = symbolKey(dn.moduleId, cd->name);
+                    if (snap.symbols.constants.count(cKey) > 0) {
+                        detail = "as " + formatCleanbasicType(snap.arena, snap.symbols.constants.at(cKey).typeId);
+                    }
+                    jsonArrayPush(outArena, symbolsArr, makeLspDocSymbol(outArena, cd->name, detail, 14, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
                 }
             }
         }
@@ -123,6 +138,14 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         res.hoverMarkdown = formatAliasHoverMarkdown(snap.arena, snap.symbols, al);
         if (!al.fileName.empty()) res.definition = makeDefTarget(al.fileName, al.line, al.col, al.name.size());
     };
+    const auto bindEnum = [&](const EnumSymbol& es) {
+        res.hoverMarkdown = formatEnumHoverMarkdown(es);
+        if (!es.fileName.empty()) res.definition = makeDefTarget(es.fileName, es.line, es.col, es.name.size());
+    };
+    const auto bindConst = [&](const ConstSymbol& cs) {
+        res.hoverMarkdown = formatConstHoverMarkdown(snap.arena, cs);
+        if (!cs.fileName.empty()) res.definition = makeDefTarget(cs.fileName, cs.line, cs.col, cs.name.size());
+    };
     if (cursorCtx.hasDotReceiver) {
         const std::string& recv = cursorCtx.receiverName;
         const std::string& member = tok.value;
@@ -133,8 +156,25 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
             if (fnIt != snap.symbols.functions.end()) { bindFn(fnIt->second); return res; }
             const auto tyIt = snap.symbols.types.find(qkey);
             if (tyIt != snap.symbols.types.end()) { bindType(tyIt->second); return res; }
+            const auto enIt = snap.symbols.enums.find(qkey);
+            if (enIt != snap.symbols.enums.end()) { bindEnum(enIt->second); return res; }
             const auto alIt = snap.symbols.aliases.find(qkey);
             if (alIt != snap.symbols.aliases.end()) { bindAlias(alIt->second); return res; }
+            const auto coIt = snap.symbols.constants.find(qkey);
+            if (coIt != snap.symbols.constants.end()) { bindConst(coIt->second); return res; }
+        }
+        if (activeScope.find(recv) == activeScope.end()) {
+            const auto enumOpt = resolveEnumSymbol(snap.arena, snap.symbols, currentModId, recv);
+            if (enumOpt.has_value()) {
+                const auto vit = enumOpt->memberValues.find(member);
+                if (vit != enumOpt->memberValues.end()) {
+                    res.hoverMarkdown = wrapVbCodeBlock("(enum member) " + enumOpt->name + "." + member + " = " + std::to_string(vit->second));
+                    if (!enumOpt->fileName.empty()) {
+                        res.definition = makeDefTarget(enumOpt->fileName, enumOpt->line, enumOpt->col, enumOpt->name.size());
+                    }
+                    return res;
+                }
+            }
         }
         const auto varIt = activeScope.find(recv);
         if (varIt != activeScope.end()) {
@@ -170,6 +210,10 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
     if (alIt != snap.symbols.aliases.end()) { bindAlias(alIt->second); return res; }
     const auto tyIt = snap.symbols.types.find(symKey);
     if (tyIt != snap.symbols.types.end() && !isBuiltinTypeName(tok.value)) { bindType(tyIt->second); return res; }
+    const auto enIt = snap.symbols.enums.find(symKey);
+    if (enIt != snap.symbols.enums.end()) { bindEnum(enIt->second); return res; }
+    const auto coIt = snap.symbols.constants.find(symKey);
+    if (coIt != snap.symbols.constants.end()) { bindConst(coIt->second); return res; }
     for (const auto& kv : snap.symbols.types) {
         const auto fit = kv.second.fields.find(tok.value);
         if (fit != kv.second.fields.end()) {
