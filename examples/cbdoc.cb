@@ -18,7 +18,7 @@ type DocEntry
 end type
 
 fn extractDeclHeader(line as str, includePrivate as bool) as str
-    dim t = line.trim()
+    const t = line.trim()
     if t.startsWith("pub ")
         return t
     end if
@@ -39,20 +39,20 @@ fn parseDeclKindAndName(header as str) as list[str]
         work = work.sliceFrom(7).ltrim()
     end if
 
-    dim kinds as list[str] = ["fn", "type", "enum", "union", "alias", "const"]
+    const kinds as list[str] = ["fn", "type", "enum", "union", "alias", "const"]
     for k in kinds
-        dim prefix = k & " "
+        const prefix = k & " "
         if work.startsWith(prefix)
-            dim rest = work.sliceFrom(prefix.len()).ltrim()
+            const rest = work.sliceFrom(prefix.len()).ltrim()
             dim endIdx = 0
             while endIdx < rest.len()
-                dim ch = rest.charAt(endIdx)
+                const ch = rest.charAt(endIdx)
                 if ch == "(" or ch == " " or ch == "=" or ch == "\t"
                     break
                 end if
                 endIdx += 1
             end while
-            dim name = rest.slice(0, endIdx)
+            const name = rest.slice(0, endIdx)
             return [k, name]
         end if
     end for
@@ -73,14 +73,14 @@ fn isBlockDeclKind(header as str, kind as str) as bool
 end fn
 
 fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can error
-    dim lines = fs.lines(filePath)
+    const lines = fs.lines(filePath)
     dim entries as list[DocEntry] = []
     dim pendingDoc as list[str] = []
 
     dim i = 0
     while i < lines.len()
-        dim rawLine = lines[i]
-        dim trimmed = rawLine.trim()
+        const rawLine = lines[i]
+        const trimmed = rawLine.trim()
 
         if trimmed.startsWith("''")
             dim docLine = trimmed.sliceFrom(2)
@@ -92,15 +92,15 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
             continue
         end if
 
-        dim header = extractDeclHeader(trimmed, includePrivate)
+        const header = extractDeclHeader(trimmed, includePrivate)
         if header != ""
-            dim kindAndName = parseDeclKindAndName(header)
-            dim kind = kindAndName[0]
-            dim name = kindAndName[1]
+            const kindAndName = parseDeclKindAndName(header)
+            const kind = kindAndName[0]
+            const name = kindAndName[1]
             if kind != "" and name != ""
                 dim sigLines as list[str] = [trimmed]
                 if isBlockDeclKind(header, kind)
-                    dim endMarker = $"end {kind}"
+                    const endMarker = $"end {kind}"
                     i += 1
                     while i < lines.len()
                         sigLines.push(lines[i])
@@ -137,12 +137,12 @@ fn collectCbFiles(targetPath as str, byref outFiles as list[str]) can error
         return
     end if
     if fs.isDir(targetPath)
-        dim names = fs.dir(targetPath)
+        const names = fs.dir(targetPath)
         for name in names
             if name.startsWith(".")
                 continue
             end if
-            dim child = fs.joinPath(targetPath, name)
+            const child = fs.joinPath(targetPath, name)
             if fs.isDir(child)
                 collectCbFiles(child, outFiles)
             else if fs.isFile(child) and fs.ext(child) == ".cb"
@@ -153,8 +153,8 @@ fn collectCbFiles(targetPath as str, byref outFiles as list[str]) can error
 end fn
 
 fn renderFileSection(filePath as str, entries as list[DocEntry]) as str
-    dim tick = str.fromChar(96)
-    dim fence = tick.repeat(3)
+    const tick = str.fromChar(96)
+    const fence = tick.repeat(3)
     dim out as list[str] = []
     out.push($"## Module {tick}{filePath}{tick}")
     out.push("")
@@ -187,7 +187,7 @@ fn buildParser() as cli.Parser
 end fn
 
 fn main() as int
-    dim p = buildParser()
+    const p = buildParser()
 
     on error e
         os.eprint($"cbdoc: {e.msg}")
@@ -195,7 +195,7 @@ fn main() as int
         return 2
     end error
 
-    dim args = p.parse()
+    const args = p.parse()
     if args.helpRequested
         p.printUsage()
         return 0
@@ -205,7 +205,7 @@ fn main() as int
         return 0
     end if
 
-    dim target = args.get("target")
+    const target = args.get("target")
     if not fs.exists(target)
         os.eprint($"cbdoc: {target}: No such file or directory")
         return 1
@@ -214,19 +214,19 @@ fn main() as int
     dim files as list[str] = []
     collectCbFiles(target, files)
 
-    dim title = args.get("title", "CleanBasic API Reference")
-    dim includePrivate = args.has("include-private")
+    const title = args.get("title", "CleanBasic API Reference")
+    const includePrivate = args.has("include-private")
     dim sections as list[str] = [$"# {title}", ""]
 
     for fpath in files
-        dim entries = parseFileDocs(fpath, includePrivate)
+        const entries = parseFileDocs(fpath, includePrivate)
         if entries.len() > 0
             sections.push(renderFileSection(fpath, entries))
         end if
     end for
 
-    dim markdown = str.join(sections, "\n").rtrim() & "\n"
-    dim outPath = args.get("output", "")
+    const markdown = str.join(sections, "\n").rtrim() & "\n"
+    const outPath = args.get("output", "")
     if outPath != ""
         fs.write(outPath, markdown)
     else
