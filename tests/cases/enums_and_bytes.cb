@@ -1,0 +1,132 @@
+' EXPECT_CPP: enum class HttpMethod : int64_t
+' EXPECT_CPP: std::vector<uint8_t>
+' EXPECT_CPP: cbBytesReadU16Le(
+' EXPECT_OUT: HttpMethod.post toStr: post, toInt: 1
+' EXPECT_OUT: FileAccess.readWrite: 3
+' EXPECT_OUT: describeMethod GET: GET
+' EXPECT_OUT: describeMethod POST: MUTATE
+' EXPECT_OUT: describeMethod DELETE: OTHER
+' EXPECT_OUT: GIF magic len: 6, hex: 474946383961
+' EXPECT_OUT: GIF slice: GIF, sliceFrom: 89a
+' EXPECT_OUT: fromHex: deadbeef, len: 4
+' EXPECT_OUT: toBytes roundtrip: CleanBasic
+' EXPECT_OUT: Endian U16Le: 4660, U16Be: 4660, U32Le: 287454020
+' EXPECT_OUT: Whole file bytes match: true
+' EXPECT_OUT: Streamed bytes match: aabb and ccdd
+
+import "std/fs"
+
+enum HttpMethod
+    get
+    post
+    put
+    delete
+end enum
+
+enum FileAccess as int
+    read = 1
+    write = 2
+    readWrite = 3
+end enum
+
+fn describeMethod(m as HttpMethod) as str
+    select case m
+        case HttpMethod.get
+            return "GET"
+        case HttpMethod.post, HttpMethod.put
+            return "MUTATE"
+        case else
+            return "OTHER"
+    end select
+end fn
+
+fn testEnums()
+    dim m = HttpMethod.post
+    print("HttpMethod.post toStr: " & m.toStr() & ", toInt: " & m.toInt().toStr())
+
+    dim fa = FileAccess.readWrite
+    print("FileAccess.readWrite: " & fa.toInt().toStr())
+
+    print("describeMethod GET: " & describeMethod(HttpMethod.get))
+    print("describeMethod POST: " & describeMethod(HttpMethod.post))
+    print("describeMethod DELETE: " & describeMethod(HttpMethod.delete))
+end fn
+
+fn testBytesBuffers() can error
+    dim gif = b"GIF89a"
+    print("GIF magic len: " & gif.len().toStr() & ", hex: " & gif.toHex())
+
+    dim part1 = gif.slice(0, 3)
+    dim part2 = gif.sliceFrom(3)
+    dim s1 = part1.toUtf8()
+    dim s2 = part2.toUtf8()
+    print("GIF slice: " & s1 & ", sliceFrom: " & s2)
+
+    dim parsed = bytes.fromHex("deadbeef")
+    print("fromHex: " & parsed.toHex() & ", len: " & parsed.len().toStr())
+
+    dim originalStr = "CleanBasic"
+    dim encoded = originalStr.toBytes()
+    dim decodedStr = encoded.toUtf8()
+    print("toBytes roundtrip: " & decodedStr)
+    dim endianBuf as bytes = b"\x00\x00\x00\x00\x00\x00\x00\x00"
+    endianBuf.writeU16Le(4660, 0)
+    endianBuf.writeU16Be(4660, 2)
+    endianBuf.writeU32Le(287454020, 4)
+
+    dim rU16Le = endianBuf.readU16Le(0)
+    dim rU16Be = endianBuf.readU16Be(2)
+    dim rU32Le = endianBuf.readU32Le(4)
+    print("Endian U16Le: " & rU16Le.toStr() & ", U16Be: " & rU16Be.toStr() & ", U32Le: " & rU32Le.toStr())
+end fn
+
+fn testBinaryFiles() can error
+    dim binPath = "build/testArtifacts/enumsAndBytes.dat"
+    if fs.exists(binPath)
+        fs.remove(binPath)
+    end if
+
+    dim testData = b"\xde\xad\xbe\xef\x01\x02\x03\x04"
+    fs.writeBytes(binPath, testData)
+
+    dim readBack = fs.readBytes(binPath)
+    dim matches = (readBack.toHex() == testData.toHex())
+    print("Whole file bytes match: " & matches.toStr())
+
+    fs.remove(binPath)
+
+    dim streamPath = "build/testArtifacts/enumsAndBytesStream.dat"
+    if fs.exists(streamPath)
+        fs.remove(streamPath)
+    end if
+
+    dim writer = fs.openMode(streamPath, "w")
+    defer
+        writer.close()
+    end defer
+    writer.writeBytes(b"\xaa\xbb\xcc\xdd")
+    writer.close()
+
+    dim reader = fs.open(streamPath)
+    defer
+        reader.close()
+    end defer
+    dim chunk1 = reader.readBytes(2)
+    dim chunk2 = reader.readBytes(2)
+    reader.close()
+
+    print("Streamed bytes match: " & chunk1.toHex() & " and " & chunk2.toHex())
+    fs.remove(streamPath)
+end fn
+
+fn main() as int
+    on error e
+        print("Error: " & e.msg)
+        return 1
+    end error
+
+    testEnums()
+    testBytesBuffers()
+    testBinaryFiles()
+    return 0
+end fn

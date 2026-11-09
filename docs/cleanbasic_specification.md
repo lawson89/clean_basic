@@ -23,13 +23,16 @@ For deep-dive technical documentation on each compiler stage, consult:
 ```ebnf
 Program         ::= TopLevelDecl*
 
-TopLevelDecl    ::= ImportDecl | AliasDecl | TypeDecl | FnDecl
+TopLevelDecl    ::= ImportDecl | AliasDecl | TypeDecl | EnumDecl | FnDecl
 
 ImportDecl      ::= "import" (StringLiteral | QualifiedIdent) ["as" Identifier] NEWLINE
                   | "import header" StringLiteral NEWLINE
                   | "import link" StringLiteral NEWLINE
 
 AliasDecl       ::= ["pub"] "alias" Identifier "=" Type NEWLINE
+
+EnumDecl        ::= ["pub"] "enum" Identifier ["as" "int"] NEWLINE EnumMember* "end enum" NEWLINE
+EnumMember      ::= Identifier ["=" Expr] NEWLINE
 
 TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
                   | ["pub"] "extern" "type" Identifier NEWLINE
@@ -94,14 +97,15 @@ PrimaryExpr     ::= Literal | QualifiedIdent | "(" Expr ")"
 CallArgList     ::= CallArg ("," CallArg)* [","]
 CallArg         ::= [Identifier "="] Expr
 
-Literal         ::= NumberLiteral | StringLiteral
+Literal         ::= NumberLiteral | StringLiteral | BytesLiteral
                   | "true" | "false" | "null"
                   | ListLiteral | DictLiteral
+BytesLiteral    ::= 'b"' ... '"' | 'B"' ... '"'
 ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
 DictLiteral     ::= "{" [DictEntry ("," DictEntry)* [","]] "}"
 DictEntry       ::= Expr ":" Expr
 
-Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err"
+Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err" | "bytes"
                   | "list" "[" Type "]"
                   | "dict" "[" Type "," Type "]"
                   | QualifiedIdent

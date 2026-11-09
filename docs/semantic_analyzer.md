@@ -37,6 +37,7 @@ struct GlobalSymbolTable {
 
 ### Symbol Table Components
 * **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
+* **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `hasExplicitIntType`, `members` map, `cppName`).
 * **`aliases` (`key -> AliasSymbol`)**: Stores every `alias Name = TargetType` declaration (`name`, `moduleId`, `key`, `targetType`, `isPub`, `cppName`).
 * **`functions` (`key -> FnSymbol`)**: Stores every function signature (`name`, `moduleId`, `key`, resolved `params`, resolved `returnType`, `isFallible`, `isPub`, `isExtern`, `cppName`).
 * **`headers` & `linkLibs`**: Deduplicated ordered lists of `import header "..."` and `import link "..."` targets across all loaded modules.
@@ -55,6 +56,7 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 | `int` | `symbols.typeInt` | Signed integer primitive. |
 | `float` | `symbols.typeFloat` | Double-precision floating-point primitive (`double`). |
 | `str` | `symbols.typeStr` | UTF-8 string value (`std::string`). |
+| `bytes` | `symbols.typeBytes` | Raw binary buffer (`std::vector<uint8_t>`). |
 | `bool` | `symbols.typeBool` | Boolean primitive (`true` / `false`). |
 | `cptr` | `symbols.typeCptr` | Opaque C pointer (`void*`) for C/C++ FFI handles. |
 | `err` | `symbols.typeErr` | Built-in structured error type (`CbError`) with `.msg as str` and `.code as int` fields. |
@@ -70,10 +72,12 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 
 CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 
-* **`.len() as int`**: Supported on `list[T]`, `dict[K, V]`, and `str`. Returns the number of elements or characters.
-* **`.push(item as T)`**: Supported on `list[T]`. Appends an item to the end of the list.
-* **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, and `err`. Returns a string representation.
-* **`.toInt() as int`**: Supported on `int`, `float`, and `bool`. Performs an infallible integer conversion.
+* **`.len() as int`**: Supported on `list[T]`, `dict[K, V]`, `str`, and `bytes`. Returns the number of elements or characters.
+* **`.push(item as T)`**: Supported on `list[T]` and `bytes` (octet). Appends an item to the end of the list.
+* **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
+* **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
+* **`bytes` Methods**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, etc.
+* **`str.toBytes() as bytes`**: Encodes a string into UTF-8 bytes. Performs an infallible integer conversion.
 * **`.toFloat() as float`**: Supported on `int` and `float`. Performs an infallible floating-point conversion.
 
 ---
@@ -101,6 +105,9 @@ partition "Pass 1a: Module Imports, Aliases & Type Headers" {
   3. TypeDecl:
      - Register TypeSymbol shell in symbols.types[key]
      - Pre-register canonical TypeNode in arena.types;
+  4. EnumDecl:
+     - Register EnumSymbol shell in symbols.enums[key]
+     - Pre-register canonical TypeNode in arena.types;
 }
 
 partition "Pass 1b: Struct Fields & Function Signatures" {
@@ -111,6 +118,8 @@ partition "Pass 1b: Struct Fields & Function Signatures" {
   2. FnDecl:
      - Resolve parameter TypeIds and returnType through resolveAlias()
      - Register FnSymbol in symbols.functions[key];
+  3. EnumDecl:
+     - Populate EnumSymbol::members
 }
 
 partition "Pass 2: Function Body & Statement Validation" {
@@ -232,8 +241,8 @@ In `analyzeStmt()` (`VarAssignment`):
 3. **`byref` Parameter Mutability:** Function parameters are passed by value by default (`isByref = false`). When a parameter is marked `byref p as Player`, `VarSymbol::isByref = true` is recorded in the function scope and emitted as a mutable C++ reference (`Player& p`).
 
 ### 6.3 `select case` Target and Case Expression Constraints
-`select case <target>` supports `int`, `bool`, and `str` expressions. The analyzer validates that:
-1. The target expression is of type `int`, `bool`, or `str` (reporting an error otherwise).
+`select case <target>` supports `int`, `bool`, `str`, and `enum` expressions. The analyzer validates that:
+1. The target expression is of type `int`, `bool`, `str`, or an `enum` (reporting an error otherwise).
 2. Every match expression in each `case expr1, expr2` clause matches the target type.
 Integral and boolean targets lower to native C++ `switch` jump tables with stacked `case` labels, while string targets lower to a single-evaluation temporary variable paired with an `if / else if / else` equality chain.
 

@@ -27,6 +27,10 @@ inline TypeId inferExprType(
         return symbols.typeStr;
     }
 
+    if (arena.getExpr<BytesLiteral>(exprId) != nullptr) {
+        return symbols.typeBytes;
+    }
+
     if (arena.getExpr<BoolLiteral>(exprId) != nullptr) {
         return symbols.typeBool;
     }
@@ -70,6 +74,28 @@ inline TypeId inferExprType(
     }
 
     if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
+        if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess->target)) {
+            if (scope.find(tgtIdent->name) == scope.end()) {
+                const auto enumOpt = resolveEnumSymbol(arena, symbols, currentModuleId, tgtIdent->name);
+                if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
+                    const TypeId tid = arena.findType(enumOpt->key, {});
+                    if (tid != INVALID_ID) return tid;
+                }
+            }
+        }
+        if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess->target)) {
+            if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
+                std::string targetModId;
+                if (isModuleAliasInScope(symbols, currentModuleId, modIdent->name, scope, targetModId)) {
+                    const std::string enumKey = symbolKey(targetModId, innerFa->fieldName);
+                    const auto it = symbols.enums.find(enumKey);
+                    if (it != symbols.enums.end() && it->second.memberValues.count(faccess->fieldName) > 0) {
+                        const TypeId tid = arena.findType(it->second.key, {});
+                        if (tid != INVALID_ID) return tid;
+                    }
+                }
+            }
+        }
         const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
         if (tsOpt.has_value()) {
@@ -90,6 +116,12 @@ inline TypeId inferExprType(
             }
             if (tnode.name == "dict" && tnode.typeArgs.size() == 2) {
                 return tnode.typeArgs[1];
+            }
+            if (tnode.name == "bytes") {
+                return symbols.typeInt;
+            }
+            if (tnode.name == "str") {
+                return symbols.typeStr;
             }
         }
         return symbols.typeAuto;

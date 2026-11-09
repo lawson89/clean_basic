@@ -42,6 +42,22 @@ struct FnSymbol {
     uint32_t col = 1;
     uint32_t endLine = 1;
     bool isBuiltinReceiver = false;
+    std::vector<FnSymbol> overloads;
+};
+
+struct EnumSymbol {
+    std::string name;
+    std::string moduleId;
+    std::string key;
+    std::vector<EnumMember> members;
+    std::unordered_map<std::string, int64_t> memberValues;
+    bool isPub = false;
+    bool hasExplicitIntType = false;
+    std::string cppName;
+    std::string fileName = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t endLine = 1;
 };
 
 struct AliasSymbol {
@@ -71,6 +87,7 @@ struct VarSymbol {
 struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
     std::unordered_map<std::string, AliasSymbol> aliases;
+    std::unordered_map<std::string, EnumSymbol> enums;
     std::unordered_map<std::string, FnSymbol> functions;
     std::vector<std::string> headers;
     std::vector<std::string> linkLibs;
@@ -85,6 +102,7 @@ struct GlobalSymbolTable {
     TypeId typeNull = INVALID_ID;
     TypeId typeErr = INVALID_ID;
     TypeId typeCptr = INVALID_ID;
+    TypeId typeBytes = INVALID_ID;
 };
 
 struct AnalysisResult {
@@ -103,6 +121,7 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     symbols.typeNull = arena.findOrAddType("null");
     symbols.typeErr = arena.findOrAddType("err");
     symbols.typeCptr = arena.findOrAddType("cptr");
+    symbols.typeBytes = arena.findOrAddType("bytes");
 
     TypeSymbol errType{};
     errType.name = "err";
@@ -129,7 +148,8 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
 inline bool isBuiltinTypeName(std::string_view name) {
     return name == "int" || name == "float" || name == "str" || name == "bool" ||
            name == "void" || name == "auto" || name == "null" ||
-           name == "err" || name == "list" || name == "dict" || name == "cptr";
+           name == "err" || name == "list" || name == "dict" || name == "cptr" ||
+           name == "bytes";
 }
 
 inline bool isBuiltinSymbolName(std::string_view name) {
@@ -360,9 +380,12 @@ inline std::optional<FnSymbol> resolveUfcsFn(
         recvTypeKey = resolveSymbolKey(symbols, currentModuleId, recvTypeKey);
     }
 
+    const bool isEnumRecv = (symbols.enums.count(recvTypeKey) > 0 ||
+                             symbols.enums.count(resolveSymbolKey(symbols, currentModuleId, recvTypeKey)) > 0);
+
     // Built-in receiver methods
     if (methodName == "len") {
-        if (recvTypeKey == "str" || recvTypeKey == "list" || recvTypeKey == "dict") {
+        if (recvTypeKey == "str" || recvTypeKey == "list" || recvTypeKey == "dict" || recvTypeKey == "bytes") {
             FnSymbol fs{};
             fs.name = "len";
             fs.returnType = symbols.typeInt;
@@ -370,7 +393,7 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             return fs;
         }
     } else if (methodName == "push") {
-        if (recvTypeKey == "list") {
+        if (recvTypeKey == "list" || recvTypeKey == "bytes") {
             FnSymbol fs{};
             fs.name = "push";
             fs.returnType = symbols.typeVoid;
@@ -378,7 +401,7 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             return fs;
         }
     } else if (methodName == "toStr") {
-        if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || recvTypeKey == "str" || recvTypeKey == "err") {
+        if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || recvTypeKey == "str" || recvTypeKey == "err" || isEnumRecv) {
             FnSymbol fs{};
             fs.name = "toStr";
             fs.returnType = symbols.typeStr;
@@ -386,7 +409,7 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             return fs;
         }
     } else if (methodName == "toInt") {
-        if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool") {
+        if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || isEnumRecv) {
             FnSymbol fs{};
             fs.name = "toInt";
             fs.returnType = symbols.typeInt;
@@ -401,14 +424,90 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             fs.isBuiltinReceiver = true;
             return fs;
         }
+    } else if (methodName == "slice") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "slice";
+            fs.returnType = symbols.typeBytes;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "sliceFrom") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "sliceFrom";
+            fs.returnType = symbols.typeBytes;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "toUtf8") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "toUtf8";
+            fs.returnType = symbols.typeStr;
+            fs.isFallible = true;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "toBytes") {
+        if (recvTypeKey == "str") {
+            FnSymbol fs{};
+            fs.name = "toBytes";
+            fs.returnType = symbols.typeBytes;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "toHex") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "toHex";
+            fs.returnType = symbols.typeStr;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "fromHex") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = "fromHex";
+            fs.returnType = symbols.typeBytes;
+            fs.isFallible = true;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "readU16Le" || methodName == "readU16Be" ||
+               methodName == "readU32Le" || methodName == "readU32Be" ||
+               methodName == "readU64Le" || methodName == "readU64Be") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = std::string(methodName);
+            fs.returnType = symbols.typeInt;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
+    } else if (methodName == "writeU16Le" || methodName == "writeU16Be" ||
+               methodName == "writeU32Le" || methodName == "writeU32Be" ||
+               methodName == "writeU64Le" || methodName == "writeU64Be") {
+        if (recvTypeKey == "bytes") {
+            FnSymbol fs{};
+            fs.name = std::string(methodName);
+            fs.returnType = symbols.typeVoid;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
     }
 
     // UFCS Step 1: Current module
     const std::string localKey = symbolKey(currentModuleId, methodName);
     const auto localIt = symbols.functions.find(localKey);
-    if (localIt != symbols.functions.end() &&
-        ufcsParamMatchesReceiver(arena, symbols, localIt->second, recvTypeKey)) {
-        return localIt->second;
+    if (localIt != symbols.functions.end()) {
+        if (ufcsParamMatchesReceiver(arena, symbols, localIt->second, recvTypeKey)) {
+            return localIt->second;
+        }
+        for (const auto& ov : localIt->second.overloads) {
+            if (ufcsParamMatchesReceiver(arena, symbols, ov, recvTypeKey)) {
+                return ov;
+            }
+        }
     }
 
     // UFCS Step 2: Receiver's defining module (including 'std/str' for 'str' when imported)
@@ -421,11 +520,49 @@ inline std::optional<FnSymbol> resolveUfcsFn(
                 ufcsParamMatchesReceiver(arena, symbols, recvFnIt->second, recvTypeKey)) {
                 return recvFnIt->second;
             }
+            for (const auto& ov : recvFnIt->second.overloads) {
+                if ((recvModId == currentModuleId || ov.isPub) &&
+                    ufcsParamMatchesReceiver(arena, symbols, ov, recvTypeKey)) {
+                    return ov;
+                }
+            }
             return std::nullopt;
         }
     }
 
     return std::nullopt;
+}
+
+inline std::optional<EnumSymbol> resolveEnumSymbol(
+    const AstArena& /*arena*/,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    std::string_view typeName
+) {
+    const std::string localKey = symbolKey(currentModuleId, typeName);
+    const auto it = symbols.enums.find(localKey);
+    if (it != symbols.enums.end()) {
+        return it->second;
+    }
+    const std::string rootKey = symbolKey("", typeName);
+    const auto it2 = symbols.enums.find(rootKey);
+    if (it2 != symbols.enums.end()) {
+        return it2->second;
+    }
+    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
+    const auto it3 = symbols.enums.find(normKey);
+    if (it3 != symbols.enums.end()) {
+        return it3->second;
+    }
+    return std::nullopt;
+}
+
+inline bool isEnumType(const GlobalSymbolTable& symbols, TypeId tid, const AstArena& arena, std::string_view currentModuleId) {
+    if (tid >= arena.types.size()) return false;
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
+    if (symbols.enums.find(resolved.name) != symbols.enums.end()) return true;
+    const std::string k = resolveSymbolKey(symbols, currentModuleId, resolved.name);
+    return symbols.enums.find(k) != symbols.enums.end();
 }
 
 inline std::optional<FnSymbol> resolveFuncCall(
@@ -439,6 +576,16 @@ inline std::optional<FnSymbol> resolveFuncCall(
         const std::string key = resolveSymbolKey(symbols, currentModuleId, ident->name);
         const auto it = symbols.functions.find(key);
         if (it != symbols.functions.end()) {
+            if (!it->second.overloads.empty()) {
+                if (it->second.params.size() == call.args.size()) {
+                    return it->second;
+                }
+                for (const auto& ov : it->second.overloads) {
+                    if (ov.params.size() == call.args.size()) {
+                        return ov;
+                    }
+                }
+            }
             return it->second;
         }
         return std::nullopt;
@@ -451,9 +598,27 @@ inline std::optional<FnSymbol> resolveFuncCall(
                 const std::string key = symbolKey(targetModId, access->fieldName);
                 const auto it = symbols.functions.find(key);
                 if (it != symbols.functions.end()) {
+                    if (!it->second.overloads.empty()) {
+                        if (it->second.params.size() == call.args.size()) {
+                            return it->second;
+                        }
+                        for (const auto& ov : it->second.overloads) {
+                            if (ov.params.size() == call.args.size()) {
+                                return ov;
+                            }
+                        }
+                    }
                     return it->second;
                 }
                 return std::nullopt;
+            }
+            if (tgtIdent->name == "bytes" && access->fieldName == "fromHex") {
+                FnSymbol fs{};
+                fs.name = "fromHex";
+                fs.returnType = symbols.typeBytes;
+                fs.isFallible = true;
+                fs.isBuiltinReceiver = true;
+                return fs;
             }
         }
         const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);

@@ -33,11 +33,12 @@ struct LexResult {
 
 | Token `kind` | Examples (`Token::value`) | Description |
 | :--- | :--- | :--- |
-| `KEYWORD` | `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
-| `TYPE_KW` | `int`, `float`, `bool`, `str`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
+| `KEYWORD` | `enum`, `end enum`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
+| `TYPE_KW` | `int`, `float`, `bool`, `str`, `bytes`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
 | `NUMBER` | `42`, `3.14159`, `0` | Integer or decimal floating-point numeric literals. |
 | `STRING` | `"Alice"`, `"IP cannot be empty"` | Double-quoted string literals (retaining outer quotes until stripped by `stripQuotes` in the parser; supports `\` escape sequences). |
+| `BYTES` | `b"GIF89a"`, `B"\x7fELF"` | Byte string literals prefixed with `b"` or `B"`. |
 | `OP_CMP` | `==`, `!=`, `<`, `>`, `<=`, `>=` | Relational and equality comparison operators. |
 | `OP_ARITH` | `+`, `-`, `*`, `/`, `&` | Arithmetic operators and the `&` string concatenation operator. |
 | `ASSIGN` | `=` | Variable assignment, default/alias binding, and named argument separator. |
@@ -67,7 +68,7 @@ CleanBasic uses natural multi-word BASIC block terminators and clauses. When the
 | `else` | `if` | `"else if"` |
 | `on` | `error` | `"on error"` |
 | `can` | `error` | `"can error"` |
-| `end` | `select`, `if`, `fn`, `type`, `for`, `defer`, `error` | `"end select"`, `"end if"`, `"end fn"`, `"end type"`, `"end for"`, `"end defer"`, `"end error"` |
+| `end` | `select`, `if`, `fn`, `type`, `enum`, `for`, `defer`, `error` | `"end select"`, `"end if"`, `"end fn"`, `"end type"`, `"end enum"`, `"end for"`, `"end defer"`, `"end error"` |
 
 Coalescing these in the lexer keeps the parser LL(1) on block boundaries without requiring arbitrary backtracking.
 
@@ -112,7 +113,7 @@ Unary prefix '+', '-' (right-associative)" as L7
 rectangle "8. parsePostfix
 '.field', '[index]', '(args...)' (left-associative loop)" as L8
 rectangle "9. parsePrimary
-Literals (Number, String, Bool, Null, List [...], Dict {...}),
+Literals (Number, String, Bytes b"...", Bool, Null, List [...], Dict {...}),
 Identifiers, and Parenthesized '( expr )'" as L9
 
 L1 --> L2
@@ -149,7 +150,11 @@ At the top level of a `.cb` file, only four declaration families are legal:
 3. **Struct / Extern Types (`TypeDecl`)**:
    * `[pub] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
    * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`pub`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
-4. **Functions (`FnDecl`)**:
+4. **Enums (`EnumDecl`)**:
+   * `[pub] enum Name [as int] ... end enum` for enumeration types.
+   * `[pub] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
+   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`pub`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
+5. **Functions (`FnDecl`)**:
    * `[pub] [extern] fn name([byref] p as Type, ...) [as ReturnType] [can error]`
    * Note: `as err` is also accepted as a shorthand for a void fallible function (`isFallible = true`, `returnType = void`), alongside standard `[as ReturnType] can error`.
    * If `isExtern` is true and `end fn` is not present, `parseFnDecl()` returns a bodyless extern `FnDecl` immediately after the signature line.

@@ -164,8 +164,34 @@ public:
                                 setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '.push()' on const variable '" + root.name + "'.");
                             }
                         }
+                    } else if (fnSym.name == "slice") {
+                        if (call->args.size() != 2) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'.slice()' requires exactly 2 arguments (start, end).");
+                        }
+                    } else if (fnSym.name == "sliceFrom") {
+                        if (call->args.size() != 1) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'.sliceFrom()' requires exactly 1 argument (start).");
+                        }
+                    } else if (fnSym.name == "fromHex") {
+                        if (call->args.size() != 1) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'fromHex()' requires exactly 1 argument (hex string).");
+                        }
+                    } else if (fnSym.name.size() > 5 && fnSym.name.substr(0, 5) == "readU") {
+                        if (call->args.size() != 1) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'." + fnSym.name + "()' requires exactly 1 argument (offset).");
+                        }
+                    } else if (fnSym.name.size() > 6 && fnSym.name.substr(0, 6) == "writeU") {
+                        if (call->args.size() != 2) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'." + fnSym.name + "()' requires exactly 2 arguments (value, offset).");
+                        }
+                        if (const auto* calleeFa = arena.getExpr<FieldAccess>(call->callee)) {
+                            const auto root = findRootVar(calleeFa->target, scope);
+                            if (root.found && root.isConst) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '." + fnSym.name + "()' on const variable '" + root.name + "'.");
+                            }
+                        }
                     } else {
-                        // len, toStr, toInt, toFloat
+                        // len, toStr, toInt, toFloat, toUtf8, toBytes, toHex
                         if (!call->args.empty()) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'." + fnSym.name + "()' takes 0 arguments.");
                         }
@@ -284,6 +310,15 @@ public:
         if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
             validateExprCalls(fn, bop->left, scope, false);
             validateExprCalls(fn, bop->right, scope, false);
+            const TypeId lt = inferExprType(arena, bop->left, symbols, scope, moduleId);
+            const TypeId rt = inferExprType(arena, bop->right, symbols, scope, moduleId);
+            const bool lEnum = isEnumType(symbols, lt, arena, moduleId);
+            const bool rEnum = isEnumType(symbols, rt, arena, moduleId);
+            if (lEnum || rEnum) {
+                if (lt != rt && lt != symbols.typeAuto && rt != symbols.typeAuto) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "Cannot compare enum with mismatched type (use .toInt() for integer comparison).");
+                }
+            }
             return;
         }
 
@@ -293,6 +328,38 @@ public:
         }
 
         if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
+            if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess->target)) {
+                if (scope.find(tgtIdent->name) == scope.end()) {
+                    const auto enumOpt = resolveEnumSymbol(arena, symbols, moduleId, tgtIdent->name);
+                    if (enumOpt.has_value()) {
+                        if (enumOpt->moduleId != moduleId && !enumOpt->isPub) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'pub').");
+                        }
+                        if (enumOpt->memberValues.count(faccess->fieldName) == 0) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' has no member '" + faccess->fieldName + "'.");
+                        }
+                        return;
+                    }
+                }
+            }
+            if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess->target)) {
+                if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
+                    std::string targetModId;
+                    if (isModuleAliasInScope(symbols, moduleId, modIdent->name, scope, targetModId)) {
+                        const std::string enumKey = symbolKey(targetModId, innerFa->fieldName);
+                        const auto it = symbols.enums.find(enumKey);
+                        if (it != symbols.enums.end()) {
+                            if (!it->second.isPub) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + it->second.name + "' is private to module '" + targetModId + "' (missing 'pub').");
+                            }
+                            if (it->second.memberValues.count(faccess->fieldName) == 0) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + it->second.name + "' has no member '" + faccess->fieldName + "'.");
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
             validateExprCalls(fn, faccess->target, scope, false);
             return;
         }
@@ -356,6 +423,13 @@ public:
                     } else if (valType != INVALID_ID) {
                         varTid = valType;
                     }
+                    const bool varIsEnum = isEnumType(symbols, varTid, arena, moduleId);
+                    const bool valIsEnum = isEnumType(symbols, valType, arena, moduleId);
+                    if (varIsEnum && valType != symbols.typeAuto && valType != varTid) {
+                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign mismatched type to enum variable '" + ident->name + "'.");
+                    } else if (!varIsEnum && valIsEnum && varTid == symbols.typeInt) {
+                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign enum value to 'int' without explicit conversion (use .toInt()).");
+                    }
                     bindLocalVar(scope, ident->name, varTid, false, vassign->isConst, tgtNode.line, tgtNode.col);
                 } else {
                     const auto existing = scope.find(ident->name);
@@ -366,6 +440,13 @@ public:
                     if (existing->second.isConst) {
                         std::string msg = "Cannot reassign const variable '" + ident->name + "'.";
                         setAnalyzerError(tgtNode.line, tgtNode.col, msg);
+                    }
+                    const bool varIsEnum = isEnumType(symbols, existing->second.typeId, arena, moduleId);
+                    const bool valIsEnum = isEnumType(symbols, valType, arena, moduleId);
+                    if (varIsEnum && valType != symbols.typeAuto && valType != existing->second.typeId) {
+                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign mismatched type to enum variable '" + ident->name + "'.");
+                    } else if (!varIsEnum && valIsEnum && existing->second.typeId == symbols.typeInt) {
+                        setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot assign enum value to 'int' without explicit conversion (use .toInt()).");
                     }
                 }
             } else {
@@ -479,8 +560,9 @@ public:
             validateExprCalls(fn, selStmt->target, scope, false);
 
             const TypeId targetTid = inferExprType(arena, selStmt->target, symbols, scope, moduleId);
-            if (targetTid != symbols.typeInt && targetTid != symbols.typeBool && targetTid != symbols.typeStr) {
-                setAnalyzerError(stmtNode.line, stmtNode.col, "select case expression must be of type 'int', 'bool', or 'str'");
+            const bool isEnumTarget = isEnumType(symbols, targetTid, arena, moduleId);
+            if (targetTid != symbols.typeInt && targetTid != symbols.typeBool && targetTid != symbols.typeStr && !isEnumTarget) {
+                setAnalyzerError(stmtNode.line, stmtNode.col, "select case expression must be of type 'int', 'bool', or 'str' (or enum)");
             }
 
             for (const auto& scase : selStmt->cases) {
@@ -654,6 +736,30 @@ public:
                 const std::string keyCopy = tsym.key;
                 symbols.types[keyCopy] = std::move(tsym);
                 arena.findOrAddType(keyCopy, {});
+            } else if (const auto* edecl = arena.getDecl<EnumDecl>(did)) {
+                EnumSymbol esym{};
+                esym.name = edecl->name;
+                esym.moduleId = declNode.moduleId;
+                esym.key = symbolKey(declNode.moduleId, edecl->name);
+                esym.isPub = edecl->isPub;
+                esym.hasExplicitIntType = edecl->hasExplicitIntType;
+                esym.cppName = makeCppTypeName(declNode.moduleId, edecl->name, false);
+                esym.fileName = declNode.fileName;
+                esym.line = declNode.nameLine;
+                esym.col = declNode.nameCol;
+                esym.endLine = declNode.endLine;
+                std::unordered_set<std::string> seen;
+                for (const auto& mem : edecl->members) {
+                    if (seen.count(mem.name) > 0) {
+                        throw makeError("AnalyzerError", "Duplicate enum member '" + mem.name + "' in enum '" + edecl->name + "'.", declNode.fileName, declNode.line, declNode.col);
+                    }
+                    seen.insert(mem.name);
+                    esym.members.push_back(mem);
+                    esym.memberValues[mem.name] = mem.value;
+                }
+                const std::string keyCopy = esym.key;
+                symbols.enums[keyCopy] = std::move(esym);
+                arena.findOrAddType(keyCopy, {});
             }
         }
 
@@ -690,7 +796,12 @@ public:
                 if (fdecl->returnType != INVALID_ID) {
                     fsym.returnType = resolveAlias(arena, symbols, declNode.moduleId, fdecl->returnType);
                 }
-                symbols.functions[fsym.key] = std::move(fsym);
+                const auto existing = symbols.functions.find(fsym.key);
+                if (existing != symbols.functions.end()) {
+                    existing->second.overloads.push_back(std::move(fsym));
+                } else {
+                    symbols.functions[fsym.key] = std::move(fsym);
+                }
             }
         }
 

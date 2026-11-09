@@ -39,6 +39,197 @@ inline std::string cbToStr(bool val) {
 inline std::string cbToStr(const CbError& val) { return val.msg; }
 inline bool cbHasError(const CbError& val) { return !val.msg.empty() || val.code != 0; }
 
+inline std::string cbToStr(const std::vector<uint8_t>& val) {
+    return "<bytes len=" + std::to_string(val.size()) + ">";
+}
+
+inline std::vector<uint8_t> cbBytesSlice(const std::vector<uint8_t>& b, int64_t start, int64_t end) {
+    const int64_t n = static_cast<int64_t>(b.size());
+    if (start < 0) start = 0;
+    if (end > n) end = n;
+    if (start >= end) return std::vector<uint8_t>{};
+    return std::vector<uint8_t>(b.begin() + static_cast<size_t>(start), b.begin() + static_cast<size_t>(end));
+}
+
+inline std::vector<uint8_t> cbBytesSliceFrom(const std::vector<uint8_t>& b, int64_t start) {
+    return cbBytesSlice(b, start, static_cast<int64_t>(b.size()));
+}
+
+inline std::tuple<std::string, CbError> cbBytesToUtf8(const std::vector<uint8_t>& b) {
+    size_t i = 0;
+    const size_t n = b.size();
+    while (i < n) {
+        uint8_t byte = b[i];
+        if (byte <= 0x7F) {
+            i += 1;
+        } else if ((byte & 0xE0) == 0xC0) {
+            if (i + 1 >= n || (b[i + 1] & 0xC0) != 0x80) return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
+            i += 2;
+        } else if ((byte & 0xF0) == 0xE0) {
+            if (i + 2 >= n || (b[i + 1] & 0xC0) != 0x80 || (b[i + 2] & 0xC0) != 0x80) return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
+            i += 3;
+        } else if ((byte & 0xF8) == 0xF0) {
+            if (i + 3 >= n || (b[i + 1] & 0xC0) != 0x80 || (b[i + 2] & 0xC0) != 0x80 || (b[i + 3] & 0xC0) != 0x80) return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
+            i += 4;
+        } else {
+            return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
+        }
+    }
+    return {std::string(reinterpret_cast<const char*>(b.data()), b.size()), CbError{"", 0}};
+}
+
+inline std::vector<uint8_t> cbStrToBytes(const std::string& s) {
+    return std::vector<uint8_t>(s.begin(), s.end());
+}
+
+inline std::string cbBytesToHex(const std::vector<uint8_t>& b) {
+    static const char hexChars[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(b.size() * 2);
+    for (uint8_t byte : b) {
+        out.push_back(hexChars[(byte >> 4) & 0x0F]);
+        out.push_back(hexChars[byte & 0x0F]);
+    }
+    return out;
+}
+
+inline std::tuple<std::vector<uint8_t>, CbError> cbBytesFromHex(const std::string& hex) {
+    if (hex.size() % 2 != 0) {
+        return {std::vector<uint8_t>{}, CbError{"Invalid hexadecimal string: length must be even", 400}};
+    }
+    auto hexVal = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::vector<uint8_t> out;
+    out.reserve(hex.size() / 2);
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        int v1 = hexVal(hex[i]);
+        int v2 = hexVal(hex[i + 1]);
+        if (v1 == -1 || v2 == -1) {
+            return {std::vector<uint8_t>{}, CbError{"Invalid hexadecimal character in string", 400}};
+        }
+        out.push_back(static_cast<uint8_t>((v1 << 4) | v2));
+    }
+    return {out, CbError{"", 0}};
+}
+
+inline int64_t cbBytesReadU16Le(const std::vector<uint8_t>& b, int64_t offset) {
+    if (offset < 0 || offset + 2 > static_cast<int64_t>(b.size())) return 0;
+    const size_t off = static_cast<size_t>(offset);
+    return static_cast<int64_t>(static_cast<uint16_t>(b[off]) | (static_cast<uint16_t>(b[off + 1]) << 8));
+}
+
+inline int64_t cbBytesReadU16Be(const std::vector<uint8_t>& b, int64_t offset) {
+    if (offset < 0 || offset + 2 > static_cast<int64_t>(b.size())) return 0;
+    const size_t off = static_cast<size_t>(offset);
+    return static_cast<int64_t>((static_cast<uint16_t>(b[off]) << 8) | static_cast<uint16_t>(b[off + 1]));
+}
+
+inline int64_t cbBytesReadU32Le(const std::vector<uint8_t>& b, int64_t offset) {
+    if (offset < 0 || offset + 4 > static_cast<int64_t>(b.size())) return 0;
+    const size_t off = static_cast<size_t>(offset);
+    uint32_t val = static_cast<uint32_t>(b[off]) |
+                   (static_cast<uint32_t>(b[off + 1]) << 8) |
+                   (static_cast<uint32_t>(b[off + 2]) << 16) |
+                   (static_cast<uint32_t>(b[off + 3]) << 24);
+    return static_cast<int64_t>(val);
+}
+
+inline int64_t cbBytesReadU32Be(const std::vector<uint8_t>& b, int64_t offset) {
+    if (offset < 0 || offset + 4 > static_cast<int64_t>(b.size())) return 0;
+    const size_t off = static_cast<size_t>(offset);
+    uint32_t val = (static_cast<uint32_t>(b[off]) << 24) |
+                   (static_cast<uint32_t>(b[off + 1]) << 16) |
+                   (static_cast<uint32_t>(b[off + 2]) << 8) |
+                   static_cast<uint32_t>(b[off + 3]);
+    return static_cast<int64_t>(val);
+}
+
+inline int64_t cbBytesReadU64Le(const std::vector<uint8_t>& b, int64_t offset) {
+    if (offset < 0 || offset + 8 > static_cast<int64_t>(b.size())) return 0;
+    const size_t off = static_cast<size_t>(offset);
+    uint64_t val = 0;
+    for (size_t i = 0; i < 8; ++i) {
+        val |= (static_cast<uint64_t>(b[off + i]) << (i * 8));
+    }
+    return static_cast<int64_t>(val);
+}
+
+inline int64_t cbBytesReadU64Be(const std::vector<uint8_t>& b, int64_t offset) {
+    if (offset < 0 || offset + 8 > static_cast<int64_t>(b.size())) return 0;
+    const size_t off = static_cast<size_t>(offset);
+    uint64_t val = 0;
+    for (size_t i = 0; i < 8; ++i) {
+        val = (val << 8) | static_cast<uint64_t>(b[off + i]);
+    }
+    return static_cast<int64_t>(val);
+}
+
+inline void cbBytesWriteU16Le(std::vector<uint8_t>& b, int64_t val, int64_t offset) {
+    if (offset < 0) return;
+    const size_t needed = static_cast<size_t>(offset + 2);
+    if (b.size() < needed) b.resize(needed, 0);
+    const size_t off = static_cast<size_t>(offset);
+    b[off] = static_cast<uint8_t>(val & 0xFF);
+    b[off + 1] = static_cast<uint8_t>((val >> 8) & 0xFF);
+}
+
+inline void cbBytesWriteU16Be(std::vector<uint8_t>& b, int64_t val, int64_t offset) {
+    if (offset < 0) return;
+    const size_t needed = static_cast<size_t>(offset + 2);
+    if (b.size() < needed) b.resize(needed, 0);
+    const size_t off = static_cast<size_t>(offset);
+    b[off] = static_cast<uint8_t>((val >> 8) & 0xFF);
+    b[off + 1] = static_cast<uint8_t>(val & 0xFF);
+}
+
+inline void cbBytesWriteU32Le(std::vector<uint8_t>& b, int64_t val, int64_t offset) {
+    if (offset < 0) return;
+    const size_t needed = static_cast<size_t>(offset + 4);
+    if (b.size() < needed) b.resize(needed, 0);
+    const size_t off = static_cast<size_t>(offset);
+    b[off] = static_cast<uint8_t>(val & 0xFF);
+    b[off + 1] = static_cast<uint8_t>((val >> 8) & 0xFF);
+    b[off + 2] = static_cast<uint8_t>((val >> 16) & 0xFF);
+    b[off + 3] = static_cast<uint8_t>((val >> 24) & 0xFF);
+}
+
+inline void cbBytesWriteU32Be(std::vector<uint8_t>& b, int64_t val, int64_t offset) {
+    if (offset < 0) return;
+    const size_t needed = static_cast<size_t>(offset + 4);
+    if (b.size() < needed) b.resize(needed, 0);
+    const size_t off = static_cast<size_t>(offset);
+    b[off] = static_cast<uint8_t>((val >> 24) & 0xFF);
+    b[off + 1] = static_cast<uint8_t>((val >> 16) & 0xFF);
+    b[off + 2] = static_cast<uint8_t>((val >> 8) & 0xFF);
+    b[off + 3] = static_cast<uint8_t>(val & 0xFF);
+}
+
+inline void cbBytesWriteU64Le(std::vector<uint8_t>& b, int64_t val, int64_t offset) {
+    if (offset < 0) return;
+    const size_t needed = static_cast<size_t>(offset + 8);
+    if (b.size() < needed) b.resize(needed, 0);
+    const size_t off = static_cast<size_t>(offset);
+    uint64_t uval = static_cast<uint64_t>(val);
+    for (size_t i = 0; i < 8; ++i) {
+        b[off + i] = static_cast<uint8_t>((uval >> (i * 8)) & 0xFF);
+    }
+}
+
+inline void cbBytesWriteU64Be(std::vector<uint8_t>& b, int64_t val, int64_t offset) {
+    if (offset < 0) return;
+    const size_t needed = static_cast<size_t>(offset + 8);
+    if (b.size() < needed) b.resize(needed, 0);
+    const size_t off = static_cast<size_t>(offset);
+    uint64_t uval = static_cast<uint64_t>(val);
+    for (size_t i = 0; i < 8; ++i) {
+        b[off + 7 - i] = static_cast<uint8_t>((uval >> (i * 8)) & 0xFF);
+    }
+}
+
 inline std::vector<std::string>& cbRuntimeArgs() {
     static std::vector<std::string> args;
     return args;
@@ -57,6 +248,28 @@ inline std::string joinStrings(const std::vector<std::string>& items, std::strin
         out += items[i];
     }
     return out;
+}
+inline std::string sanitizeCppIdent(std::string_view name) {
+    static const std::unordered_set<std::string_view> cppKeywords = {
+        "alignas", "alignof", "and_eq", "asm", "atomic_cancel", "atomic_commit",
+        "atomic_noexcept", "auto", "bitand", "bitor", "bool", "break", "case",
+        "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl",
+        "concept", "const", "consteval", "constexpr", "constinit", "const_cast",
+        "continue", "co_await", "co_return", "co_yield", "decltype", "default",
+        "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit",
+        "export", "extern", "false", "float", "for", "friend", "goto", "if",
+        "inline", "int", "long", "mutable", "namespace", "new", "noexcept",
+        "not_eq", "nullptr", "operator", "or_eq", "private", "protected", "public",
+        "reflexpr", "register", "reinterpret_cast", "requires", "return", "short",
+        "signed", "sizeof", "static", "static_assert", "static_cast", "struct",
+        "switch", "synchronized", "template", "this", "thread_local", "throw",
+        "true", "try", "typedef", "typeid", "typename", "union", "unsigned",
+        "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq"
+    };
+    if (cppKeywords.count(name) > 0) {
+        return std::string(name) + "_";
+    }
+    return std::string(name);
 }
 
 class Emitter {
@@ -98,6 +311,7 @@ public:
         if (t.name == "float") return "double";
         if (t.name == "bool") return "bool";
         if (t.name == "str") return "std::string";
+        if (t.name == "bytes") return "std::vector<uint8_t>";
         if (t.name == "err") return "CbError";
         if (t.name == "void") return "void";
         if (t.name == "auto") return "auto";
@@ -124,6 +338,9 @@ public:
         const std::string key = resolveSymbolKey(symbols, modId, t.name);
         if (symbols.types.count(key)) {
             return symbols.types.at(key).cppName;
+        }
+        if (symbols.enums.count(key)) {
+            return symbols.enums.at(key).cppName;
         }
         if (symbols.aliases.count(key)) {
             return symbols.aliases.at(key).cppName;
@@ -159,6 +376,7 @@ public:
         if (resolved.name == "float") return "0.0";
         if (resolved.name == "bool") return "false";
         if (resolved.name == "str") return "std::string("")";
+        if (resolved.name == "bytes") return "std::vector<uint8_t>{}";
         return mapTypeNode(modId, resolved) + "{}";
     }
 
@@ -188,6 +406,10 @@ public:
         if (actual.name == "int" || actual.name == "float" ||
             actual.name == "bool" || actual.name == "cptr" ||
             actual.name == "void" || actual.name == "auto") {
+            return false;
+        }
+        const std::string k = resolveSymbolKey(symbols, modId, actual.name);
+        if (symbols.enums.count(actual.name) > 0 || symbols.enums.count(k) > 0) {
             return false;
         }
         return true;
@@ -245,6 +467,7 @@ public:
     void emitExprStmt(const FnDecl& fn, const ExprStmt& stmt, std::unordered_map<std::string, VarSymbol>& scope, std::unordered_set<std::string>& declaredVars);
     void emitReturn(const FnDecl& fn, const ReturnStmt& stmt, const std::unordered_map<std::string, VarSymbol>& scope);
     void emitStructDecl(const TypeDecl& td);
+    void emitEnumDecl(const EnumDecl& ed);
     void emitFnDecl(const FnDecl& fn);
     std::string emitProgram(const Program& program);
 };

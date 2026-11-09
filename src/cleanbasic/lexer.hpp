@@ -40,7 +40,7 @@ inline bool isDigitChar(char c) {
 
 inline bool isSingleKeyword(std::string_view word) {
     static const std::vector<std::string_view> keywords = {
-        "import", "as", "pub", "extern", "alias", "type", "fn",
+        "import", "as", "pub", "extern", "alias", "type", "enum", "fn",
         "dim", "const", "byref", "if", "else",
         "for", "in", "to", "step", "while", "case", "defer", "on", "error",
         "return", "break", "continue", "and", "or", "not",
@@ -56,7 +56,7 @@ inline bool isSingleKeyword(std::string_view word) {
 
 inline bool isTypeKeyword(std::string_view word) {
     static const std::vector<std::string_view> typeKws = {
-        "int", "float", "bool", "str", "list", "dict", "err", "cptr"
+        "int", "float", "bool", "str", "bytes", "list", "dict", "err", "cptr"
     };
     for (const auto& tk : typeKws) {
         if (word == tk) {
@@ -87,7 +87,7 @@ inline bool matchSecondWordForMultiKw(std::string_view first, std::string_view s
     }
     if (first == "end") {
         return second == "select" || second == "if" || second == "fn" ||
-               second == "type" || second == "for" || second == "while" ||
+               second == "type" || second == "enum" || second == "for" || second == "while" ||
                second == "defer" || second == "error";
     }
     return false;
@@ -156,6 +156,44 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
         }
         if (ch == '!' && !(i + 1 < n && code[i + 1] == '=')) {
             return LexResult{false, {}, makeError("LexerError", "C-style operator '!' is forbidden in CleanBasic; use 'not' instead.", fileStr, lineNum, col)};
+        }
+
+        // 5a. Byte string literal: b"..." or B"..."
+        if ((ch == 'b' || ch == 'B') && i + 1 < n && code[i + 1] == '"') {
+            const char quote = '"';
+            const std::size_t startIdx = i;
+            i += 2;
+            bool closed = false;
+            while (i < n && code[i] != nlCh) {
+                if (code[i] == backslashChar && i + 1 < n) {
+                    i += 2;
+                    continue;
+                }
+                if (code[i] == quote) {
+                    i += 1;
+                    closed = true;
+                    break;
+                }
+                i += 1;
+            }
+            if (!closed) {
+                res.ok = false;
+                res.error = makeError(
+                    "LexerError",
+                    "Unterminated byte string literal",
+                    fileStr,
+                    lineNum,
+                    col
+                );
+                return res;
+            }
+            Token tok{};
+            tok.kind = "BYTES";
+            tok.value = std::string(code.substr(startIdx, i - startIdx));
+            tok.line = lineNum;
+            tok.col = col;
+            res.tokens.push_back(std::move(tok));
+            continue;
         }
 
         // 5. String literal

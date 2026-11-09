@@ -69,6 +69,11 @@ struct StringLiteral {
     std::string value;
 };
 
+struct BytesLiteral {
+    std::string raw;
+    std::vector<uint8_t> value;
+};
+
 struct BoolLiteral {
     bool value = false;
 };
@@ -129,6 +134,7 @@ struct DictLiteral {
 using ExprVariant = std::variant<
     NumberLiteral,
     StringLiteral,
+    BytesLiteral,
     BoolLiteral,
     NullLiteral,
     Identifier,
@@ -317,6 +323,19 @@ struct TypeDecl {
     bool isExtern = false;
 };
 
+struct EnumMember {
+    std::string name;
+    bool hasValue = false;
+    int64_t value = 0;
+};
+
+struct EnumDecl {
+    std::string name;
+    std::vector<EnumMember> members;
+    bool isPub = false;
+    bool hasExplicitIntType = false;
+};
+
 struct FnDecl {
     std::string name;
     std::vector<Param> params;
@@ -331,6 +350,7 @@ using DeclVariant = std::variant<
     ImportDecl,
     AliasDecl,
     TypeDecl,
+    EnumDecl,
     FnDecl
 >;
 

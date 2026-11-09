@@ -93,6 +93,18 @@ inline std::string Emitter::emitExpr(
         return "std::string(" + q + str->value + q + ")";
     }
 
+    if (const auto* b = arena.getExpr<BytesLiteral>(exprId)) {
+        std::string res = "std::vector<uint8_t>{";
+        for (size_t i = 0; i < b->value.size(); ++i) {
+            res += std::to_string(static_cast<int>(b->value[i]));
+            if (i + 1 < b->value.size()) {
+                res += ", ";
+            }
+        }
+        res += "}";
+        return res;
+    }
+
     if (const auto* b = arena.getExpr<BoolLiteral>(exprId)) {
         if (b->value) {
             return "true";
@@ -134,6 +146,26 @@ inline std::string Emitter::emitExpr(
     }
 
     if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
+        if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess->target)) {
+            if (scope.find(tgtIdent->name) == scope.end()) {
+                const auto enumOpt = resolveEnumSymbol(arena, symbols, currentModuleId, tgtIdent->name);
+                if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
+                    return enumOpt->cppName + "::" + sanitizeCppIdent(faccess->fieldName);
+                }
+            }
+        }
+        if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess->target)) {
+            if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
+                std::string targetModId;
+                if (isModuleAliasInScope(symbols, currentModuleId, modIdent->name, scope, targetModId)) {
+                    const std::string enumKey = symbolKey(targetModId, innerFa->fieldName);
+                    const auto it = symbols.enums.find(enumKey);
+                    if (it != symbols.enums.end() && it->second.memberValues.count(faccess->fieldName) > 0) {
+                        return it->second.cppName + "::" + sanitizeCppIdent(faccess->fieldName);
+                    }
+                }
+            }
+        }
         return emitExpr(faccess->target, scope) + "." + faccess->fieldName;
     }
 
@@ -190,6 +222,11 @@ inline std::string Emitter::emitExpr(
                 if (fnSym->name == "len") {
                     return "static_cast<int64_t>(" + recvCpp + ".size())";
                 } else if (fnSym->name == "push") {
+                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
+                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
+                    if (recvNode.name == "bytes") {
+                        return recvCpp + ".push_back(static_cast<uint8_t>(" + emitExpr(call->args[0], scope) + "))";
+                    }
                     return recvCpp + ".push_back(" + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "toStr") {
                     return "cbToStr(" + recvCpp + ")";
@@ -197,6 +234,42 @@ inline std::string Emitter::emitExpr(
                     return "static_cast<int64_t>(" + recvCpp + ")";
                 } else if (fnSym->name == "toFloat") {
                     return "static_cast<double>(" + recvCpp + ")";
+                } else if (fnSym->name == "slice") {
+                    return "cbBytesSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                } else if (fnSym->name == "sliceFrom") {
+                    return "cbBytesSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "toUtf8") {
+                    return "cbBytesToUtf8(" + recvCpp + ")";
+                } else if (fnSym->name == "toBytes") {
+                    return "cbStrToBytes(" + recvCpp + ")";
+                } else if (fnSym->name == "toHex") {
+                    return "cbBytesToHex(" + recvCpp + ")";
+                } else if (fnSym->name == "fromHex") {
+                    return "cbBytesFromHex(" + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "readU16Le") {
+                    return "cbBytesReadU16Le(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "readU16Be") {
+                    return "cbBytesReadU16Be(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "readU32Le") {
+                    return "cbBytesReadU32Le(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "readU32Be") {
+                    return "cbBytesReadU32Be(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "readU64Le") {
+                    return "cbBytesReadU64Le(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "readU64Be") {
+                    return "cbBytesReadU64Be(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "writeU16Le") {
+                    return "cbBytesWriteU16Le(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                } else if (fnSym->name == "writeU16Be") {
+                    return "cbBytesWriteU16Be(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                } else if (fnSym->name == "writeU32Le") {
+                    return "cbBytesWriteU32Le(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                } else if (fnSym->name == "writeU32Be") {
+                    return "cbBytesWriteU32Be(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                } else if (fnSym->name == "writeU64Le") {
+                    return "cbBytesWriteU64Le(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                } else if (fnSym->name == "writeU64Be") {
+                    return "cbBytesWriteU64Be(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                 }
             }
 
@@ -287,6 +360,8 @@ inline std::string Emitter::buildErrorBubbleReturn(
     std::string elem = "{}";
     if (tnode.name == "str" && tnode.typeArgs.empty()) {
         elem = "std::string{}";
+    } else if (tnode.name == "bytes" && tnode.typeArgs.empty()) {
+        elem = "std::vector<uint8_t>{}";
     } else if (tnode.name == "list" || tnode.name == "dict" || symbols.types.find(tnode.name) != symbols.types.end()) {
         elem = mapTypeNode(currentModuleId, tnode) + "{}";
     }
@@ -829,6 +904,41 @@ inline void Emitter::emitStmt(
     }
 }
 
+inline void Emitter::emitEnumDecl(const EnumDecl& ed) {
+    const std::string key = resolveSymbolKey(symbols, currentModuleId, ed.name);
+    std::string cppName = ed.name;
+    if (symbols.enums.count(key) > 0) {
+        cppName = symbols.enums.at(key).cppName;
+    }
+    emitLine("enum class " + cppName + " : int64_t {");
+    indentLevel += 1;
+    for (size_t i = 0; i < ed.members.size(); ++i) {
+        const auto& m = ed.members[i];
+        std::string line = sanitizeCppIdent(m.name);
+        if (m.hasValue) {
+            line += " = " + std::to_string(m.value);
+        }
+        if (i + 1 < ed.members.size()) {
+            line += ",";
+        }
+        emitLine(line);
+    }
+    indentLevel -= 1;
+    emitLine("};");
+    emitLine("inline std::string cbToStr(" + cppName + " val) {");
+    indentLevel += 1;
+    emitLine("switch (val) {");
+    indentLevel += 1;
+    const std::string q(1, '"');
+    for (const auto& m : ed.members) {
+        emitLine("case " + cppName + "::" + sanitizeCppIdent(m.name) + ": return std::string(" + q + m.name + q + ");");
+    }
+    emitLine("default: return std::string();");
+    indentLevel -= 1;
+    emitLine("}");
+    indentLevel -= 1;
+    emitLine("}");
+}
 inline void Emitter::emitStructDecl(const TypeDecl& td) {
     const std::string key = resolveSymbolKey(symbols, currentModuleId, td.name);
     std::string cppName = td.name;
@@ -908,18 +1018,44 @@ inline std::string Emitter::emitProgram(const Program& program) {
         }
     }
 
+    std::vector<std::pair<std::string, EnumDecl>> enumDecls;
     std::vector<std::pair<std::string, TypeDecl>> structDecls;
     std::vector<std::pair<std::string, AliasDecl>> aliasDecls;
     std::vector<std::pair<std::string, FnDecl>> fnDecls;
+
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
         const auto& declNode = arena.decls[did];
         if (const auto* td = arena.getDecl<TypeDecl>(did)) {
             if (!td->isExtern) structDecls.push_back({declNode.moduleId, *td});
+        } else if (const auto* ed = arena.getDecl<EnumDecl>(did)) {
+            enumDecls.push_back({declNode.moduleId, *ed});
         } else if (const auto* ad = arena.getDecl<AliasDecl>(did)) {
             aliasDecls.push_back({declNode.moduleId, *ad});
         } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
             if (!fd->isExtern) fnDecls.push_back({declNode.moduleId, *fd});
+        }
+    }
+
+    if (!enumDecls.empty()) {
+        emitLine();
+        for (const auto& pair : enumDecls) {
+            currentModuleId = pair.first;
+            const std::string key = resolveSymbolKey(symbols, currentModuleId, pair.second.name);
+            std::string cppName = pair.second.name;
+            if (symbols.enums.count(key) > 0) {
+                cppName = symbols.enums.at(key).cppName;
+            }
+            emitLine("enum class " + cppName + " : int64_t;");
+        }
+    }
+
+    if (!enumDecls.empty()) {
+        emitLine();
+        for (const auto& pair : enumDecls) {
+            currentModuleId = pair.first;
+            emitEnumDecl(pair.second);
+            emitLine();
         }
     }
 

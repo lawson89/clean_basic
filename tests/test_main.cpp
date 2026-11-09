@@ -850,6 +850,10 @@ TEST_CASE("End-to-end fixture: cptr interop", "[e2e]") {
 TEST_CASE("End-to-end fixture: fibonacci sequence", "[e2e]") {
     cb::testE2E::runE2EFixture("fibonacci", "tests/cases/fibonacci.cb");
 }
+
+TEST_CASE("End-to-end fixture: enums and bytes", "[e2e]") {
+    cb::testE2E::runE2EFixture("enumsAndBytes", "tests/cases/enums_and_bytes.cb");
+}
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
     const std::string artifactDir = "build/testArtifacts/cliBuild";
     std::error_code ec;
@@ -2842,4 +2846,108 @@ end fn
     }
 }
 
+
+TEST_CASE("Enums and bytes semantic analysis and code generation", "[enums][bytes]") {
+    SECTION("Analyzer rejects implicit conversion between enum and int") {
+        const std::string assignToInt = R"(
+enum Color
+    red
+    green
+end enum
+
+fn main()
+    dim c = Color.red
+    dim x as int = c
+end fn
+)";
+        const auto res1 = cb::transpileSource(assignToInt, "enumToInt.cb");
+        CHECK_FALSE(res1.ok);
+        CHECK(res1.error.message.find("Cannot assign enum value to 'int'") != std::string::npos);
+
+        const std::string assignFromInt = R"(
+enum Color
+    red
+    green
+end enum
+
+fn main()
+    dim c as Color = 1
+end fn
+)";
+        const auto res2 = cb::transpileSource(assignFromInt, "intToEnum.cb");
+        CHECK_FALSE(res2.ok);
+        CHECK(res2.error.message.find("Cannot assign mismatched type to enum variable") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects unknown enum member") {
+        const std::string badMember = R"(
+enum Color
+    red
+    green
+end enum
+
+fn main()
+    dim c = Color.blue
+end fn
+)";
+        const auto res = cb::transpileSource(badMember, "badMember.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("has no member 'blue'") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects mutating bytes methods on const variables") {
+        const std::string constPush = R"(
+fn main()
+    const b = b"hello"
+    b.push(65)
+end fn
+)";
+        const auto resPush = cb::transpileSource(constPush, "constPush.cb");
+        CHECK_FALSE(resPush.ok);
+        CHECK(resPush.error.message.find("Cannot call '.push()' on const variable 'b'") != std::string::npos);
+
+        const std::string constWrite = R"(
+fn main()
+    const b = b"hello"
+    b.writeU16Le(1234, 0)
+end fn
+)";
+        const auto resWrite = cb::transpileSource(constWrite, "constWrite.cb");
+        CHECK_FALSE(resWrite.ok);
+        CHECK(resWrite.error.message.find("Cannot call '.writeU16Le()' on const variable 'b'") != std::string::npos);
+    }
+
+    SECTION("Analyzer validates select case matching on enum types") {
+        const std::string mismatchedEnumCase = R"(
+enum Color
+    red
+end enum
+enum Direction
+    north
+end enum
+
+fn main()
+    dim c = Color.red
+    select case c
+        case Direction.north
+            print("no")
+    end select
+end fn
+)";
+        const auto res = cb::transpileSource(mismatchedEnumCase, "mismatchedEnumCase.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("case expression type does not match select case target type") != std::string::npos);
+    }
+
+    SECTION("Lexer rejects invalid byte literal hex escape") {
+        const std::string badHex = R"(
+fn main()
+    dim b = b"\xZZ"
+end fn
+)";
+        const auto res = cb::transpileSource(badHex, "badHex.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.message.find("Invalid hexadecimal escape") != std::string::npos);
+    }
+}
 

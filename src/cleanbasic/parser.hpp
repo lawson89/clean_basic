@@ -31,6 +31,67 @@ inline std::string stripQuotes(std::string_view raw) {
     return std::string(raw);
 }
 
+inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string* errorOut = nullptr) {
+    std::vector<uint8_t> bytes;
+    if (raw.size() < 3) {
+        return bytes;
+    }
+    constexpr char backslashChar = 92;
+    size_t i = 2; // skip b" or B"
+    size_t end = raw.size() - 1; // skip trailing "
+    while (i < end) {
+        if (raw[i] == backslashChar && i + 1 < end) {
+            char esc = raw[i + 1];
+            if (esc == 'n') {
+                bytes.push_back(static_cast<uint8_t>(10));
+                i += 2;
+            } else if (esc == 'r') {
+                bytes.push_back(static_cast<uint8_t>(13));
+                i += 2;
+            } else if (esc == 't') {
+                bytes.push_back(static_cast<uint8_t>(9));
+                i += 2;
+            } else if (esc == '0') {
+                bytes.push_back(static_cast<uint8_t>(0));
+                i += 2;
+            } else if (esc == backslashChar) {
+                bytes.push_back(static_cast<uint8_t>(92));
+                i += 2;
+            } else if (esc == '"') {
+                bytes.push_back(static_cast<uint8_t>('"'));
+                i += 2;
+            } else if (esc == 'x' || esc == 'X') {
+                if (i + 3 >= end) {
+                    if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
+                    return bytes;
+                }
+                char h1 = raw[i + 2];
+                char h2 = raw[i + 3];
+                auto hexVal = [](char c) -> int {
+                    if (c >= '0' && c <= '9') return c - '0';
+                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                    return -1;
+                };
+                int v1 = hexVal(h1);
+                int v2 = hexVal(h2);
+                if (v1 == -1 || v2 == -1) {
+                    if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
+                    return bytes;
+                }
+                bytes.push_back(static_cast<uint8_t>((v1 << 4) | v2));
+                i += 4;
+            } else {
+                bytes.push_back(static_cast<uint8_t>(esc));
+                i += 2;
+            }
+        } else {
+            bytes.push_back(static_cast<uint8_t>(raw[i]));
+            i += 1;
+        }
+    }
+    return bytes;
+}
 // ==========================================
 // Stateful Parser Class
 // ==========================================
@@ -178,6 +239,15 @@ public:
         if (check("STRING")) {
             const Token strTok = match("STRING");
             return arena.addExpr(strTok.line, strTok.col, StringLiteral{stripQuotes(strTok.value)});
+        }
+        if (check("BYTES")) {
+            const Token bTok = match("BYTES");
+            std::string errStr;
+            auto decoded = decodeBytesLiteral(bTok.value, &errStr);
+            if (!errStr.empty()) {
+                setParseError(bTok, errStr);
+            }
+            return arena.addExpr(bTok.line, bTok.col, BytesLiteral{bTok.value, std::move(decoded)});
         }
         if (check("KEYWORD", "true") || check("KEYWORD", "false")) {
             const Token bTok = match("KEYWORD");
@@ -775,6 +845,7 @@ public:
                 check("KEYWORD", "extern") ||
                 check("KEYWORD", "fn") ||
                 check("KEYWORD", "type") ||
+                check("KEYWORD", "enum") ||
                 check("KEYWORD", "alias") ||
                 check("KEYWORD", "import") ||
                 check("KEYWORD", "import header") ||
@@ -812,6 +883,65 @@ public:
         decl.fields = std::move(fields);
         decl.isPub = isPub;
         decl.isExtern = isExtern;
+        return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, endTok.line, nameTok.line, nameTok.col);
+    }
+
+    DeclId parseEnumDecl(bool isPub, const Token& startTok) {
+        match("KEYWORD", "enum");
+        const Token nameTok = match("IDENT");
+        bool hasExplicitIntType = false;
+        if (check("KEYWORD", "as")) {
+            match("KEYWORD", "as");
+            match("TYPE_KW", "int");
+            hasExplicitIntType = true;
+        }
+        expectNewlineOrEof();
+
+        std::vector<EnumMember> members;
+        int64_t nextAutoValue = 0;
+
+        while (!check("KEYWORD", "end enum")) {
+            if (check("EOF")) {
+                setParseError(current(), "Unclosed 'enum " + nameTok.value + "', expected 'end enum'");
+            }
+            const Token memberTok = match("IDENT");
+            bool hasVal = false;
+            int64_t memberVal = nextAutoValue;
+            if (check("ASSIGN")) {
+                match("ASSIGN");
+                bool isNeg = false;
+                if (check("OP_ARITH", "-")) {
+                    match("OP_ARITH", "-");
+                    isNeg = true;
+                } else if (check("OP_ARITH", "+")) {
+                    match("OP_ARITH", "+");
+                }
+                const Token numTok = match("NUMBER");
+                if (numTok.value.find('.') != std::string::npos) {
+                    setParseError(numTok, "Enum member value must be an integer");
+                }
+                hasVal = true;
+                int64_t parsed = std::stoll(numTok.value);
+                if (isNeg) {
+                    parsed = -parsed;
+                }
+                memberVal = parsed;
+                nextAutoValue = memberVal + 1;
+            } else {
+                nextAutoValue += 1;
+            }
+            members.push_back(EnumMember{memberTok.value, hasVal, memberVal});
+            expectNewlineOrEof();
+        }
+
+        const Token endTok = match("KEYWORD", "end enum");
+        expectNewlineOrEof();
+
+        EnumDecl decl{};
+        decl.name = nameTok.value;
+        decl.members = std::move(members);
+        decl.isPub = isPub;
+        decl.hasExplicitIntType = hasExplicitIntType;
         return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, endTok.line, nameTok.line, nameTok.col);
     }
 
@@ -933,11 +1063,18 @@ public:
             return parseTypeDecl(isPub, isExtern, tok);
         }
 
+        if (check("KEYWORD", "enum")) {
+            if (isExtern) {
+                setParseError(current(), "'extern' cannot be applied to 'enum'");
+            }
+            return parseEnumDecl(isPub, tok);
+        }
+
         if (check("KEYWORD", "fn")) {
             return parseFnDecl(isPub, isExtern, tok);
         }
 
-        setParseError(current(), "Expected top-level declaration ('import', 'alias', 'type', or 'fn')");
+        setParseError(current(), "Expected top-level declaration ('import', 'alias', 'type', 'enum', or 'fn')");
     }
 
     Program parseProgram() {
