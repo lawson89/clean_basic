@@ -1,6 +1,7 @@
 #ifndef CLEANBASIC_STDLIB_OS_BRIDGE_HPP
 #define CLEANBASIC_STDLIB_OS_BRIDGE_HPP
 
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,15 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 inline std::vector<std::string> cbOsArgs() {
     return cbRuntimeArgs();
@@ -105,6 +115,38 @@ inline std::string cbOsPlatform() {
     return "macos";
 #else
     return "linux";
+#endif
+}
+
+inline std::string cbOsExePath() {
+#if defined(_WIN32)
+    std::array<char, 4096> buf{};
+    const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (len > 0 && len < buf.size()) {
+        std::error_code ec;
+        const std::filesystem::path p(std::string(buf.data(), static_cast<size_t>(len)));
+        return p.generic_string();
+    }
+    return "";
+#elif defined(__APPLE__)
+    std::array<char, 4096> buf{};
+    uint32_t size = static_cast<uint32_t>(buf.size());
+    if (_NSGetExecutablePath(buf.data(), &size) == 0) {
+        std::error_code ec;
+        const std::filesystem::path p = std::filesystem::canonical(std::filesystem::path(buf.data()), ec);
+        if (!ec) {
+            return p.generic_string();
+        }
+        return std::filesystem::path(buf.data()).generic_string();
+    }
+    return "";
+#else
+    std::error_code ec;
+    const std::filesystem::path exeP = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !exeP.empty()) {
+        return exeP.generic_string();
+    }
+    return "";
 #endif
 }
 

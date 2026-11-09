@@ -25,6 +25,7 @@ struct TypeSymbol {
     uint32_t line = 1;
     uint32_t col = 1;
     uint32_t endLine = 1;
+    std::string docComment;
 };
 
 struct FnSymbol {
@@ -41,6 +42,7 @@ struct FnSymbol {
     uint32_t line = 1;
     uint32_t col = 1;
     uint32_t endLine = 1;
+    std::string docComment;
     bool isBuiltinReceiver = false;
     bool isFnValueCall = false;
     TypeId fnTypeId = INVALID_ID;
@@ -59,6 +61,7 @@ struct EnumSymbol {
     uint32_t line = 1;
     uint32_t col = 1;
     uint32_t endLine = 1;
+    std::string docComment;
 };
 
 struct UnionSymbol {
@@ -74,6 +77,7 @@ struct UnionSymbol {
     uint32_t line = 1;
     uint32_t col = 1;
     uint32_t endLine = 1;
+    std::string docComment;
 };
 
 struct AliasSymbol {
@@ -87,6 +91,7 @@ struct AliasSymbol {
     uint32_t line = 1;
     uint32_t col = 1;
     uint32_t endLine = 1;
+    std::string docComment;
 };
 
 struct ConstSymbol {
@@ -101,7 +106,100 @@ struct ConstSymbol {
     uint32_t line = 1;
     uint32_t col = 1;
     uint32_t endLine = 1;
+    std::string docComment;
 };
+
+inline std::vector<std::string_view> splitSourceLinesView(std::string_view sourceText) {
+    std::vector<std::string_view> lines;
+    size_t start = 0;
+    const size_t n = sourceText.size();
+    while (start <= n) {
+        size_t nlPos = sourceText.find(static_cast<char>(10), start);
+        if (nlPos == std::string_view::npos) {
+            std::string_view tail = sourceText.substr(start);
+            if (!tail.empty() && tail.back() == static_cast<char>(13)) {
+                tail.remove_suffix(1);
+            }
+            lines.push_back(tail);
+            break;
+        }
+        std::string_view seg = sourceText.substr(start, nlPos - start);
+        if (!seg.empty() && seg.back() == static_cast<char>(13)) {
+            seg.remove_suffix(1);
+        }
+        lines.push_back(seg);
+        start = nlPos + 1;
+    }
+    return lines;
+}
+
+inline std::string extractPrecedingDocCommentFromLines(
+    const std::vector<std::string_view>& lines,
+    uint32_t declLine1Based
+) {
+    if (declLine1Based <= 1 || lines.empty()) {
+        return "";
+    }
+    int64_t idx = static_cast<int64_t>(declLine1Based) - 2;
+    if (idx >= static_cast<int64_t>(lines.size())) {
+        idx = static_cast<int64_t>(lines.size()) - 1;
+    }
+    std::vector<std::string_view> revDocLines;
+    while (idx >= 0) {
+        std::string_view line = lines[static_cast<size_t>(idx)];
+        size_t pos = 0;
+        while (pos < line.size() && (line[pos] == ' ' || line[pos] == static_cast<char>(9))) {
+            pos += 1;
+        }
+        std::string_view trimmed = line.substr(pos);
+        if (trimmed.size() >= 2 && trimmed[0] == static_cast<char>(39) && trimmed[1] == static_cast<char>(39)) {
+            std::string_view docText = trimmed.substr(2);
+            if (!docText.empty() && docText[0] == ' ') {
+                docText.remove_prefix(1);
+            }
+            revDocLines.push_back(docText);
+            idx -= 1;
+        } else {
+            break;
+        }
+    }
+    if (revDocLines.empty()) {
+        return "";
+    }
+    std::string out;
+    for (size_t i = revDocLines.size(); i > 0; --i) {
+        if (i < revDocLines.size()) {
+            out.push_back(static_cast<char>(10));
+        }
+        out.append(revDocLines[i - 1]);
+    }
+    return out;
+}
+
+inline std::string extractPrecedingDocComment(
+    std::string_view sourceText,
+    uint32_t declLine1Based
+) {
+    const auto lines = splitSourceLinesView(sourceText);
+    return extractPrecedingDocCommentFromLines(lines, declLine1Based);
+}
+
+inline void attachDocCommentsToDecls(
+    AstArena& arena,
+    const std::vector<DeclId>& declIds,
+    std::string_view sourceText
+) {
+    if (declIds.empty() || sourceText.empty()) {
+        return;
+    }
+    const auto lines = splitSourceLinesView(sourceText);
+    for (const DeclId did : declIds) {
+        if (did >= arena.decls.size()) {
+            continue;
+        }
+        arena.decls[did].docComment = extractPrecedingDocCommentFromLines(lines, arena.decls[did].line);
+    }
+}
 
 struct VarSymbol {
     std::string name;

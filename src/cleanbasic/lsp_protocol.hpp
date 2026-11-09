@@ -281,47 +281,58 @@ inline std::string formatFnDetailSignature(
     return out;
 }
 
+inline std::string appendDocCommentMarkdown(std::string md, std::string_view docComment) {
+    if (!docComment.empty()) {
+        const std::string nl(1, static_cast<char>(10));
+        md += nl + nl;
+        md.append(docComment);
+    }
+    return md;
+}
+
 inline std::string formatFnHoverMarkdown(const AstArena& arena, const FnSymbol& fn) {
     std::string sig;
     if (fn.isPub) sig += "pub ";
     if (fn.isExtern) sig += "extern ";
     sig += "fn " + fn.name + formatFnDetailSignature(arena, fn.params, fn.returnType, fn.isFallible);
-    return wrapVbCodeBlock(sig);
+    return appendDocCommentMarkdown(wrapVbCodeBlock(sig), fn.docComment);
 }
 
 inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts) {
+    const std::string nl(1, static_cast<char>(10));
     std::string code;
     if (ts.isPub) code += "pub ";
     if (ts.isExtern) code += "extern ";
     code += "type " + ts.name;
-    if (ts.isExtern && ts.fieldOrder.empty()) return wrapVbCodeBlock(code);
-    code += "\n";
+    if (ts.isExtern && ts.fieldOrder.empty()) return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);
+    code += nl;
     for (const auto& f : ts.fieldOrder) {
         TypeId ftid = f.typeId;
         const auto fit = ts.fields.find(f.name);
         if (fit != ts.fields.end()) ftid = fit->second;
-        code += "    " + f.name + " as " + formatCleanbasicType(arena, ftid) + "\n";
+        code += "    " + f.name + " as " + formatCleanbasicType(arena, ftid) + nl;
     }
     code += "end type";
-    return wrapVbCodeBlock(code);
+    return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);
 }
 
 inline std::string formatEnumHoverMarkdown(const EnumSymbol& es) {
+    const std::string nl(1, static_cast<char>(10));
     std::string code;
     if (es.isPub) {
         code += "pub ";
     }
-    code += "enum " + es.name + "\n";
+    code += "enum " + es.name + nl;
     for (const auto& m : es.members) {
         code += "    " + m.name;
         const auto vit = es.memberValues.find(m.name);
         if (vit != es.memberValues.end()) {
             code += " = " + std::to_string(vit->second);
         }
-        code += "\n";
+        code += nl;
     }
     code += "end enum";
-    return wrapVbCodeBlock(code);
+    return appendDocCommentMarkdown(wrapVbCodeBlock(code), es.docComment);
 }
 
 inline std::string formatUnionHoverMarkdown(const AstArena& arena, const UnionSymbol& us) {
@@ -340,9 +351,11 @@ inline std::string formatUnionHoverMarkdown(const AstArena& arena, const UnionSy
         code += "    " + uv.name + " as " + formatCleanbasicType(arena, vtid) + nl;
     }
     code += "end union";
-    return wrapVbCodeBlock(code);
+    return appendDocCommentMarkdown(wrapVbCodeBlock(code), us.docComment);
 }
+
 inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalSymbolTable& symbols, const AliasSymbol& al) {
+    const std::string nl(1, static_cast<char>(10));
     std::string code;
     if (al.isPub) code += "pub ";
     const std::string rawTarget = formatCleanbasicType(arena, al.targetType);
@@ -351,16 +364,16 @@ inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalS
     code += "alias " + al.name + " = " + rawTarget;
     std::string md = wrapVbCodeBlock(code);
     if (resolvedTarget != rawTarget) {
-        md += "\nResolved type: " + wrapInlineCode(resolvedTarget);
+        md += nl + "Resolved type: " + wrapInlineCode(resolvedTarget);
     }
-    return md;
+    return appendDocCommentMarkdown(md, al.docComment);
 }
 
 inline std::string formatConstHoverMarkdown(const AstArena& arena, const ConstSymbol& cs) {
     std::string code;
     if (cs.isPub) code += "pub ";
     code += "const " + cs.name + " as " + formatCleanbasicType(arena, cs.typeId);
-    return wrapVbCodeBlock(code);
+    return appendDocCommentMarkdown(wrapVbCodeBlock(code), cs.docComment);
 }
 
 inline std::string formatVarHoverMarkdown(const AstArena& arena, const VarSymbol& vs) {

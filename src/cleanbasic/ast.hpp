@@ -371,6 +371,7 @@ struct DeclNode {
     DeclVariant payload;
     std::string moduleId = "";
     std::string fileName = "main.cb";
+    std::string docComment = "";
 
     template <typename T>
     const T* getIf() const {

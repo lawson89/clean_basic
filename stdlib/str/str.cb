@@ -67,206 +67,254 @@ extern fn cbStrAsciiIsHexDigit(s as str) as bool
 
 ' --- Public API: UTF-8 Inspection & Codepoints ---
 
+'' Returns the number of UTF-8 Unicode codepoints in s.
 pub fn utf8Len(s as str) as int
     return cbStrUtf8Len(s)
 end fn
 
+'' Returns true if s contains strictly valid UTF-8 byte sequences.
 pub fn utf8Valid(s as str) as bool
     return cbStrUtf8Valid(s)
 end fn
 
+'' Splits s into a list of single-codepoint UTF-8 strings.
 pub fn chars(s as str) as list[str]
     return cbStrChars(s)
 end fn
 
 ' --- Public API: Search & Match ---
 
+'' Returns true if s contains the substring sub.
 pub fn contains(s as str, sub as str) as bool
     return cbStrContains(s, sub)
 end fn
 
+'' Returns the 0-based byte index of the first occurrence of sub in s, or -1 if not found.
 pub fn find(s as str, sub as str) as int
     return cbStrFind(s, sub)
 end fn
 
+'' Returns the 0-based byte index of the last occurrence of sub in s, or -1 if not found.
 pub fn rfind(s as str, sub as str) as int
     return cbStrRfind(s, sub)
 end fn
 
+'' Returns the number of non-overlapping occurrences of sub in s.
 pub fn count(s as str, sub as str) as int
     return cbStrCount(s, sub)
 end fn
 
+'' Returns true if s begins with prefix.
 pub fn startsWith(s as str, prefix as str) as bool
     return cbStrStartsWith(s, prefix)
 end fn
 
+'' Returns true if s ends with suffix.
 pub fn endsWith(s as str, suffix as str) as bool
     return cbStrEndsWith(s, suffix)
 end fn
 
+'' Returns true if s and other are equal under ASCII case-insensitive comparison.
 pub fn asciiEqualsIgnoreCase(s as str, other as str) as bool
     return cbStrAsciiEqualsIgnoreCase(s, other)
 end fn
 
+'' Returns true if s starts with prefix under ASCII case-insensitive comparison.
 pub fn asciiStartsWithIgnoreCase(s as str, prefix as str) as bool
     return cbStrAsciiStartsWithIgnoreCase(s, prefix)
 end fn
 
+'' Returns true if s ends with suffix under ASCII case-insensitive comparison.
 pub fn asciiEndsWithIgnoreCase(s as str, suffix as str) as bool
     return cbStrAsciiEndsWithIgnoreCase(s, suffix)
 end fn
 
+'' Returns the 0-based byte index of the first ASCII case-insensitive match of sub in s, or -1.
 pub fn asciiFindIgnoreCase(s as str, sub as str) as int
     return cbStrAsciiFindIgnoreCase(s, sub)
 end fn
 
+'' Returns the 0-based byte index of the last ASCII case-insensitive match of sub in s, or -1.
 pub fn asciiRfindIgnoreCase(s as str, sub as str) as int
     return cbStrAsciiRfindIgnoreCase(s, sub)
 end fn
 
+'' Returns true if s contains sub under ASCII case-insensitive comparison.
 pub fn asciiContainsIgnoreCase(s as str, sub as str) as bool
     return cbStrAsciiContainsIgnoreCase(s, sub)
 end fn
 
 ' --- Public API: Splitting & Joining ---
 
+'' Splits s by separator sep into a list of substrings (or into UTF-8 codepoints when sep is "").
 pub fn split(s as str, sep as str) as list[str]
     return cbStrSplit(s, sep)
 end fn
 
+'' Splits s on runs of ASCII whitespace, discarding leading/trailing whitespace.
 pub fn fields(s as str) as list[str]
     return cbStrFields(s)
 end fn
 
+'' Splits s into lines on LF or CRLF boundaries.
 pub fn lines(s as str) as list[str]
     return cbStrLines(s)
 end fn
 
+'' Joins a list of strings with separator sep between elements.
 pub fn join(parts as list[str], sep as str) as str
     return cbStrJoin(parts, sep)
 end fn
 
 ' --- Public API: Trimming & Padding ---
 
+'' Strips leading and trailing ASCII whitespace from s.
 pub fn trim(s as str) as str
     return cbStrTrim(s)
 end fn
 
+'' Strips leading ASCII whitespace from s.
 pub fn ltrim(s as str) as str
     return cbStrLtrim(s)
 end fn
 
+'' Strips trailing ASCII whitespace from s.
 pub fn rtrim(s as str) as str
     return cbStrRtrim(s)
 end fn
 
+'' Strips leading and trailing UTF-8 codepoints present in chars from s.
 pub fn trimChars(s as str, chars as str) as str
     return cbStrTrimChars(s, chars)
 end fn
 
+'' Pads s on the left with pad up to width UTF-8 codepoints.
 pub fn padLeft(s as str, width as int, pad as str) as str
     return cbStrPadLeft(s, width, pad)
 end fn
 
+'' Pads s on the right with pad up to width UTF-8 codepoints.
 pub fn padRight(s as str, width as int, pad as str) as str
     return cbStrPadRight(s, width, pad)
 end fn
 
 ' --- Public API: Slicing & Substrings ---
 
+'' Returns the bounds-clamped byte slice [start, stop) of s.
 pub fn slice(s as str, start as int, stop as int) as str
     return cbStrSlice(s, start, stop)
 end fn
 
+'' Returns the bounds-clamped byte slice of s from start to the end of the string.
 pub fn sliceFrom(s as str, start as int) as str
     return cbStrSliceFrom(s, start)
 end fn
 
+'' Returns the first n UTF-8 codepoints of s.
 pub fn left(s as str, n as int) as str
     return cbStrLeft(s, n)
 end fn
 
+'' Returns the last n UTF-8 codepoints of s.
 pub fn right(s as str, n as int) as str
     return cbStrRight(s, n)
 end fn
 
+'' Returns count UTF-8 codepoints of s starting at codepoint index start.
 pub fn mid(s as str, start as int, count as int) as str
     return cbStrMid(s, start, count)
 end fn
 
+'' Returns the UTF-8 codepoint at codepoint index idx in s, or "" if out of bounds.
 pub fn charAt(s as str, idx as int) as str
     return cbStrCharAt(s, idx)
 end fn
 
+'' Encodes a Unicode scalar value (codepoint) into a UTF-8 string.
 pub fn fromChar(code as int) as str
     return cbStrFromChar(code)
 end fn
 
 ' --- Public API: Transformations ---
 
+'' Replaces all occurrences of oldSub in s with newSub.
 pub fn replace(s as str, oldSub as str, newSub as str) as str
     return cbStrReplace(s, oldSub, newSub)
 end fn
 
+'' Replaces the first occurrence of oldSub in s with newSub.
 pub fn replaceFirst(s as str, oldSub as str, newSub as str) as str
     return cbStrReplaceFirst(s, oldSub, newSub)
 end fn
 
+'' Converts all ASCII uppercase bytes ('A'..'Z') in s to lowercase ('a'..'z').
 pub fn asciiLower(s as str) as str
     return cbStrAsciiLower(s)
 end fn
 
+'' Converts all ASCII lowercase bytes ('a'..'z') in s to uppercase ('A'..'Z').
 pub fn asciiUpper(s as str) as str
     return cbStrAsciiUpper(s)
 end fn
 
+'' Repeats string s n times.
 pub fn repeat(s as str, n as int) as str
     return cbStrRepeat(s, n)
 end fn
 
+'' Reverses s by UTF-8 codepoints without corrupting multi-byte sequences.
 pub fn reverse(s as str) as str
     return cbStrReverse(s)
 end fn
 
+'' Escapes special characters in s for safe inclusion in C++ string literals.
 pub fn escapeCpp(s as str) as str
     return cbStrEscapeCpp(s)
 end fn
 
+'' Unescapes standard backslash escape sequences (\n, \t, \r, \, ", \xHH) in s.
 pub fn unescape(s as str) as str can error
     return cbStrUnescape(s)
 end fn
 
 ' --- Public API: Parsing & ASCII Character Classification ---
 
+'' Parses a decimal, hex (0x), or binary (0b) integer from s, raising an error if invalid.
 pub fn toInt(s as str) as int can error
     return cbStrToInt(s)
 end fn
 
+'' Parses a floating-point number from s, raising an error if invalid.
 pub fn toFloat(s as str) as float can error
     return cbStrToFloat(s)
 end fn
 
+'' Parses a boolean ("true"/"false"/"1"/"0") from s, raising an error if invalid.
 pub fn toBool(s as str) as bool can error
     return cbStrToBool(s)
 end fn
 
+'' Returns true if s is non-empty and all bytes are ASCII digits ('0'..'9').
 pub fn asciiIsDigit(s as str) as bool
     return cbStrAsciiIsDigit(s)
 end fn
 
+'' Returns true if s is non-empty and all bytes are ASCII letters ('a'..'z', 'A'..'Z').
 pub fn asciiIsAlpha(s as str) as bool
     return cbStrAsciiIsAlpha(s)
 end fn
 
+'' Returns true if s is non-empty and all bytes are ASCII whitespace.
 pub fn asciiIsSpace(s as str) as bool
     return cbStrAsciiIsSpace(s)
 end fn
 
+'' Returns true if s is non-empty and all bytes are ASCII alphanumeric characters.
 pub fn asciiIsAlnum(s as str) as bool
     return cbStrAsciiIsAlnum(s)
 end fn
 
+'' Returns true if s is non-empty and all bytes are ASCII hexadecimal digits.
 pub fn asciiIsHexDigit(s as str) as bool
     return cbStrAsciiIsHexDigit(s)
 end fn

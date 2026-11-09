@@ -402,6 +402,7 @@ inline void loadModuleDeclarationsRecursive(
                             return;
                         }
                         arena = std::move(modParse.arena);
+                        attachDocCommentsToDecls(arena, modParse.program.declarations, modSource);
 
                         loader.loadingStack.push_back(targetModuleId);
                         loader.loadingPathStack.push_back(normCandidate);
@@ -494,6 +495,7 @@ inline void preloadStdStrPrelude(
         return;
     }
     arena = std::move(modParse.arena);
+    attachDocCommentsToDecls(arena, modParse.program.declarations, modSource);
     const std::string normCandidate = normalizeRelPath(candidatePath);
     loader.loadingStack.push_back(targetModuleId);
     loader.loadingPathStack.push_back(normCandidate);
@@ -525,6 +527,7 @@ inline CheckSourceResult checkSource(
     if (!parseRes.ok) {
         return CheckSourceResult{false, {}, {}, {}, parseRes.error};
     }
+    attachDocCommentsToDecls(parseRes.arena, parseRes.program.declarations, source);
 
     ModuleLoaderState loader{};
     loader.rootBaseDir = parentDirOf(fileName);

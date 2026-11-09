@@ -10,6 +10,37 @@
 ' EXPECT_OUT: hasAlice: true, hasCharlie: false, popped: 30, removedBob: true, afterClear: 0
 ' EXPECT_OUT: sorted: 5,20,40,0, contains20: true, contains99: false, slice: 10,20, sliceFrom: 20,40, removedAt1: 10, afterRemoveLen: 3
 ' EXPECT_OUT: keys: alpha,beta,gamma,
+' EXPECT_OUT: arenaSummary: node0_line=12, hasX=true, tagX=99, valsLen=2, totalVals=35
+
+type NodeEntry
+    line as int
+    vals as list[int]
+    tags as dict[str, int]
+end type
+
+type NodeArena
+    nodes as list[NodeEntry]
+    modules as dict[str, dict[str, str]]
+end type
+
+fn bumpNode(byref n as NodeEntry, extra as int)
+    n.line += extra
+    n.vals.push(extra)
+end fn
+
+fn inspectReadOnlyArena(arena as NodeArena) as str
+    dim totalVals = 0
+    for node in arena.nodes
+        for v in node.vals
+            totalVals += v
+        end for
+    end for
+    dim n0Line = arena.nodes[0].line
+    dim hasX = arena.nodes[0].tags.has("x")
+    dim tagX = arena.nodes[0].tags["x"]
+    dim valsLen = arena.nodes[0].vals.len()
+    return $"node0_line={n0Line}, hasX={hasX}, tagX={tagX}, valsLen={valsLen}, totalVals={totalVals}"
+end fn
 
 fn testContainers(nums as list[int], lookup as dict[str, int]) as int
     select case nums.len()
@@ -52,4 +83,11 @@ fn main()
         kout &= k & ","
     end for
     print("keys: " & kout)
+
+    dim arena = NodeArena()
+    arena.nodes.push(NodeEntry(line=2, vals=[25], tags={"x": 10}))
+    arena.nodes[0].tags["x"] = 99
+    arena.modules["root"]["hero"] = "entities/hero"
+    bumpNode(arena.nodes[0], 10)
+    print("arenaSummary: " & inspectReadOnlyArena(arena))
 end fn

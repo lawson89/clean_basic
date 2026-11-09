@@ -1,0 +1,410 @@
+' CleanBasic Standard Library: std/cli
+' Declarative command-line argument parser supporting flags, options, positional arguments, and usage generation
+
+import "std/os"
+import "std/str"
+
+'' Specification for a boolean command-line flag (e.g., --verbose / -v).
+pub type FlagSpec
+    name as str
+    shortName as str = ""
+    help as str = ""
+end type
+
+'' Specification for a key-value command-line option (e.g., --output <val> / -o <val>).
+pub type OptionSpec
+    name as str
+    shortName as str = ""
+    help as str = ""
+    defaultVal as str = ""
+    required as bool = false
+end type
+
+'' Specification for a positional command-line argument (e.g., <pattern>).
+pub type ArgSpec
+    name as str
+    help as str = ""
+    required as bool = true
+end type
+
+'' Declarative command-line parser definition holding flags, options, and positional argument specs.
+pub type Parser
+    name as str
+    version as str = ""
+    description as str = ""
+    flags as list[FlagSpec]
+    options as list[OptionSpec]
+    args as list[ArgSpec]
+end type
+
+'' Parsed command-line arguments result containing matched flags, options, positional arguments, and trailing rest arguments.
+pub type Args
+    flags as dict[str, bool]
+    options as dict[str, str]
+    positional as dict[str, str]
+    rest as list[str]
+    helpRequested as bool = false
+    versionRequested as bool = false
+end type
+
+'' Creates a new declarative command-line Parser with the given program name, optional version, and optional description.
+pub fn newParser(name as str, version as str = "", description as str = "") as Parser
+    dim flags as list[FlagSpec] = []
+    dim options as list[OptionSpec] = []
+    dim args as list[ArgSpec] = []
+    return Parser(name=name, version=version, description=description, flags=flags, options=options, args=args)
+end fn
+
+'' Registers a boolean flag (--name and optional -shortName) on the parser.
+pub fn addFlag(byref p as Parser, name as str, shortName as str = "", help as str = "")
+    p.flags.push(FlagSpec(name=name, shortName=shortName, help=help))
+end fn
+
+'' Registers a value-taking option (--name <val> and optional -shortName <val>) on the parser.
+pub fn addOption(byref p as Parser, name as str, shortName as str = "", help as str = "", defaultVal as str = "", required as bool = false)
+    p.options.push(OptionSpec(name=name, shortName=shortName, help=help, defaultVal=defaultVal, required=required))
+end fn
+
+'' Registers a positional argument on the parser in declaration order.
+pub fn addArg(byref p as Parser, name as str, help as str = "", required as bool = true)
+    p.args.push(ArgSpec(name=name, help=help, required=required))
+end fn
+
+fn findFlagByName(p as Parser, name as str) as int
+    for i = 0 to p.flags.len() - 1
+        if p.flags[i].name == name
+            return i
+        end if
+    end for
+    return -1
+end fn
+
+fn findFlagByShort(p as Parser, shortName as str) as int
+    if shortName == ""
+        return -1
+    end if
+    for i = 0 to p.flags.len() - 1
+        if p.flags[i].shortName == shortName
+            return i
+        end if
+    end for
+    return -1
+end fn
+
+fn findOptionByName(p as Parser, name as str) as int
+    for i = 0 to p.options.len() - 1
+        if p.options[i].name == name
+            return i
+        end if
+    end for
+    return -1
+end fn
+
+fn findOptionByShort(p as Parser, shortName as str) as int
+    if shortName == ""
+        return -1
+    end if
+    for i = 0 to p.options.len() - 1
+        if p.options[i].shortName == shortName
+            return i
+        end if
+    end for
+    return -1
+end fn
+
+'' Generates a formatted multi-line usage and help string for the parser.
+pub fn usage(p as Parser) as str
+    dim lines as list[str] = []
+    if p.description != "" and p.version != ""
+        lines.push($"{p.name} {p.version} - {p.description}")
+    else if p.description != ""
+        lines.push($"{p.name} - {p.description}")
+    else if p.version != ""
+        lines.push($"{p.name} {p.version}")
+    end if
+
+    dim synopsis = $"Usage: {p.name}"
+    if p.flags.len() > 0 or p.options.len() > 0
+        synopsis &= " [options]"
+    end if
+    for a in p.args
+        if a.required
+            synopsis &= $" <{a.name}>"
+        else
+            synopsis &= $" [{a.name}]"
+        end if
+    end for
+    lines.push(synopsis)
+
+    if p.args.len() > 0
+        lines.push("")
+        lines.push("Arguments:")
+        for a in p.args
+            dim label = $"  <{a.name}>".padRight(22, " ")
+            if a.help != ""
+                lines.push($"{label} {a.help}")
+            else
+                lines.push(label.rtrim())
+            end if
+        end for
+    end if
+
+    lines.push("")
+    lines.push("Options:")
+    for f in p.flags
+        dim flagSpec = ""
+        if f.shortName != ""
+            flagSpec = $"  -{f.shortName}, --{f.name}"
+        else
+            flagSpec = $"      --{f.name}"
+        end if
+        dim padded = flagSpec.padRight(22, " ")
+        if f.help != ""
+            lines.push($"{padded} {f.help}")
+        else
+            lines.push(padded.rtrim())
+        end if
+    end for
+
+    for o in p.options
+        dim optSpec = ""
+        if o.shortName != ""
+            optSpec = $"  -{o.shortName}, --{o.name} <val>"
+        else
+            optSpec = $"      --{o.name} <val>"
+        end if
+        dim padded = optSpec.padRight(22, " ")
+        dim desc = o.help
+        if o.defaultVal != ""
+            if desc != ""
+                desc &= $" (default: {o.defaultVal})"
+            else
+                desc = $"(default: {o.defaultVal})"
+            end if
+        else if o.required
+            if desc != ""
+                desc &= " (required)"
+            else
+                desc = "(required)"
+            end if
+        end if
+        if desc != ""
+            lines.push($"{padded} {desc}")
+        else
+            lines.push(padded.rtrim())
+        end if
+    end for
+
+    dim helpPad = "  -h, --help".padRight(22, " ")
+    lines.push($"{helpPad} Show this help message")
+    return str.join(lines, "\n")
+end fn
+
+'' Prints the formatted usage and help message to standard output.
+pub fn printUsage(p as Parser)
+    print(p.usage())
+end fn
+
+'' Parses an explicit list of command-line arguments (excluding argv[0]) according to the parser specification.
+pub fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
+    dim flags as dict[str, bool] = {}
+    dim options as dict[str, str] = {}
+    dim providedOptions as dict[str, bool] = {}
+    dim positional as dict[str, str] = {}
+    dim rest as list[str] = []
+
+    for f in p.flags
+        flags[f.name] = false
+    end for
+    for o in p.options
+        if o.defaultVal != ""
+            options[o.name] = o.defaultVal
+        end if
+    end for
+
+    dim i = 0
+    dim flagsDone = false
+    dim posIdx = 0
+
+    while i < rawArgs.len()
+        dim arg = rawArgs[i]
+        if not flagsDone and arg == "--"
+            flagsDone = true
+            i += 1
+            continue
+        end if
+
+        if not flagsDone and arg.startsWith("--") and arg.len() > 2
+            dim body = arg.sliceFrom(2)
+            dim eqIdx = body.find("=")
+            if eqIdx >= 0
+                dim optName = body.slice(0, eqIdx)
+                dim optVal = body.sliceFrom(eqIdx + 1)
+                dim oIdx = findOptionByName(p, optName)
+                if oIdx >= 0
+                    options[optName] = optVal
+                    providedOptions[optName] = true
+                else
+                    dim fIdx = findFlagByName(p, optName)
+                    if fIdx >= 0
+                        if optVal == "true" or optVal == "1"
+                            flags[optName] = true
+                        else if optVal == "false" or optVal == "0"
+                            flags[optName] = false
+                        else
+                            error($"Flag '--{optName}' does not take value '{optVal}'")
+                        end if
+                    else
+                        error($"Unknown option '--{optName}'")
+                    end if
+                end if
+            else
+                dim fIdx = findFlagByName(p, body)
+                if fIdx >= 0
+                    flags[body] = true
+                else
+                    dim oIdx = findOptionByName(p, body)
+                    if oIdx >= 0
+                        if i + 1 >= rawArgs.len()
+                            error($"Option '--{body}' requires a value")
+                        end if
+                        i += 1
+                        options[body] = rawArgs[i]
+                        providedOptions[body] = true
+                    else if body == "help"
+                        flags["help"] = true
+                        return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=true, versionRequested=false)
+                    else if body == "version" and p.version != ""
+                        flags["version"] = true
+                        return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=false, versionRequested=true)
+                    else
+                        error($"Unknown option '--{body}'")
+                    end if
+                end if
+            end if
+            i += 1
+            continue
+        end if
+
+        if not flagsDone and arg.startsWith("-") and arg.len() > 1 and not arg.startsWith("--")
+            dim cluster = arg.sliceFrom(1)
+            if cluster.len() >= 2 and cluster.charAt(1) == "="
+                dim shortCh = cluster.charAt(0)
+                dim optVal = cluster.sliceFrom(2)
+                dim oIdx = findOptionByShort(p, shortCh)
+                if oIdx >= 0
+                    dim optName = p.options[oIdx].name
+                    options[optName] = optVal
+                    providedOptions[optName] = true
+                else
+                    error($"Unknown option '-{shortCh}'")
+                end if
+            else
+                dim cIdx = 0
+                while cIdx < cluster.len()
+                    dim ch = cluster.charAt(cIdx)
+                    dim fIdx = findFlagByShort(p, ch)
+                    if fIdx >= 0
+                        flags[p.flags[fIdx].name] = true
+                        cIdx += 1
+                    else
+                        dim oIdx = findOptionByShort(p, ch)
+                        if oIdx >= 0
+                            dim optName = p.options[oIdx].name
+                            if cIdx + 1 < cluster.len()
+                                options[optName] = cluster.sliceFrom(cIdx + 1)
+                                providedOptions[optName] = true
+                                break
+                            else
+                                if i + 1 >= rawArgs.len()
+                                    error($"Option '-{ch}' requires a value")
+                                end if
+                                i += 1
+                                options[optName] = rawArgs[i]
+                                providedOptions[optName] = true
+                                cIdx += 1
+                            end if
+                        else if ch == "h"
+                            flags["help"] = true
+                            return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=true, versionRequested=false)
+                        else if ch == "V" and p.version != ""
+                            flags["version"] = true
+                            return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=false, versionRequested=true)
+                        else
+                            error($"Unknown option '-{ch}'")
+                        end if
+                    end if
+                end while
+            end if
+            i += 1
+            continue
+        end if
+
+        if posIdx < p.args.len()
+            dim spec = p.args[posIdx]
+            positional[spec.name] = arg
+            posIdx += 1
+        else
+            rest.push(arg)
+        end if
+        i += 1
+    end while
+
+    for o in p.options
+        if o.required and not providedOptions.get(o.name, false) and o.defaultVal == ""
+            error($"Missing required option '--{o.name}'")
+        end if
+    end for
+
+    for a in p.args
+        if a.required and not positional.has(a.name)
+            error($"Missing required argument '<{a.name}>'")
+        end if
+    end for
+
+    return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=false, versionRequested=false)
+end fn
+
+'' Parses the process command-line arguments from os.args() (automatically skipping argv[0]).
+pub fn parse(p as Parser) as Args can error
+    dim argv = os.args()
+    dim rawArgs as list[str] = []
+    if argv.len() > 1
+        rawArgs = argv.sliceFrom(1)
+    end if
+    return p.parseArgs(rawArgs)
+end fn
+
+'' Returns true if a boolean flag is set or if an option or positional argument with the given name is present.
+pub fn has(a as Args, name as str) as bool
+    if a.flags.get(name, false)
+        return true
+    end if
+    if a.options.has(name) and a.options[name] != ""
+        return true
+    end if
+    if a.positional.has(name)
+        return true
+    end if
+    return false
+end fn
+
+'' Returns the string value of an option or positional argument, or defaultVal if not present.
+pub fn get(a as Args, name as str, defaultVal as str = "") as str
+    if a.options.has(name)
+        return a.options[name]
+    end if
+    if a.positional.has(name)
+        return a.positional[name]
+    end if
+    return defaultVal
+end fn
+
+'' Parses and returns the integer value of an option or positional argument, or defaultVal if empty.
+pub fn getInt(a as Args, name as str, defaultVal as int = 0) as int can error
+    dim raw = a.get(name, "")
+    if raw == ""
+        return defaultVal
+    end if
+    return raw.toInt()
+end fn

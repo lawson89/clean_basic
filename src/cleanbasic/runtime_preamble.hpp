@@ -316,10 +316,18 @@ inline void cbBytesWriteU64Be(std::vector<uint8_t>& b, int64_t val, int64_t offs
     }
 }
 
-template <typename T>
-inline T cbListGet(const std::vector<T>& v, int64_t idx) {
+inline bool cbListGet(const std::vector<bool>& v, int64_t idx) {
     if (idx < 0 || static_cast<size_t>(idx) >= v.size()) {
-        return T{};
+        return false;
+    }
+    return v[static_cast<size_t>(idx)];
+}
+
+template <typename T>
+inline const T& cbListGet(const std::vector<T>& v, int64_t idx) {
+    static const T empty{};
+    if (idx < 0 || static_cast<size_t>(idx) >= v.size()) {
+        return empty;
     }
     return v[static_cast<size_t>(idx)];
 }
@@ -367,12 +375,13 @@ inline int64_t cbBytesGet(const std::vector<uint8_t>& b, int64_t idx) {
 }
 
 template <typename K, typename V, typename KArg>
-inline V cbDictAt(const std::unordered_map<K, V>& d, const KArg& k) {
+inline const V& cbDictAt(const std::unordered_map<K, V>& d, const KArg& k) {
+    static const V empty{};
     const auto it = d.find(static_cast<K>(k));
     if (it != d.end()) {
         return it->second;
     }
-    return V{};
+    return empty;
 }
 
 template <typename K, typename V, typename KArg, typename VArg>

@@ -6,7 +6,7 @@
 ' EXPECT_CPP: cb_std_os__exec(
 ' EXPECT_CPP: int main(int argc, char** argv)
 ' EXPECT_OUT: Args count=1
-' EXPECT_OUT: Platform valid=true, unsetEnvExists=false, unsetEnvVal=[]
+' EXPECT_OUT: Platform valid=true, exePathNonEmpty=true, unsetEnvExists=false, unsetEnvVal=[]
 ' EXPECT_OUT: Working dir changed=stdlibOsSandbox, restored=true
 ' EXPECT_OUT: Clock monotonic=true
 ' EXPECT_OUT: Subprocess exit codes: zero=0, seven=7
@@ -50,9 +50,11 @@ fn main() as int
 
     dim plat = os.platform()
     dim platOk = (plat == "linux" or plat == "macos" or plat == "windows")
+    dim exeP = os.exePath()
+    dim exeOk = (exeP.len() > 0 and fs.exists(exeP))
     dim hasUnset = os.hasEnv("CB_NONEXISTENT_ENV_VAR_999")
     dim unsetVal = os.env("CB_NONEXISTENT_ENV_VAR_999")
-    print("Platform valid=" & platOk & ", unsetEnvExists=" & hasUnset & ", unsetEnvVal=[" & unsetVal & "]")
+    print("Platform valid=" & platOk & ", exePathNonEmpty=" & exeOk & ", unsetEnvExists=" & hasUnset & ", unsetEnvVal=[" & unsetVal & "]")
 
     dim sandboxDir = "build/testArtifacts/stdlibOsSandbox"
     if not fs.exists(sandboxDir)

@@ -1051,8 +1051,7 @@ public:
         }
         const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
         if (fnSym.has_value() && fnSym->isFallible) {
-            const std::string valTmp = nextTemp("_val");
-            const std::string errTmp = nextTemp("_err");
+            const auto [valTmp, errTmp] = nextValErrTemps();
             emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
             emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
             if (fn.isFallible) {
@@ -1202,8 +1201,8 @@ public:
             if (forS->loopVars.size() == 1) {
                 const std::string& lv = forS->loopVars[0];
                 if (iterType.name == "str") {
-                    loopScope[lv] = VarSymbol{lv, symbols.typeStr, false};
-                    emitLine("for (auto& " + lv + " : cbStrUtf8Chars(" + iterCpp + ")) {");
+                    loopScope[lv] = VarSymbol{lv, symbols.typeStr, false, true};
+                    emitLine("for (const auto& " + lv + " : cbStrUtf8Chars(" + iterCpp + ")) {");
                     indentLevel += 1;
                     emitStmtList(fn, forS->body, loopScope, loopDecls);
                     indentLevel -= 1;
@@ -1216,8 +1215,12 @@ public:
                 } else if (iterType.name == "bytes") {
                     elemT = symbols.typeInt;
                 }
-                loopScope[lv] = VarSymbol{lv, elemT, false};
-                emitLine("for (auto& " + lv + " : " + iterCpp + ") {");
+                loopScope[lv] = VarSymbol{lv, elemT, false, true};
+                if (iterType.name == "bytes") {
+                    emitLine("for (int64_t " + lv + " : " + iterCpp + ") {");
+                } else {
+                    emitLine("for (const auto& " + lv + " : " + iterCpp + ") {");
+                }
                 indentLevel += 1;
                 emitStmtList(fn, forS->body, loopScope, loopDecls);
                 indentLevel -= 1;
@@ -1227,15 +1230,15 @@ public:
             if (forS->loopVars.size() == 2 && iterType.name == "str") {
                 const std::string& idxVar = forS->loopVars[0];
                 const std::string& elemVar = forS->loopVars[1];
-                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false};
-                loopScope[elemVar] = VarSymbol{elemVar, symbols.typeStr, false};
+                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false, true};
+                loopScope[elemVar] = VarSymbol{elemVar, symbols.typeStr, false, true};
                 const std::string iterRef = nextTemp("_iter");
                 emitLine("{");
                 indentLevel += 1;
                 emitLine("const auto " + iterRef + " = cbStrUtf8Chars(" + iterCpp + ");");
                 emitLine("for (int64_t " + idxVar + " = 0; " + idxVar + " < static_cast<int64_t>(" + iterRef + ".size()); ++" + idxVar + ") {");
                 indentLevel += 1;
-                emitLine("auto " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
+                emitLine("const auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
                 emitStmtList(fn, forS->body, loopScope, loopDecls);
                 indentLevel -= 1;
                 emitLine("}");
@@ -1252,18 +1255,18 @@ public:
                 } else if (iterType.name == "bytes") {
                     elemT = symbols.typeInt;
                 }
-                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false};
-                loopScope[elemVar] = VarSymbol{elemVar, elemT, false};
+                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false, true};
+                loopScope[elemVar] = VarSymbol{elemVar, elemT, false, true};
                 const std::string iterRef = nextTemp("_iter");
                 emitLine("{");
                 indentLevel += 1;
-                emitLine("auto&& " + iterRef + " = " + iterCpp + ";");
+                emitLine("const auto& " + iterRef + " = " + iterCpp + ";");
                 emitLine("for (int64_t " + idxVar + " = 0; " + idxVar + " < static_cast<int64_t>(" + iterRef + ".size()); ++" + idxVar + ") {");
                 indentLevel += 1;
                 if (iterType.name == "bytes") {
                     emitLine("int64_t " + elemVar + " = static_cast<int64_t>(" + iterRef + "[static_cast<size_t>(" + idxVar + ")]);");
                 } else {
-                    emitLine("auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
+                    emitLine("const auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
                 }
                 emitStmtList(fn, forS->body, loopScope, loopDecls);
                 indentLevel -= 1;
@@ -1273,10 +1276,10 @@ public:
                 return;
             }
             if (iterType.typeArgs.size() == 2) {
-                loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], iterType.typeArgs[0], false};
-                loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], iterType.typeArgs[1], false};
+                loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], iterType.typeArgs[0], false, true};
+                loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], iterType.typeArgs[1], false, true};
             }
-            emitLine("for (auto& [" + joinStrings(forS->loopVars) + "] : " + iterCpp + ") {");
+            emitLine("for (const auto& [" + joinStrings(forS->loopVars) + "] : " + iterCpp + ") {");
             indentLevel += 1;
             emitStmtList(fn, forS->body, loopScope, loopDecls);
             indentLevel -= 1;

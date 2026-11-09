@@ -1,10 +1,11 @@
 ' CleanBasic Example: cbgrep
 ' Fast Unix grep / ripgrep-style CLI utility written in pure CleanBasic
-' Demonstrates std/os, std/fs (streaming File + defer + recursive dir walk), and std/str (zero-allocation search)
+' Demonstrates std/cli, std/os, std/fs (streaming File + defer + recursive dir walk), and std/str
 '
 ' Usage:
 '   cbgrep [-icnv] <pattern> [path...]
 
+import "std/cli"
 import "std/os"
 import "std/fs"
 import "std/str"
@@ -15,31 +16,6 @@ type GrepOptions
     countOnly as bool
     invertMatch as bool
 end type
-
-fn printUsage()
-    os.eprint("Usage: cbgrep [-icnv] <pattern> [path...]")
-end fn
-
-fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
-    for i = 1 to arg.len() - 1
-        dim ch = arg[i]
-        select case ch
-            case "i"
-                opts.ignoreCase = true
-            case "n"
-                opts.lineNumbers = true
-            case "c"
-                opts.countOnly = true
-            case "v"
-                opts.invertMatch = true
-            case else
-                os.eprint($"cbgrep: invalid option -- '{ch}'")
-                printUsage()
-                return false
-        end select
-    end for
-    return true
-end fn
 
 fn lineMatches(line as str, pattern as str, opts as GrepOptions) as bool
     dim matched = false
@@ -151,37 +127,43 @@ fn searchDir(dirPath as str, pattern as str, opts as GrepOptions, byref hadError
     return total
 end fn
 
+fn buildCliParser() as cli.Parser
+    dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files or standard input")
+    p.addFlag("ignore-case", "i", "Perform case-insensitive ASCII matching")
+    p.addFlag("line-number", "n", "Prefix each matching line with its 1-based line number")
+    p.addFlag("count", "c", "Print only a count of matching lines per input")
+    p.addFlag("invert-match", "v", "Select non-matching lines")
+    p.addArg("pattern", "Substring pattern to search for", required=true)
+    return p
+end fn
+
 fn main() as int
-    dim argv = os.args()
-    dim opts = GrepOptions()
-    dim hasPattern = false
-    dim pattern = ""
-    dim targets as list[str] = []
-    dim flagsDone = false
+    dim p = buildCliParser()
 
-    for i = 1 to argv.len() - 1
-        dim arg = argv[i]
-        if not flagsDone and not hasPattern and (arg == "-h" or arg == "--help")
-            printUsage()
-            return 0
-        else if not flagsDone and arg == "--"
-            flagsDone = true
-        else if not flagsDone and not hasPattern and arg.startsWith("-") and arg != "-"
-            if not parseFlagGroup(arg, opts)
-                return 2
-            end if
-        else if not hasPattern
-            pattern = arg
-            hasPattern = true
-        else
-            targets.push(arg)
-        end if
-    end for
-
-    if not hasPattern
-        printUsage()
+    on error e
+        os.eprint($"cbgrep: {e.msg}")
+        os.eprint(p.usage())
         return 2
+    end error
+
+    dim args = p.parse()
+    if args.helpRequested
+        p.printUsage()
+        return 0
     end if
+    if args.versionRequested
+        print("cbgrep 1.0")
+        return 0
+    end if
+
+    dim opts = GrepOptions(
+        ignoreCase=args.has("ignore-case"),
+        lineNumbers=args.has("line-number"),
+        countOnly=args.has("count"),
+        invertMatch=args.has("invert-match")
+    )
+    dim pattern = args.get("pattern")
+    dim targets = args.rest
 
     dim totalMatches = 0
     dim hadError = false

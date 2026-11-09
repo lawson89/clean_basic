@@ -1,23 +1,32 @@
+' CleanBasic Standard Library: std/test
+' Lightweight unit testing runner with assertion failure reporting
+
+'' Stateless function reference type for a fallible test case body.
 pub alias TestFn = fn() can error
 
+'' Represents a single named test case and its callback function.
 pub type TestCase
     name as str
     runFn as TestFn
 end type
 
+'' Represents a named collection of test cases to execute together.
 pub type Suite
     name as str
     cases as list[TestCase]
 end type
 
+'' Creates a new empty test Suite with the given name.
 pub fn newSuite(name as str) as Suite
     return Suite(name=name, cases=[])
 end fn
 
+'' Registers a named test case function in the suite.
 pub fn add(byref s as Suite, name as str, runFn as TestFn)
     s.cases.push(TestCase(name=name, runFn=runFn))
 end fn
 
+'' Executes all test cases in the suite, printing PASS/FAIL diagnostics and returning 0 if all pass or 1 if any fail.
 pub fn run(byref s as Suite) as int
     print("Running suite: " & s.name)
     dim passed = 0
@@ -30,12 +39,12 @@ pub fn run(byref s as Suite) as int
             failed = failed + 1
             continue
         end error
-        
+
         tc.runFn()
         print("  [PASS] " & tc.name)
         passed = passed + 1
     end for
-    
+
     print("Passed: " & passed.toStr() & ", Failed: " & failed.toStr())
     if failed > 0
         return 1

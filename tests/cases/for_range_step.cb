@@ -1,7 +1,7 @@
 ' EXPECT_CPP: for (int64_t i = 0; i <= 10; i += 2) {
 ' EXPECT_CPP: for (int64_t i = 10; i >= 2; i += (-2)) {
 ' EXPECT_CPP: for (int64_t i = 0; i < 5; i += 1) {
-' EXPECT_CPP: for (auto& x : nums) {
+' EXPECT_CPP: for (const auto& x : nums) {
 ' EXPECT_CPP: cbStrUtf8Chars(
 ' FORBID_CPP: throw
 ' EXPECT_OUT: inclusiveEvens: 30

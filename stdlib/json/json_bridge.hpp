@@ -8,6 +8,7 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <vector>
 
 struct CbJsonDoc {
     cbVendorJson::JsonArena arena;
@@ -235,6 +236,60 @@ inline std::tuple<CbJsonVal, CbError> cbJsonArrayAt(
         return {CbJsonVal{-1}, CbError{"JSON array index out of bounds", 404}};
     }
     return {CbJsonVal{static_cast<int64_t>(elems[uIdx])}, CbError{"", 0}};
+}
+
+inline std::string cbJsonKind(const CbJsonDoc& doc, CbJsonVal val) {
+    if (val.id < 0) {
+        return "invalid";
+    }
+    const auto uid = static_cast<cbVendorJson::JsonId>(val.id);
+    if (uid >= doc.arena.nodes.size()) {
+        return "invalid";
+    }
+    const auto& node = doc.arena.nodes[uid];
+    if (std::holds_alternative<cbVendorJson::JsonNull>(node)) {
+        return "null";
+    }
+    if (std::holds_alternative<cbVendorJson::JsonBool>(node)) {
+        return "bool";
+    }
+    if (std::holds_alternative<cbVendorJson::JsonNumber>(node)) {
+        const auto& num = std::get<cbVendorJson::JsonNumber>(node);
+        if (num.isInt) {
+            return "int";
+        }
+        return "float";
+    }
+    if (std::holds_alternative<cbVendorJson::JsonString>(node)) {
+        return "str";
+    }
+    if (std::holds_alternative<cbVendorJson::JsonArray>(node)) {
+        return "array";
+    }
+    if (std::holds_alternative<cbVendorJson::JsonObject>(node)) {
+        return "object";
+    }
+    return "invalid";
+}
+
+inline std::vector<std::string> cbJsonObjectKeys(const CbJsonDoc& doc, CbJsonVal obj) {
+    std::vector<std::string> keys;
+    if (obj.id < 0) {
+        return keys;
+    }
+    const auto uid = static_cast<cbVendorJson::JsonId>(obj.id);
+    if (uid >= doc.arena.nodes.size()) {
+        return keys;
+    }
+    if (!std::holds_alternative<cbVendorJson::JsonObject>(doc.arena.nodes[uid])) {
+        return keys;
+    }
+    const auto& fields = std::get<cbVendorJson::JsonObject>(doc.arena.nodes[uid]).fields;
+    keys.reserve(fields.size());
+    for (const auto& f : fields) {
+        keys.push_back(f.key);
+    }
+    return keys;
 }
 
 #endif // CLEANBASIC_STDLIB_JSON_BRIDGE_HPP

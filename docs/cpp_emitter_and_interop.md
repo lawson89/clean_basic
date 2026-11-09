@@ -103,8 +103,8 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 | `cptr` | `void*` | `void*{}` (`nullptr`) | Opaque C pointer for C/C++ FFI interop. |
 | `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`, `.file`, `.line`); marked `[[nodiscard]]`. |
 | `fn(T1, ...) [as R] [can error]` | `std::function<Ret(Param1, ...)>` | `std::function<...>{}` | Stateless function reference type (supports `byref` parameters and `can error` return lowering). |
-| `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; rvalue reads lower to bounds-safe `cbListGet(v, i)`; `.push(x)` lowers to `.push_back(x)`. |
-| `dict[K, V]` | `std::unordered_map<MappedK, MappedV>` | `std::unordered_map<...>{}` | Hash table; rvalue reads lower to const-safe `cbDictAt(d, k)` and `.get(k, def)` lowers to `cbDictGet(d, k, def)`. |
+| `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; rvalue reads lower to zero-copy bounds-safe `cbListGet(v, i)` (`const T&`); `.push(x)` lowers to `.push_back(x)`. |
+| `dict[K, V]` | `std::unordered_map<MappedK, MappedV>` | `std::unordered_map<...>{}` | Hash table; rvalue reads lower to zero-copy const-safe `cbDictAt(d, k)` (`const V&`) and `.get(k, def)` lowers to `cbDictGet(d, k, def)`. |
 | User `enum Foo` | `Foo` / `cb_m_a__Foo` | `static_cast<Foo>(0)` | Emitted as C++17 `enum class : int64_t`. |
 | User `union Bar` | `struct Bar` / `struct cb_m_a__Bar` | `Bar{}` | POD wrapper struct around `std::variant<MappedT0, ...> _data{}` constructed via `std::in_place_index<Idx>`. |
 | User `type Foo` (root) | `struct Foo` | `Foo{}` | Pure value semantics (stack allocated, passed by const ref or `byref`). |

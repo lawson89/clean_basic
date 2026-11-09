@@ -1,0 +1,236 @@
+' CleanBasic Example: cbdoc
+' Markdown API documentation generator for CleanBasic (.cb) source files and directories
+' Extracts '' doc-comments paired with pub declarations using std/cli, std/fs, and std/str
+'
+' Usage:
+'   cbdoc [-o <output.md>] [-t <title>] [-p] <target>
+
+import "std/cli"
+import "std/fs"
+import "std/os"
+import "std/str"
+
+type DocEntry
+    name as str
+    kind as str
+    signature as str
+    doc as str
+end type
+
+fn extractDeclHeader(line as str, includePrivate as bool) as str
+    dim t = line.trim()
+    if t.startsWith("pub ")
+        return t
+    end if
+    if includePrivate
+        if t.startsWith("fn ") or t.startsWith("type ") or t.startsWith("enum ") or t.startsWith("union ") or t.startsWith("alias ") or t.startsWith("const ")
+            return t
+        end if
+    end if
+    return ""
+end fn
+
+fn parseDeclKindAndName(header as str) as list[str]
+    dim work = header
+    if work.startsWith("pub ")
+        work = work.sliceFrom(4).ltrim()
+    end if
+    if work.startsWith("extern ")
+        work = work.sliceFrom(7).ltrim()
+    end if
+
+    dim kinds as list[str] = ["fn", "type", "enum", "union", "alias", "const"]
+    for k in kinds
+        dim prefix = k & " "
+        if work.startsWith(prefix)
+            dim rest = work.sliceFrom(prefix.len()).ltrim()
+            dim endIdx = 0
+            while endIdx < rest.len()
+                dim ch = rest.charAt(endIdx)
+                if ch == "(" or ch == " " or ch == "=" or ch == "\t"
+                    break
+                end if
+                endIdx += 1
+            end while
+            dim name = rest.slice(0, endIdx)
+            return [k, name]
+        end if
+    end for
+    return ["", ""]
+end fn
+
+fn isBlockDeclKind(header as str, kind as str) as bool
+    if kind == "enum" or kind == "union"
+        return true
+    end if
+    if kind == "type"
+        if header.contains("extern type ")
+            return false
+        end if
+        return true
+    end if
+    return false
+end fn
+
+fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can error
+    dim lines = fs.lines(filePath)
+    dim entries as list[DocEntry] = []
+    dim pendingDoc as list[str] = []
+
+    dim i = 0
+    while i < lines.len()
+        dim rawLine = lines[i]
+        dim trimmed = rawLine.trim()
+
+        if trimmed.startsWith("''")
+            dim docLine = trimmed.sliceFrom(2)
+            if docLine.startsWith(" ")
+                docLine = docLine.sliceFrom(1)
+            end if
+            pendingDoc.push(docLine)
+            i += 1
+            continue
+        end if
+
+        dim header = extractDeclHeader(trimmed, includePrivate)
+        if header != ""
+            dim kindAndName = parseDeclKindAndName(header)
+            dim kind = kindAndName[0]
+            dim name = kindAndName[1]
+            if kind != "" and name != ""
+                dim sigLines as list[str] = [trimmed]
+                if isBlockDeclKind(header, kind)
+                    dim endMarker = $"end {kind}"
+                    i += 1
+                    while i < lines.len()
+                        sigLines.push(lines[i])
+                        if lines[i].trim() == endMarker
+                            break
+                        end if
+                        i += 1
+                    end while
+                end if
+                if header.startsWith("pub ") or pendingDoc.len() > 0
+                    entries.push(DocEntry(
+                        name=name,
+                        kind=kind,
+                        signature=str.join(sigLines, "\n"),
+                        doc=str.join(pendingDoc, "\n")
+                    ))
+                end if
+            end if
+            pendingDoc.clear()
+            i += 1
+            continue
+        end if
+
+        pendingDoc.clear()
+        i += 1
+    end while
+
+    return entries
+end fn
+
+fn collectCbFiles(targetPath as str, byref outFiles as list[str]) can error
+    if fs.isFile(targetPath)
+        outFiles.push(targetPath)
+        return
+    end if
+    if fs.isDir(targetPath)
+        dim names = fs.dir(targetPath)
+        for name in names
+            if name.startsWith(".")
+                continue
+            end if
+            dim child = fs.joinPath(targetPath, name)
+            if fs.isDir(child)
+                collectCbFiles(child, outFiles)
+            else if fs.isFile(child) and fs.ext(child) == ".cb"
+                outFiles.push(child)
+            end if
+        end for
+    end if
+end fn
+
+fn renderFileSection(filePath as str, entries as list[DocEntry]) as str
+    dim tick = str.fromChar(96)
+    dim fence = tick.repeat(3)
+    dim out as list[str] = []
+    out.push($"## Module {tick}{filePath}{tick}")
+    out.push("")
+    for entry in entries
+        out.push($"### {tick}{entry.name}{tick} ({entry.kind})")
+        out.push("")
+        out.push($"{fence}vb")
+        out.push(entry.signature)
+        out.push(fence)
+        if entry.doc != ""
+            out.push("")
+            out.push(entry.doc)
+        end if
+        out.push("")
+    end for
+    return str.join(out, "\n")
+end fn
+
+fn buildParser() as cli.Parser
+    dim p = cli.newParser(
+        name="cbdoc",
+        version="1.0",
+        description="Generate Markdown API documentation from CleanBasic '' doc-comments"
+    )
+    p.addOption("output", "o", "Write generated Markdown to file instead of stdout")
+    p.addOption("title", "t", "Document title heading", defaultVal="CleanBasic API Reference")
+    p.addFlag("include-private", "p", "Include documented private declarations")
+    p.addArg("target", "CleanBasic .cb file or directory to document", required=true)
+    return p
+end fn
+
+fn main() as int
+    dim p = buildParser()
+
+    on error e
+        os.eprint($"cbdoc: {e.msg}")
+        os.eprint(p.usage())
+        return 2
+    end error
+
+    dim args = p.parse()
+    if args.helpRequested
+        p.printUsage()
+        return 0
+    end if
+    if args.versionRequested
+        print("cbdoc 1.0")
+        return 0
+    end if
+
+    dim target = args.get("target")
+    if not fs.exists(target)
+        os.eprint($"cbdoc: {target}: No such file or directory")
+        return 1
+    end if
+
+    dim files as list[str] = []
+    collectCbFiles(target, files)
+
+    dim title = args.get("title", "CleanBasic API Reference")
+    dim includePrivate = args.has("include-private")
+    dim sections as list[str] = [$"# {title}", ""]
+
+    for fpath in files
+        dim entries = parseFileDocs(fpath, includePrivate)
+        if entries.len() > 0
+            sections.push(renderFileSection(fpath, entries))
+        end if
+    end for
+
+    dim markdown = str.join(sections, "\n").rtrim() & "\n"
+    dim outPath = args.get("output", "")
+    if outPath != ""
+        fs.write(outPath, markdown)
+    else
+        os.printRaw(markdown)
+    end if
+    return 0
+end fn

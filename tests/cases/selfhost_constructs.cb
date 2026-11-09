@@ -1,0 +1,182 @@
+' EXPECT_CPP: struct ExprPayload
+' EXPECT_CPP: struct StmtPayload
+' EXPECT_CPP: cbUnionKind(
+' EXPECT_CPP: cbListGet(
+' EXPECT_CPP: cbDictAt(
+' FORBID_CPP: throw
+' EXPECT_OUT: eval_expr: 35
+' EXPECT_OUT: exec_stmts: x=35, y=42, module_hero=entities/hero, sym_x_const=false
+' EXPECT_OUT: overloads: id=7, tag=custom:7, stamped_line=99
+' EXPECT_OUT: error_caught: code=422, has_file=true, line_positive=true, msg=Unresolved identifier: missingVar
+
+type IntLit
+    val as int
+end type
+
+type IdentExpr
+    name as str
+end type
+
+type BinOpExpr
+    op as str
+    left as int
+    right as int
+end type
+
+union ExprPayload
+    intLit as IntLit
+    ident as IdentExpr
+    binOp as BinOpExpr
+end union
+
+type ExprNode
+    line as int
+    col as int
+    payload as ExprPayload
+end type
+
+type AssignStmt
+    varName as str
+    exprId as int
+end type
+
+type PrintStmt
+    exprId as int
+end type
+
+union StmtPayload
+    assign as AssignStmt
+    printVal as PrintStmt
+end union
+
+type StmtNode
+    line as int
+    payload as StmtPayload
+end type
+
+type VarSym
+    name as str
+    val as int
+    isConst as bool = false
+end type
+
+type MiniArena
+    exprs as list[ExprNode]
+    stmts as list[StmtNode]
+    modules as dict[str, dict[str, str]]
+    scopes as dict[str, dict[str, VarSym]]
+end type
+
+fn addExpr(byref arena as MiniArena, line as int, payload as ExprPayload) as int
+    dim id = arena.exprs.len()
+    arena.exprs.push(ExprNode(line=line, col=1, payload=payload))
+    return id
+end fn
+
+fn addStmt(byref arena as MiniArena, line as int, payload as StmtPayload) as int
+    dim id = arena.stmts.len()
+    arena.stmts.push(StmtNode(line=line, payload=payload))
+    return id
+end fn
+
+fn stampExprLine(byref node as ExprNode, newLine as int)
+    node.line = newLine
+end fn
+
+fn formatNodeTag(id as int) as str
+    return "id=" & id.toStr()
+end fn
+
+fn formatNodeTag(id as int, prefix as str) as str
+    return "tag=" & prefix & ":" & id.toStr()
+end fn
+
+fn evalExpr(arena as MiniArena, fnKey as str, exprId as int) as int can error
+    dim node = arena.exprs[exprId]
+    select case node.payload
+        case intLit as lit
+            return lit.val
+        case ident as idNode
+            if not arena.scopes[fnKey].has(idNode.name)
+                error("Unresolved identifier: " & idNode.name, code=422)
+            end if
+            return arena.scopes[fnKey][idNode.name].val
+        case binOp as bop
+            dim lhs = evalExpr(arena, fnKey, bop.left)
+            dim rhs = evalExpr(arena, fnKey, bop.right)
+            select case bop.op
+                case "+"
+                    return lhs + rhs
+                case "*"
+                    return lhs * rhs
+                case else
+                    error("Unknown binary operator: " & bop.op, code=400)
+            end select
+    end select
+    return 0
+end fn
+
+fn executeStmts(byref arena as MiniArena, fnKey as str) can error
+    for i = 0 until arena.stmts.len()
+        dim st = arena.stmts[i]
+        select case st.payload
+            case assign as asgn
+                dim v = evalExpr(arena, fnKey, asgn.exprId)
+                arena.scopes[fnKey][asgn.varName] = VarSym(name=asgn.varName, val=v, isConst=false)
+            case printVal as pv
+                dim v = evalExpr(arena, fnKey, pv.exprId)
+                print("eval_expr: " & v.toStr())
+        end select
+    end for
+end fn
+
+fn runCompilerSim() can error
+    dim arena = MiniArena()
+    arena.modules["root"]["hero"] = "entities/hero"
+
+    ' Build expression tree: (5 + 2) * 5 = 35
+    dim e0 = arena.addExpr(10, ExprPayload.intLit(IntLit(val=5)))
+    dim e1 = arena.addExpr(10, ExprPayload.intLit(IntLit(val=2)))
+    dim e2 = arena.addExpr(10, ExprPayload.binOp(BinOpExpr(op="+", left=e0, right=e1)))
+    dim e3 = arena.addExpr(11, ExprPayload.intLit(IntLit(val=5)))
+    dim e4 = arena.addExpr(11, ExprPayload.binOp(BinOpExpr(op="*", left=e2, right=e3)))
+
+    ' Statements: x = (5 + 2) * 5; print(x); y = x + 7
+    arena.addStmt(12, StmtPayload.assign(AssignStmt(varName="x", exprId=e4)))
+    dim eRefX = arena.addExpr(13, ExprPayload.ident(IdentExpr(name="x")))
+    arena.addStmt(13, StmtPayload.printVal(PrintStmt(exprId=eRefX)))
+
+    dim eSeven = arena.addExpr(14, ExprPayload.intLit(IntLit(val=7)))
+    dim eAddY = arena.addExpr(14, ExprPayload.binOp(BinOpExpr(op="+", left=eRefX, right=eSeven)))
+    arena.addStmt(14, StmtPayload.assign(AssignStmt(varName="y", exprId=eAddY)))
+
+    arena.executeStmts("main")
+
+    dim vx = arena.scopes["main"]["x"].val
+    dim vy = arena.scopes["main"]["y"].val
+    dim mHero = arena.modules["root"]["hero"]
+    dim xConst = arena.scopes["main"]["x"].isConst
+    print($"exec_stmts: x={vx}, y={vy}, module_hero={mHero}, sym_x_const={xConst}")
+
+    arena.exprs[0].stampExprLine(99)
+    print("overloads: " & formatNodeTag(7) & ", " & formatNodeTag(7, "custom") & ", stamped_line=" & arena.exprs[0].line.toStr())
+
+    ' Trigger an unresolved identifier error and recover via on error
+    dim eBad = arena.addExpr(25, ExprPayload.ident(IdentExpr(name="missingVar")))
+    on error e
+        dim hasFile = e.file.contains("selfhost_constructs.cb")
+        dim linePos = e.line > 0
+        print($"error_caught: code={e.code}, has_file={hasFile}, line_positive={linePos}, msg={e.msg}")
+        return
+    end error
+    dim ignored = evalExpr(arena, "main", eBad)
+end fn
+
+fn main() as int
+    on error e
+        print("Unexpected top-level error: " & e.msg)
+        return 1
+    end error
+    runCompilerSim()
+    return 0
+end fn

@@ -4,9 +4,11 @@
 ' EXPECT_CPP: cb_std_json__stringify(
 ' EXPECT_OUT: Built JSON: {"service":"cleanbasic","port":8080,"enabled":true,"items":[10,20],"meta":null}
 ' EXPECT_OUT: Parsed service: cleanbasic (port=8080, enabled=true, items=2, firstItem=10)
+' EXPECT_OUT: Kinds: root=object, service=str, port=int, enabled=bool, items=array, meta=null, keys=service,port,enabled,items,meta
 ' EXPECT_OUT: Caught invalid JSON (code=400)
 
 import "std/json"
+import "std/str"
 
 fn buildPayload() as str
     dim doc = json.newDoc()
@@ -23,6 +25,17 @@ fn buildPayload() as str
 
     doc.setRoot(root)
     return doc.stringify()
+end fn
+
+fn summarizeDocKinds(doc as json.JsonDoc) as str can error
+    dim root = doc.root()
+    dim svcVal = doc.getField(root, "service")
+    dim portVal = doc.getField(root, "port")
+    dim enabledVal = doc.getField(root, "enabled")
+    dim itemsVal = doc.getField(root, "items")
+    dim metaVal = doc.getField(root, "meta")
+    dim objKeys = doc.keys(root)
+    return $"Kinds: root={doc.kind(root)}, service={doc.kind(svcVal)}, port={doc.kind(portVal)}, enabled={doc.kind(enabledVal)}, items={doc.kind(itemsVal)}, meta={doc.kind(metaVal)}, keys={str.join(objKeys, ",")}"
 end fn
 
 fn inspectPayload(payload as str) can error
@@ -47,6 +60,8 @@ fn inspectPayload(payload as str) can error
     if doc.isNull(metaVal) and doc.hasField(root, "service")
         print("Parsed service: " & svcName & " (port=" & portNum & ", enabled=" & isEnabled & ", items=" & itemCount & ", firstItem=" & firstItem & ")")
     end if
+    dim kindsLine = summarizeDocKinds(doc)
+    print(kindsLine)
 end fn
 
 fn testBadJson()

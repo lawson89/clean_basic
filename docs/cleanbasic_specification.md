@@ -264,3 +264,34 @@ fn demoContainers() as int
     return 0
 end fn
 ```
+
+### 5. Declarative CLI Parsing (`std/cli`) and `''` Doc-Comments (LSP & `cbdoc`)
+
+CleanBasic includes a pure-CleanBasic declarative command-line parser (`import "std/cli"`) supporting boolean flags (`addFlag`), bundled short flags (`-icnv`), key-value options (`addOption` with `--opt val`, `--opt=val`, `-o val`, and default values), positional arguments (`addArg`), trailing `rest` arguments, and formatted `usage()` / `printUsage()` output.
+
+Declarations preceded by contiguous `''` (double-single-quote) doc-comment lines automatically surface their documentation in the CleanBasic Language Server (**Hover**, **Completion documentation**, and **Signature Help**) and can be extracted into Markdown API reference docs using `examples/cbdoc.cb`.
+
+```vb
+import "std/cli"
+
+'' Searches files for a matching pattern.
+pub fn runSearch() as int
+    dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files")
+    p.addFlag("ignore-case", "i", "Case-insensitive search")
+    p.addOption("output", "o", "Output file path", defaultVal="out.txt")
+    p.addArg("pattern", "Substring pattern to search for")
+
+    on error e
+        print(e.msg)
+        p.printUsage()
+        return 2
+    end error
+
+    dim args = p.parse()
+    if args.helpRequested
+        p.printUsage()
+        return 0
+    end if
+    return 0
+end fn
+```

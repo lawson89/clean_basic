@@ -517,10 +517,20 @@ public:
             for (const ExprId elId : llit->elements) {
                 ensureContainerTypesInExpr(elId, scope);
             }
+            if (!llit->elements.empty()) {
+                const TypeId elTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, llit->elements[0], symbols, scope, moduleId));
+                arena.findOrAddType("list", {elTid});
+            }
         } else if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
             for (const auto& ent : dlit->entries) {
                 ensureContainerTypesInExpr(ent.key, scope);
                 ensureContainerTypesInExpr(ent.value, scope);
+            }
+            if (!dlit->entries.empty()) {
+                const TypeId kTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, dlit->entries[0].key, symbols, scope, moduleId));
+                const TypeId vTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, dlit->entries[0].value, symbols, scope, moduleId));
+                arena.findOrAddType("dict", {kTid, vTid});
+                arena.findOrAddType("list", {kTid});
             }
         } else if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
             for (const ExprId argId : call->args) {
@@ -740,41 +750,41 @@ public:
                     const TypeNode iterT = resolveAliasNode(arena, symbols, moduleId, iterTid);
                     if (iterT.name == "list" && !iterT.typeArgs.empty() && !forStmt->loopVars.empty()) {
                         if (forStmt->loopVars.size() == 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, true, stmtNode.line, stmtNode.col);
                         } else if (forStmt->loopVars.size() == 2) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
-                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[0], false, true, stmtNode.line, stmtNode.col);
                         } else {
                             setAnalyzerError(stmtNode.line, stmtNode.col, "List iteration supports at most 2 loop variables ('for item in list' or 'for i, item in list').");
                         }
                     } else if (iterT.name == "bytes" && !forStmt->loopVars.empty()) {
                         if (forStmt->loopVars.size() == 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
                         } else if (forStmt->loopVars.size() == 2) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
-                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
                         } else {
                             setAnalyzerError(stmtNode.line, stmtNode.col, "Bytes iteration supports at most 2 loop variables ('for b in data' or 'for i, b in data').");
                         }
                     } else if (iterT.name == "str" && !forStmt->loopVars.empty()) {
                         if (forStmt->loopVars.size() == 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeStr, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeStr, false, true, stmtNode.line, stmtNode.col);
                         } else if (forStmt->loopVars.size() == 2) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
-                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeStr, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeStr, false, true, stmtNode.line, stmtNode.col);
                         } else {
                             setAnalyzerError(stmtNode.line, stmtNode.col, "String iteration supports at most 2 loop variables ('for ch in s' or 'for i, ch in s').");
                         }
                     } else if (iterT.name == "dict" && iterT.typeArgs.size() == 2) {
                         if (forStmt->loopVars.size() >= 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, true, stmtNode.line, stmtNode.col);
                         }
                         if (forStmt->loopVars.size() >= 2) {
-                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[1], false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[1], false, true, stmtNode.line, stmtNode.col);
                         }
                     } else {
                         for (const auto& lv : forStmt->loopVars) {
-                            bindLocalVar(scope, lv, symbols.typeAuto, false, false, stmtNode.line, stmtNode.col);
+                            bindLocalVar(scope, lv, symbols.typeAuto, false, true, stmtNode.line, stmtNode.col);
                         }
                     }
                 }
@@ -1023,6 +1033,7 @@ public:
                 asym.line = declNode.nameLine;
                 asym.col = declNode.nameCol;
                 asym.endLine = declNode.endLine;
+                asym.docComment = declNode.docComment;
                 symbols.aliases[asym.key] = std::move(asym);
             } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
                 TypeSymbol tsym{};
@@ -1037,6 +1048,7 @@ public:
                 tsym.line = declNode.nameLine;
                 tsym.col = declNode.nameCol;
                 tsym.endLine = declNode.endLine;
+                tsym.docComment = declNode.docComment;
                 const std::string keyCopy = tsym.key;
                 symbols.types[keyCopy] = std::move(tsym);
                 arena.findOrAddType(keyCopy, {});
@@ -1051,6 +1063,7 @@ public:
                 esym.line = declNode.nameLine;
                 esym.col = declNode.nameCol;
                 esym.endLine = declNode.endLine;
+                esym.docComment = declNode.docComment;
                 std::unordered_set<std::string> seen;
                 for (const auto& mem : edecl->members) {
                     if (seen.count(mem.name) > 0) {
@@ -1074,6 +1087,7 @@ public:
                 usym.line = declNode.nameLine;
                 usym.col = declNode.nameCol;
                 usym.endLine = declNode.endLine;
+                usym.docComment = declNode.docComment;
                 std::unordered_set<std::string> seen;
                 for (size_t i = 0; i < udecl->variants.size(); ++i) {
                     const auto& uv = udecl->variants[i];
@@ -1182,6 +1196,7 @@ public:
                 csym.line = declNode.nameLine;
                 csym.col = declNode.nameCol;
                 csym.endLine = declNode.endLine;
+                csym.docComment = declNode.docComment;
                 symbols.constants[key] = std::move(csym);
             } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 FnSymbol fsym{};
@@ -1196,6 +1211,7 @@ public:
                 fsym.line = declNode.nameLine;
                 fsym.col = declNode.nameCol;
                 fsym.endLine = declNode.endLine;
+                fsym.docComment = declNode.docComment;
                 fsym.params.reserve(fdecl->params.size());
                 for (const auto& p : fdecl->params) {
                     Param resolvedP = p;
