@@ -1,5 +1,4 @@
 
 [commands]
-compile = "g++ tests/run_app.cpp -o run_app && ./run_app"
-test_all = "echo ok"
-  
+compile = "cmake -B build -S . && cmake --build build"
+test_all = "cd build && ctest --output-on-failure"

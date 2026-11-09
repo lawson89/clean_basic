@@ -39,6 +39,9 @@ struct TypeNode {
     uint32_t col = 1;
     std::string name;
     std::vector<TypeId> typeArgs;
+    std::vector<bool> paramByref;
+    TypeId returnType = INVALID_ID;
+    bool isFallible = false;
 };
 
 struct Param {
@@ -82,9 +85,7 @@ struct BoolLiteral {
     bool value = false;
 };
 
-struct NullLiteral {
-    uint32_t dummy = 0;
-};
+struct NullLiteral {};
 
 struct Identifier {
     std::string name;
@@ -160,16 +161,6 @@ struct ExprNode {
     const T* getIf() const {
         return std::get_if<T>(&payload);
     }
-
-    template <typename T>
-    T* getIfMut() {
-        return std::get_if<T>(&payload);
-    }
-
-    template <typename T>
-    bool is() const {
-        return std::holds_alternative<T>(payload);
-    }
 };
 
 // ==========================================
@@ -219,7 +210,7 @@ struct RangeSpec {
     ExprId end = INVALID_ID;
     bool hasStep = false;
     ExprId step = INVALID_ID;
-    bool inclusive = false;
+    bool inclusive = true;
 };
 
 struct ForStmt {
@@ -235,6 +226,7 @@ struct SelectCase {
     uint32_t col = 1;
     std::vector<ExprId> matchExprs;
     std::vector<StmtId> body;
+    std::string bindingName;
 };
 
 struct SelectStmt {
@@ -258,13 +250,9 @@ struct ReturnStmt {
     ExprId value = INVALID_ID;
 };
 
-struct BreakStmt {
-    uint32_t dummy = 0;
-};
+struct BreakStmt {};
 
-struct ContinueStmt {
-    uint32_t dummy = 0;
-};
+struct ContinueStmt {};
 
 using StmtVariant = std::variant<
     VarAssignment,
@@ -293,11 +281,6 @@ struct StmtNode {
     template <typename T>
     T* getIfMut() {
         return std::get_if<T>(&payload);
-    }
-
-    template <typename T>
-    bool is() const {
-        return std::holds_alternative<T>(payload);
     }
 };
 
@@ -336,7 +319,19 @@ struct EnumDecl {
     std::string name;
     std::vector<EnumMember> members;
     bool isPub = false;
-    bool hasExplicitIntType = false;
+};
+
+struct UnionVariant {
+    std::string name;
+    TypeId type = INVALID_ID;
+    uint32_t line = 1;
+    uint32_t col = 1;
+};
+
+struct UnionDecl {
+    std::string name;
+    std::vector<UnionVariant> variants;
+    bool isPub = false;
 };
 
 struct ConstDecl {
@@ -362,6 +357,7 @@ using DeclVariant = std::variant<
     AliasDecl,
     TypeDecl,
     EnumDecl,
+    UnionDecl,
     ConstDecl,
     FnDecl
 >;
@@ -385,11 +381,6 @@ struct DeclNode {
     T* getIfMut() {
         return std::get_if<T>(&payload);
     }
-
-    template <typename T>
-    bool is() const {
-        return std::holds_alternative<T>(payload);
-    }
 };
 
 inline const TypeNode& emptyTypeNode() {
@@ -409,14 +400,6 @@ struct AstArena {
             return nullptr;
         }
         return exprs[id].getIf<T>();
-    }
-
-    template <typename T>
-    T* getExprMut(ExprId id) {
-        if (id >= exprs.size()) {
-            return nullptr;
-        }
-        return exprs[id].getIfMut<T>();
     }
 
     template <typename T>
@@ -465,10 +448,28 @@ struct AstArena {
         return types[tid].name == "void";
     }
 
+    TypeId findTypeNode(const TypeNode& node) const {
+        for (size_t i = 0; i < types.size(); ++i) {
+            const TypeNode& existing = types[i];
+            if (existing.name == node.name &&
+                existing.typeArgs == node.typeArgs &&
+                existing.paramByref == node.paramByref &&
+                existing.returnType == node.returnType &&
+                existing.isFallible == node.isFallible) {
+                return static_cast<TypeId>(i);
+            }
+        }
+        return INVALID_ID;
+    }
+
     TypeId findType(std::string_view name, const std::vector<TypeId>& typeArgs = {}) const {
         for (size_t i = 0; i < types.size(); ++i) {
             const TypeNode& existing = types[i];
-            if (existing.name == name && existing.typeArgs == typeArgs) {
+            if (existing.name == name &&
+                existing.typeArgs == typeArgs &&
+                existing.paramByref.empty() &&
+                existing.returnType == INVALID_ID &&
+                !existing.isFallible) {
                 return static_cast<TypeId>(i);
             }
         }
@@ -476,7 +477,7 @@ struct AstArena {
     }
 
     TypeId addType(TypeNode node) {
-        const TypeId existing = findType(node.name, node.typeArgs);
+        const TypeId existing = findTypeNode(node);
         if (existing != INVALID_ID) {
             return existing;
         }
@@ -858,11 +859,6 @@ inline std::string makeCppConstName(std::string_view moduleId, std::string_view 
 // ==========================================
 // AST Helpers
 // ==========================================
-
-template <typename T>
-inline bool isDecl(const AstArena& arena, DeclId id) {
-    return id != INVALID_ID && id < arena.decls.size() && std::holds_alternative<T>(arena.decls[id].payload);
-}
 
 template <typename T>
 inline const T& asStmt(const AstArena& arena, StmtId id) {

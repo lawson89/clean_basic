@@ -38,11 +38,19 @@ inline bool isDigitChar(char c) {
     return c >= '0' && c <= '9';
 }
 
+inline bool isHexDigitChar(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+inline bool isBinDigitChar(char c) {
+    return c == '0' || c == '1';
+}
+
 inline bool isSingleKeyword(std::string_view word) {
     static const std::vector<std::string_view> keywords = {
-        "import", "as", "pub", "extern", "alias", "type", "enum", "fn",
+        "import", "as", "pub", "extern", "alias", "type", "enum", "union", "fn",
         "dim", "const", "byref", "if", "else",
-        "for", "in", "to", "step", "while", "case", "defer", "on", "error",
+        "for", "in", "to", "until", "step", "while", "case", "defer", "on", "error",
         "return", "break", "continue", "and", "or", "not",
         "true", "false", "null"
     };
@@ -87,7 +95,7 @@ inline bool matchSecondWordForMultiKw(std::string_view first, std::string_view s
     }
     if (first == "end") {
         return second == "select" || second == "if" || second == "fn" ||
-               second == "type" || second == "enum" || second == "for" || second == "while" ||
+               second == "type" || second == "enum" || second == "union" || second == "for" || second == "while" ||
                second == "defer" || second == "error";
     }
     return false;
@@ -233,11 +241,10 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             return LexResult{false, {}, makeError("LexerError", "C-style operator '!' is forbidden in CleanBasic; use 'not' instead.", fileStr, lineNum, col)};
         }
 
-        // 5a. Byte string literal: b"..." or B"..."
-        if ((ch == 'b' || ch == 'B') && i + 1 < n && code[i + 1] == '"') {
+        auto scanQuotedLiteral = [&](std::size_t prefixLen, std::string_view tokKind, std::string_view errMsg) -> bool {
             const char quote = '"';
             const std::size_t startIdx = i;
-            i += 2;
+            i += prefixLen;
             bool closed = false;
             while (i < n && code[i] != nlCh) {
                 if (code[i] == backslashChar && i + 1 < n) {
@@ -253,21 +260,18 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             }
             if (!closed) {
                 res.ok = false;
-                res.error = makeError(
-                    "LexerError",
-                    "Unterminated byte string literal",
-                    fileStr,
-                    lineNum,
-                    col
-                );
+                res.error = makeError("LexerError", std::string(errMsg), fileStr, lineNum, col);
+                return false;
+            }
+            res.tokens.push_back(Token{std::string(tokKind), std::string(code.substr(startIdx, i - startIdx)), lineNum, col});
+            return true;
+        };
+
+        // 5a. Byte string literal: b"..." or B"..."
+        if ((ch == 'b' || ch == 'B') && i + 1 < n && code[i + 1] == '"') {
+            if (!scanQuotedLiteral(2, "BYTES", "Unterminated byte string literal")) {
                 return res;
             }
-            Token tok{};
-            tok.kind = "BYTES";
-            tok.value = std::string(code.substr(startIdx, i - startIdx));
-            tok.line = lineNum;
-            tok.col = col;
-            res.tokens.push_back(std::move(tok));
             continue;
         }
 
@@ -310,39 +314,9 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
 
         // 5. String literal
         if (ch == '"') {
-            const char quote = '"';
-            const std::size_t startIdx = i;
-            i += 1;
-            bool closed = false;
-            while (i < n && code[i] != nlCh) {
-                if (code[i] == backslashChar && i + 1 < n) {
-                    i += 2;
-                    continue;
-                }
-                if (code[i] == quote) {
-                    i += 1;
-                    closed = true;
-                    break;
-                }
-                i += 1;
-            }
-            if (!closed) {
-                res.ok = false;
-                res.error = makeError(
-                    "LexerError",
-                    "Unterminated string literal",
-                    fileStr,
-                    lineNum,
-                    col
-                );
+            if (!scanQuotedLiteral(1, "STRING", "Unterminated string literal")) {
                 return res;
             }
-            Token tok{};
-            tok.kind = "STRING";
-            tok.value = std::string(code.substr(startIdx, i - startIdx));
-            tok.line = lineNum;
-            tok.col = col;
-            res.tokens.push_back(std::move(tok));
             continue;
         }
 
@@ -392,21 +366,62 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             continue;
         }
 
-        // 7. Numbers
+        // 7. Numbers (Decimal, Hexadecimal 0x..., Binary 0b..., and optional '_' separators)
         if (isDigitChar(ch)) {
-            const std::size_t startIdx = i;
-            while (i < n && isDigitChar(code[i])) {
+            if (ch == '0' && i + 1 < n && (code[i + 1] == 'x' || code[i + 1] == 'X')) {
+                i += 2;
+                std::string normHex = "0x";
+                bool hasHexDigit = false;
+                while (i < n && (isHexDigitChar(code[i]) || code[i] == '_')) {
+                    if (code[i] != '_') {
+                        normHex.push_back(code[i]);
+                        hasHexDigit = true;
+                    }
+                    i += 1;
+                }
+                if (!hasHexDigit || (i < n && isIdentChar(code[i]))) {
+                    return LexResult{false, {}, makeError("LexerError", "Invalid hexadecimal integer literal", fileStr, lineNum, col)};
+                }
+                res.tokens.push_back(Token{"NUMBER", std::move(normHex), lineNum, col});
+                continue;
+            }
+            if (ch == '0' && i + 1 < n && (code[i + 1] == 'b' || code[i + 1] == 'B')) {
+                i += 2;
+                std::string normBin = "0b";
+                bool hasBinDigit = false;
+                while (i < n && (isBinDigitChar(code[i]) || code[i] == '_')) {
+                    if (code[i] != '_') {
+                        normBin.push_back(code[i]);
+                        hasBinDigit = true;
+                    }
+                    i += 1;
+                }
+                if (!hasBinDigit || (i < n && isIdentChar(code[i]))) {
+                    return LexResult{false, {}, makeError("LexerError", "Invalid binary integer literal", fileStr, lineNum, col)};
+                }
+                res.tokens.push_back(Token{"NUMBER", std::move(normBin), lineNum, col});
+                continue;
+            }
+            std::string normNum;
+            while (i < n && (isDigitChar(code[i]) || code[i] == '_')) {
+                if (code[i] != '_') {
+                    normNum.push_back(code[i]);
+                }
                 i += 1;
             }
             if (i + 1 < n && code[i] == '.' && isDigitChar(code[i + 1])) {
+                normNum.push_back('.');
                 i += 1;
-                while (i < n && isDigitChar(code[i])) {
+                while (i < n && (isDigitChar(code[i]) || code[i] == '_')) {
+                    if (code[i] != '_') {
+                        normNum.push_back(code[i]);
+                    }
                     i += 1;
                 }
             }
             Token tok{};
             tok.kind = "NUMBER";
-            tok.value = std::string(code.substr(startIdx, i - startIdx));
+            tok.value = std::move(normNum);
             tok.line = lineNum;
             tok.col = col;
             res.tokens.push_back(std::move(tok));

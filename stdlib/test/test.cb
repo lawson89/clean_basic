@@ -1,0 +1,44 @@
+pub alias TestFn = fn() can error
+
+pub type TestCase
+    name as str
+    runFn as TestFn
+end type
+
+pub type Suite
+    name as str
+    cases as list[TestCase]
+end type
+
+pub fn newSuite(name as str) as Suite
+    return Suite(name=name, cases=[])
+end fn
+
+pub fn add(byref s as Suite, name as str, runFn as TestFn)
+    s.cases.push(TestCase(name=name, runFn=runFn))
+end fn
+
+pub fn run(byref s as Suite) as int
+    print("Running suite: " & s.name)
+    dim passed = 0
+    dim failed = 0
+    for tc in s.cases
+        on error e
+            print("  [FAIL] " & tc.name)
+            print("         " & e.msg)
+            print("         at " & e.file & ":" & e.line.toStr())
+            failed = failed + 1
+            continue
+        end error
+        
+        tc.runFn()
+        print("  [PASS] " & tc.name)
+        passed = passed + 1
+    end for
+    
+    print("Passed: " & passed.toStr() & ", Failed: " & failed.toStr())
+    if failed > 0
+        return 1
+    end if
+    return 0
+end fn

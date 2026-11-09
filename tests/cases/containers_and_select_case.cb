@@ -1,10 +1,15 @@
 ' EXPECT_CPP: int64_t testContainers(const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& lookup)
 ' EXPECT_CPP: static_cast<int64_t>(nums.size())
+' EXPECT_CPP: cbListSlice(
+' EXPECT_CPP: cbListSort(
+' EXPECT_CPP: cbDictKeys(
 ' FORBID_CPP: std::list
 ' EXPECT_OUT: first: 10
 ' EXPECT_OUT: empty: 0
 ' EXPECT_OUT: score: 42
 ' EXPECT_OUT: hasAlice: true, hasCharlie: false, popped: 30, removedBob: true, afterClear: 0
+' EXPECT_OUT: sorted: 5,20,40,0, contains20: true, contains99: false, slice: 10,20, sliceFrom: 20,40, removedAt1: 10, afterRemoveLen: 3
+' EXPECT_OUT: keys: alpha,beta,gamma,
 
 fn testContainers(nums as list[int], lookup as dict[str, int]) as int
     select case nums.len()
@@ -31,4 +36,20 @@ fn main()
     nums.clear()
     scores.clear()
     print($"hasAlice: {hasAlice}, hasCharlie: {hasCharlie}, popped: {popped}, removedBob: {removedBob}, afterClear: {nums.len() + scores.len()}")
+
+    dim items as list[int] = [40, 10, 5, 20]
+    items.sort()
+    dim sub1 = items.slice(1, 3)
+    dim sub2 = items.sliceFrom(2)
+    dim c20 = items.contains(20)
+    dim c99 = items.contains(99)
+    dim rem1 = items.removeAt(1)
+    print($"sorted: {items[0]},{items[1]},{items[2]},{items[3]}, contains20: {c20}, contains99: {c99}, slice: {sub1[0]},{sub1[1]}, sliceFrom: {sub2[0]},{sub2[1]}, removedAt1: {rem1}, afterRemoveLen: {items.len()}")
+
+    dim d as dict[str, int] = {"gamma": 3, "alpha": 1, "beta": 2}
+    dim kout = ""
+    for k in d.keys()
+        kout &= k & ","
+    end for
+    print("keys: " & kout)
 end fn

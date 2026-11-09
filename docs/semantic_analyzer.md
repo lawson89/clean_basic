@@ -1,6 +1,6 @@
 # Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility
 
-This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/symbols.hpp`, `src/cleanbasic/type_infer.hpp`, and `src/cleanbasic/analyzer.hpp`), including the `GlobalSymbolTable` architecture, two-pass symbol registration, type alias cycle detection, Unified Function Call Syntax (UFCS) resolution, struct constructor resolution, `const`/`dim`/`byref` mutability enforcement, and static error-handling verification.
+This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/symbols.hpp` and `src/cleanbasic/analyzer.hpp`), including the `GlobalSymbolTable` architecture, two-pass symbol registration, type alias cycle detection, Unified Function Call Syntax (UFCS) resolution, struct constructor resolution, `const`/`dim`/`byref` mutability enforcement, and static error-handling verification.
 
 ### Related Documentation
 * [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
@@ -37,7 +37,7 @@ struct GlobalSymbolTable {
 
 ### Symbol Table Components
 * **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
-* **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `hasExplicitIntType`, `members` map, `cppName`).
+* **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `members`, `memberValues` map, `cppName`).
 * **`aliases` (`key -> AliasSymbol`)**: Stores every `alias Name = TargetType` declaration (`name`, `moduleId`, `key`, `targetType`, `isPub`, `cppName`).
 * **`functions` (`key -> FnSymbol`)**: Stores every function signature (`name`, `moduleId`, `key`, resolved `params`, resolved `returnType`, `isFallible`, `isPub`, `isExtern`, `cppName`).
 * **`headers` & `linkLibs`**: Deduplicated ordered lists of `import header "..."` and `import link "..."` targets across all loaded modules.
@@ -59,14 +59,16 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 | `bytes` | `symbols.typeBytes` | Raw binary buffer (`std::vector<uint8_t>`). |
 | `bool` | `symbols.typeBool` | Boolean primitive (`true` / `false`). |
 | `cptr` | `symbols.typeCptr` | Opaque C pointer (`void*`) for C/C++ FFI handles. |
-| `err` | `symbols.typeErr` | Built-in structured error type (`CbError`) with `.msg as str` and `.code as int` fields. |
+| `err` | `symbols.typeErr` | Built-in structured error type (`CbError`) with `.msg as str`, `.code as int`, `.file as str`, and `.line as int` fields. |
 | `list[T]` | Parametric `TypeNode{"list", {T}}` | Dynamic contiguous array (`std::vector<T>`). |
 | `dict[K, V]` | Parametric `TypeNode{"dict", {K, V}}` | Hash table (`std::unordered_map<K, V>`). |
+| `fn(...)` | Parametric `TypeNode{"fn", ...}` | Stateless function reference type (`std::function<...>`). |
 | `void`, `auto`, `null` | Internal compiler type handles | Used for void return types, type inference fallbacks, and `null` literals. |
 
 ### 2.2 Built-in Functions (`isBuiltinSymbolName`)
 * **`print(...)`**: Variadic standard output function (infallible, lowered to `(std::cout << ... << std::endl)` in the emitter).
-* **`error(msg..., [code=N])`**: Special built-in intrinsic validated by `isErrorBuiltinCall()`. Raises and returns a `CbError{msg, code}` value from a `can error` function (default `code = 1`).
+* **`error(msg..., [code=N])`**: Special built-in intrinsic validated by `isErrorBuiltinCall()`. Raises and returns a `CbError{msg, code, file, line}` value from a `can error` function (default `code = 1`).
+* **`assert(cond, [msg])`**: Fallible built-in intrinsic validated by `isAssertBuiltinCall()`. Evaluates `cond as bool` and raises a `CbError` with `.file`, `.line`, and automatic runtime comparison values when `cond` is a comparison operator.
 
 ### 2.3 Built-in Receiver Methods
 
@@ -76,9 +78,15 @@ CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 * **`.push(item as T)`**: Supported on `list[T]` and `bytes` (octet). Appends an item to the end of the list.
 * **`.pop() as T`**: Supported on `list[T]` and `bytes` (returns `int`). Removes and returns the last element.
 * **`.clear()`**: Supported on `list[T]`, `dict[K, V]`, and `bytes`. Removes all elements in place.
+* **`list[T].slice(start as int, stop as int) as list[T]` & `list[T].sliceFrom(start as int) as list[T]`**: Bounds-clamped sub-list extraction.
+* **`list[T].contains(val as T) as bool`**: Returns `true` if `val` is present in the list.
+* **`list[T].sort()` & `list[T].removeAt(idx as int) as T`**: In-place sorting and bounds-safe indexed removal (rejected on `const` receivers).
 * **`dict.get(key as K, defaultValue as V) as V`**: Returns the value associated with `key` if present, or `defaultValue` without mutating the dictionary.
 * **`dict.has(key as K) as bool`**: Returns `true` if `key` exists in the dictionary without mutating it.
 * **`dict.remove(key as K) as bool`**: Removes `key` from the dictionary and returns `true` if an entry was removed.
+* **`dict.keys() as list[K]`**: Returns all dictionary keys as a `list[K]` (sorted deterministically when `K` is orderable).
+* **`int` Bitwise Methods**: `.bitAnd(y)`, `.bitOr(y)`, `.bitXor(y)`, `.bitNot()`, `.shl(bits)`, and `.shr(bits)`.
+* **`union.kind() as str`**: Returns the active variant name of a tagged `union` sum type.
 * **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
 * **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
 * **`bytes` Methods & Static Constructor**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, and static constructor `bytes.fromHex(hex as str) as bytes can error`.

@@ -23,7 +23,7 @@ For deep-dive technical documentation on each compiler stage, consult:
 ```ebnf
 Program         ::= TopLevelDecl*
 
-TopLevelDecl    ::= ImportDecl | ConstDecl | AliasDecl | TypeDecl | EnumDecl | FnDecl
+TopLevelDecl    ::= ImportDecl | ConstDecl | AliasDecl | TypeDecl | EnumDecl | UnionDecl | FnDecl
 
 ImportDecl      ::= "import" (StringLiteral | QualifiedIdent) ["as" Identifier] NEWLINE
                   | "import header" StringLiteral NEWLINE
@@ -35,6 +35,9 @@ AliasDecl       ::= ["pub"] "alias" Identifier "=" Type NEWLINE
 
 EnumDecl        ::= ["pub"] "enum" Identifier ["as" "int"] NEWLINE EnumMember* "end enum" NEWLINE
 EnumMember      ::= Identifier ["=" Expr] NEWLINE
+
+UnionDecl       ::= ["pub"] "union" Identifier NEWLINE UnionVariant+ "end union" NEWLINE
+UnionVariant    ::= Identifier "as" Type NEWLINE
 
 TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
                   | ["pub"] "extern" "type" Identifier NEWLINE
@@ -63,7 +66,7 @@ IfStmt          ::= "if" Expr NEWLINE Statement*
                     ["else" NEWLINE Statement*]
                     "end if" NEWLINE
 
-ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
+ForStmt         ::= "for" Identifier "=" Expr ("to" | "until") Expr ["step" Expr] NEWLINE
                     Statement*
                     "end for" NEWLINE
                   | "for" IdentList "in" Expr NEWLINE
@@ -71,7 +74,7 @@ ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
                     "end for" NEWLINE
 
 SelectStmt      ::= "select case" Expr NEWLINE
-                    ("case" ExprList NEWLINE Statement*)*
+                    ("case" ExprList ["as" Identifier] NEWLINE Statement*)*
                     ["case else" NEWLINE Statement*]
                     "end select" NEWLINE
 ExprList        ::= Expr ("," Expr)*
@@ -111,7 +114,10 @@ DictEntry       ::= Expr ":" Expr
 Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err" | "bytes"
                   | "list" "[" Type "]"
                   | "dict" "[" Type "," Type "]"
+                  | FnType
                   | QualifiedIdent
+FnType          ::= "fn" "(" [FnTypeParam ("," FnTypeParam)* [","]] ")" ["as" Type] ["can error"]
+FnTypeParam     ::= ["byref"] [Identifier "as"] Type
 
 IdentList       ::= Identifier ("," Identifier)*
 QualifiedIdent  ::= Identifier ("." Identifier)*

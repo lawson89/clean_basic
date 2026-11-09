@@ -13,6 +13,8 @@
 ' EXPECT_OUT: Endian U16Le: 4660, U16Be: 4660, U32Le: 287454020
 ' EXPECT_OUT: Whole file bytes match: true
 ' EXPECT_OUT: Streamed bytes match: aabb and ccdd
+' EXPECT_OUT: Numerics & bitwise: hex=255, bin=165, sep=1000000, and=15, or=255, xor=240, shl=1024, shr=16
+' EXPECT_OUT: Union kinds & match: number:42 | add(10,20) | label:start | fallback
 ' EXPECT_OUT: Interp basic: Method=post, code=1, sum=30, ok=true
 ' EXPECT_OUT: Interp braces & nested: {post: 200} / dict=42
 
@@ -26,10 +28,58 @@ enum HttpMethod
 end enum
 
 enum FileAccess as int
-    read = 1
-    write = 2
-    readWrite = 3
+    read = 0b0001
+    write = 0b0010
+    readWrite = 0x03
 end enum
+
+type NumberLit
+    val as int
+end type
+
+type BinaryOpNode
+    op as str
+    left as int
+    right as int
+end type
+
+union ExprItem
+    number as NumberLit
+    binary as BinaryOpNode
+    label as str
+    empty as int
+end union
+
+fn evalExprItem(e as ExprItem) as str
+    select case e
+        case number as numLit
+            return e.kind() & ":" & numLit.val.toStr()
+        case binary as binOp
+            return binOp.op & "(" & binOp.left.toStr() & "," & binOp.right.toStr() & ")"
+        case label as lbl
+            return e.kind() & ":" & lbl
+        case else
+            return "fallback"
+    end select
+end fn
+
+fn testNumericsBitwiseAndUnions()
+    dim hx = 0xFF
+    dim bn = 0b1010_0101
+    dim mil = 1_000_000
+    dim bAnd = hx.bitAnd(0x0F)
+    dim bOr = (0xF0).bitOr(0x0F)
+    dim bXor = hx.bitXor(0x0F)
+    dim bShl = (1).shl(10)
+    dim bShr = (0x100).shr(4)
+    print($"Numerics & bitwise: hex={hx}, bin={bn}, sep={mil}, and={bAnd}, or={bOr}, xor={bXor}, shl={bShl}, shr={bShr}")
+
+    dim e1 = ExprItem.number(NumberLit(val=42))
+    dim e2 = ExprItem.binary(BinaryOpNode(op="add", left=10, right=20))
+    dim e3 = ExprItem.label("start")
+    dim e4 = ExprItem.empty(0)
+    print("Union kinds & match: " & evalExprItem(e1) & " | " & evalExprItem(e2) & " | " & evalExprItem(e3) & " | " & evalExprItem(e4))
+end fn
 
 fn lookupK(d as dict[str, int]) as int
     return d["k"] + d.get("missing", 0)
@@ -137,6 +187,7 @@ fn main() as int
     testEnums()
     testBytesBuffers()
     testBinaryFiles()
+    testNumericsBitwiseAndUnions()
     dim m = HttpMethod.post
     dim a = 10
     dim b = 20

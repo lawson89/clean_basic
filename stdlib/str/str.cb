@@ -1,7 +1,7 @@
 ' CleanBasic Standard Library: std/str
 ' UTF-8 codepoint-safe string processing, searching, splitting, trimming, slicing, and explicit ascii_* helpers
 
-import header "str_bridge.hpp"
+import header "str/str_bridge.hpp"
 
 ' UTF-8 Inspection & Codepoints
 extern fn cbStrUtf8Len(s as str) as int

@@ -125,15 +125,24 @@ inline std::string readDocumentText(const LspServerState& state, std::string_vie
     return ss.str();
 }
 
+inline LspDocumentSnapshot makeSnapshotFromCheckResult(CheckSourceResult&& checkRes) {
+    return LspDocumentSnapshot{
+        true,
+        std::move(checkRes.arena),
+        std::move(checkRes.program),
+        std::move(checkRes.symbols)
+    };
+}
+
 inline LspDocumentSnapshot getOrBuildSnapshot(LspServerState& state, std::string_view uri) {
     const std::string uriKey(uri);
     const std::string filePath = uriToFilePath(uri);
     const std::string text = readDocumentText(state, uri);
     if (!text.empty()) {
         const auto openBuffers = buildOpenFileBuffers(state);
-        const CheckSourceResult checkRes = checkSource(text, filePath, openBuffers);
+        CheckSourceResult checkRes = checkSource(text, filePath, openBuffers);
         if (checkRes.ok) {
-            LspDocumentSnapshot snap{true, checkRes.arena, checkRes.program, checkRes.symbols};
+            LspDocumentSnapshot snap = makeSnapshotFromCheckResult(std::move(checkRes));
             state.snapshots[uriKey] = snap;
             return snap;
         }
@@ -221,6 +230,24 @@ inline std::string formatCleanbasicType(const AstArena& arena, TypeId tid) {
     if (tid == INVALID_ID || tid >= arena.types.size()) return "void";
     const TypeNode& tn = arena.types[tid];
     if (tn.name.empty() || tn.name == "void") return "void";
+    if (tn.name == "fn") {
+        std::string out = "fn(";
+        for (size_t i = 0; i < tn.typeArgs.size(); ++i) {
+            if (i > 0) out += ", ";
+            if (i < tn.paramByref.size() && tn.paramByref[i]) {
+                out += "byref ";
+            }
+            out += formatCleanbasicType(arena, tn.typeArgs[i]);
+        }
+        out += ")";
+        if (!arena.isVoid(tn.returnType)) {
+            out += " as " + formatCleanbasicType(arena, tn.returnType);
+        }
+        if (tn.isFallible) {
+            out += " can error";
+        }
+        return out;
+    }
     const auto [modId, baseName] = splitSymbolKey(tn.name);
     std::string out = baseName;
     if (!tn.typeArgs.empty()) {
@@ -297,6 +324,24 @@ inline std::string formatEnumHoverMarkdown(const EnumSymbol& es) {
     return wrapVbCodeBlock(code);
 }
 
+inline std::string formatUnionHoverMarkdown(const AstArena& arena, const UnionSymbol& us) {
+    const std::string nl(1, static_cast<char>(10));
+    std::string code;
+    if (us.isPub) {
+        code += "pub ";
+    }
+    code += "union " + us.name + nl;
+    for (const auto& uv : us.variants) {
+        TypeId vtid = uv.type;
+        const auto vit = us.variantTypes.find(uv.name);
+        if (vit != us.variantTypes.end()) {
+            vtid = vit->second;
+        }
+        code += "    " + uv.name + " as " + formatCleanbasicType(arena, vtid) + nl;
+    }
+    code += "end union";
+    return wrapVbCodeBlock(code);
+}
 inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalSymbolTable& symbols, const AliasSymbol& al) {
     std::string code;
     if (al.isPub) code += "pub ";
@@ -334,9 +379,12 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     }
     if (name == "len") {
         return wrapVbCodeBlock("fn .len() as int") + "\nReturns the number of elements in a list, dict, or str.";
+    if (name == "error") {
+        return wrapVbCodeBlock("fn error(msg as str, [code=1]) as err") + "Raises and returns a structured err value from a can error function.";
     }
-    if (name == "toStr") {
-        return wrapVbCodeBlock("fn .toStr() as str") + "\nConverts a numeric, boolean, or err value to a str.";
+    if (name == "assert") {
+        return wrapVbCodeBlock("fn assert(cond as bool, [msg as str]) can error") + "Asserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false.";
+    }
     }
     if (name == "toInt") {
         return wrapVbCodeBlock("fn .toInt() as int") + "\nConverts a numeric or boolean value to an int.";
@@ -372,10 +420,49 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
         return wrapVbCodeBlock("fn .toBytes() as bytes") + "\nEncodes a str into a UTF-8 bytes buffer.";
     }
     if (name == "toHex") {
-        return wrapVbCodeBlock("fn .toHex() as str") + "\nEncodes a bytes buffer as a lowercase hexadecimal string.";
+        return wrapVbCodeBlock("fn .toHex() as str") + "Encodes a bytes buffer as a lowercase hexadecimal string.";
     }
     if (name == "toUtf8") {
-        return wrapVbCodeBlock("fn .toUtf8() as str can error") + "\nValidates and decodes a bytes buffer into a UTF-8 str.";
+        return wrapVbCodeBlock("fn .toUtf8() as str can error") + "Validates and decodes a bytes buffer into a UTF-8 str.";
+    }
+    if (name == "slice") {
+        return wrapVbCodeBlock("fn .slice(start as int, stop as int)") + "Returns a bounds-clamped sub-slice [start, stop) of a list or bytes buffer.";
+    }
+    if (name == "sliceFrom") {
+        return wrapVbCodeBlock("fn .sliceFrom(start as int)") + "Returns a bounds-clamped sub-slice from start to the end of a list or bytes buffer.";
+    }
+    if (name == "contains") {
+        return wrapVbCodeBlock("fn .contains(val as T) as bool") + "Returns true if the list contains val.";
+    }
+    if (name == "sort") {
+        return wrapVbCodeBlock("fn .sort()") + "Sorts the elements of a list in ascending order in place.";
+    }
+    if (name == "removeAt") {
+        return wrapVbCodeBlock("fn .removeAt(idx as int) as T") + "Removes and returns the element at index idx in a list (or default T{} if out of bounds).";
+    }
+    if (name == "keys") {
+        return wrapVbCodeBlock("fn .keys() as list[K]") + "Returns a list of all keys in a dict (sorted deterministically when K is orderable).";
+    }
+    if (name == "bitAnd") {
+        return wrapVbCodeBlock("fn .bitAnd(y as int) as int") + "Returns the bitwise AND of two 64-bit integers.";
+    }
+    if (name == "bitOr") {
+        return wrapVbCodeBlock("fn .bitOr(y as int) as int") + "Returns the bitwise OR of two 64-bit integers.";
+    }
+    if (name == "bitXor") {
+        return wrapVbCodeBlock("fn .bitXor(y as int) as int") + "Returns the bitwise XOR of two 64-bit integers.";
+    }
+    if (name == "bitNot") {
+        return wrapVbCodeBlock("fn .bitNot() as int") + "Returns the bitwise NOT (~x) of a 64-bit integer.";
+    }
+    if (name == "shl") {
+        return wrapVbCodeBlock("fn .shl(bits as int) as int") + "Shifts a 64-bit integer left by bits (0..63), returning 0 if bits is out of range.";
+    }
+    if (name == "shr") {
+        return wrapVbCodeBlock("fn .shr(bits as int) as int") + "Performs a logical unsigned 64-bit right shift by bits (0..63), returning 0 if bits is out of range.";
+    }
+    if (name == "kind") {
+        return wrapVbCodeBlock("fn .kind() as str") + "Returns the active variant name of a tagged union as a str.";
     }
     return std::nullopt;
 }
@@ -496,8 +583,8 @@ inline void publishEmptyDiagnostics(std::string_view uri, std::ostream& out) {
 inline void publishDocumentDiagnostics(LspServerState& state, std::string_view uri, std::string_view text, std::ostream& out) {
     const std::string filePath = uriToFilePath(uri);
     const auto openBuffers = buildOpenFileBuffers(state);
-    const CheckSourceResult checkRes = checkSource(text, filePath, openBuffers);
-    if (checkRes.ok) state.snapshots[std::string(uri)] = LspDocumentSnapshot{true, checkRes.arena, checkRes.program, checkRes.symbols};
+    CheckSourceResult checkRes = checkSource(text, filePath, openBuffers);
+    if (checkRes.ok) state.snapshots[std::string(uri)] = makeSnapshotFromCheckResult(std::move(checkRes));
     JsonArena arena;
     const JsonId root = jsonAddObject(arena);
     jsonObjectSet(arena, root, "jsonrpc", jsonAddString(arena, "2.0"));

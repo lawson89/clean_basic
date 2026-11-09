@@ -36,6 +36,14 @@ inline void handleDocumentSymbolRequest(LspServerState& state, const JsonArena& 
                     }
                     jsonObjectSet(outArena, symObj, "children", childrenArr);
                     jsonArrayPush(outArena, symbolsArr, symObj);
+                } else if (const auto* ud = snap.arena.getDecl<UnionDecl>(did)) {
+                    const JsonId symObj = makeLspDocSymbol(outArena, ud->name, "union", 23, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol);
+                    const JsonId childrenArr = jsonAddArray(outArena);
+                    for (const auto& uv : ud->variants) {
+                        jsonArrayPush(outArena, childrenArr, makeLspDocSymbol(outArena, uv.name, formatCleanbasicType(snap.arena, uv.type), 22, uv.line, uv.col, uv.line, uv.line, uv.col));
+                    }
+                    jsonObjectSet(outArena, symObj, "children", childrenArr);
+                    jsonArrayPush(outArena, symbolsArr, symObj);
                 } else if (const auto* al = snap.arena.getDecl<AliasDecl>(did)) {
                     jsonArrayPush(outArena, symbolsArr, makeLspDocSymbol(outArena, al->name, "= " + formatCleanbasicType(snap.arena, al->targetType), 26, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
                 } else if (const auto* cd = snap.arena.getDecl<ConstDecl>(did)) {
@@ -145,6 +153,10 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         res.hoverMarkdown = formatEnumHoverMarkdown(es);
         if (!es.fileName.empty()) res.definition = makeDefTarget(es.fileName, es.line, es.col, es.name.size());
     };
+    const auto bindUnion = [&](const UnionSymbol& us) {
+        res.hoverMarkdown = formatUnionHoverMarkdown(snap.arena, us);
+        if (!us.fileName.empty()) res.definition = makeDefTarget(us.fileName, us.line, us.col, us.name.size());
+    };
     const auto bindConst = [&](const ConstSymbol& cs) {
         res.hoverMarkdown = formatConstHoverMarkdown(snap.arena, cs);
         if (!cs.fileName.empty()) res.definition = makeDefTarget(cs.fileName, cs.line, cs.col, cs.name.size());
@@ -161,6 +173,8 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
             if (tyIt != snap.symbols.types.end()) { bindType(tyIt->second); return res; }
             const auto enIt = snap.symbols.enums.find(qkey);
             if (enIt != snap.symbols.enums.end()) { bindEnum(enIt->second); return res; }
+            const auto unIt = snap.symbols.unions.find(qkey);
+            if (unIt != snap.symbols.unions.end()) { bindUnion(unIt->second); return res; }
             const auto alIt = snap.symbols.aliases.find(qkey);
             if (alIt != snap.symbols.aliases.end()) { bindAlias(alIt->second); return res; }
             const auto coIt = snap.symbols.constants.find(qkey);
@@ -174,6 +188,22 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
                     res.hoverMarkdown = wrapVbCodeBlock("(enum member) " + enumOpt->name + "." + member + " = " + std::to_string(vit->second));
                     if (!enumOpt->fileName.empty()) {
                         res.definition = makeDefTarget(enumOpt->fileName, enumOpt->line, enumOpt->col, enumOpt->name.size());
+                    }
+                    return res;
+                }
+            }
+            const auto unionOpt = resolveUnionSymbolByName(snap.arena, snap.symbols, currentModId, recv);
+            if (unionOpt.has_value()) {
+                const auto vtIt = unionOpt->variantTypes.find(member);
+                if (vtIt != unionOpt->variantTypes.end()) {
+                    res.hoverMarkdown = wrapVbCodeBlock("(union variant) " + unionOpt->name + "." + member + "(payload as " + formatCleanbasicType(snap.arena, vtIt->second) + ") as " + unionOpt->name);
+                    if (!unionOpt->fileName.empty()) {
+                        for (const auto& uv : unionOpt->variants) {
+                            if (uv.name == member) {
+                                res.definition = makeDefTarget(unionOpt->fileName, uv.line, uv.col, uv.name.size());
+                                break;
+                            }
+                        }
                     }
                     return res;
                 }
@@ -238,6 +268,8 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
     if (tyIt != snap.symbols.types.end() && !isBuiltinTypeName(tok.value)) { bindType(tyIt->second); return res; }
     const auto enIt = snap.symbols.enums.find(symKey);
     if (enIt != snap.symbols.enums.end()) { bindEnum(enIt->second); return res; }
+    const auto unIt = snap.symbols.unions.find(symKey);
+    if (unIt != snap.symbols.unions.end()) { bindUnion(unIt->second); return res; }
     const auto coIt = snap.symbols.constants.find(symKey);
     if (coIt != snap.symbols.constants.end()) { bindConst(coIt->second); return res; }
     for (const auto& kv : snap.symbols.types) {

@@ -1,11 +1,16 @@
 ' EXPECT_CPP: for (int64_t i = 0; i <= 10; i += 2) {
 ' EXPECT_CPP: for (int64_t i = 10; i >= 2; i += (-2)) {
+' EXPECT_CPP: for (int64_t i = 0; i < 5; i += 1) {
 ' EXPECT_CPP: for (auto& x : nums) {
+' EXPECT_CPP: cbStrUtf8Chars(
 ' FORBID_CPP: throw
 ' EXPECT_OUT: inclusiveEvens: 30
 ' EXPECT_OUT: countdownEvens: 30
+' EXPECT_OUT: halfOpenSum: 10
 ' EXPECT_OUT: itemsSum: 60
 ' EXPECT_OUT: indexedSum: 140
+' EXPECT_OUT: strChars: a|é|🚀|
+' EXPECT_OUT: strIndexed: 0:a,1:é,2:🚀,
 
 fn sumEvens() as int
     dim total = 0
@@ -20,6 +25,14 @@ end fn
 fn sumCountdownEvens() as int
     dim total = 0
     for i = 10 to 2 step -2
+        total += i
+    end for
+    return total
+end fn
+
+fn sumHalfOpen() as int
+    dim total = 0
+    for i = 0 until 5
         total += i
     end for
     return total
@@ -43,9 +56,26 @@ fn sumIndexedItems() as int
     return sum
 end fn
 
+fn iterateStrings()
+    dim s = "aé🚀"
+    dim out1 = ""
+    for ch in s
+        out1 &= ch & "|"
+    end for
+    print("strChars: " & out1)
+
+    dim out2 = ""
+    for idx, ch in s
+        out2 &= idx.toStr() & ":" & ch & ","
+    end for
+    print("strIndexed: " & out2)
+end fn
+
 fn main()
     print("inclusiveEvens: ", sumEvens())
     print("countdownEvens: ", sumCountdownEvens())
+    print("halfOpenSum: ", sumHalfOpen())
     print("itemsSum: " & sumItems())
     print("indexedSum: " & sumIndexedItems())
+    iterateStrings()
 end fn

@@ -55,9 +55,9 @@ inline LspDocumentSnapshot getOrBuildScrubbedSnapshot(LspServerState& state, std
     const std::string filePath = uriToFilePath(uri);
     const auto openBuffers = buildOpenFileBuffers(state);
     if (!sourceText.empty()) {
-        const CheckSourceResult directRes = checkSource(sourceText, filePath, openBuffers);
+        CheckSourceResult directRes = checkSource(sourceText, filePath, openBuffers);
         if (directRes.ok) {
-            LspDocumentSnapshot snap{true, directRes.arena, directRes.program, directRes.symbols};
+            LspDocumentSnapshot snap = makeSnapshotFromCheckResult(std::move(directRes));
             state.snapshots[uriKey] = snap;
             return snap;
         }
@@ -65,8 +65,8 @@ inline LspDocumentSnapshot getOrBuildScrubbedSnapshot(LspServerState& state, std
         const std::string scrubbedText = scrubIncompleteLineInSource(sourceText, slice);
         auto scrubbedBuffers = openBuffers;
         scrubbedBuffers[filePath] = scrubbedText;
-        const CheckSourceResult scrubbedRes = checkSource(scrubbedText, filePath, scrubbedBuffers);
-        if (scrubbedRes.ok) return LspDocumentSnapshot{true, scrubbedRes.arena, scrubbedRes.program, scrubbedRes.symbols};
+        CheckSourceResult scrubbedRes = checkSource(scrubbedText, filePath, scrubbedBuffers);
+        if (scrubbedRes.ok) return makeSnapshotFromCheckResult(std::move(scrubbedRes));
     }
     const auto snapIt = state.snapshots.find(uriKey);
     if (snapIt != state.snapshots.end() && snapIt->second.valid) return snapIt->second;
@@ -217,6 +217,11 @@ inline void collectModuleSymbolCompletions(const LspDocumentSnapshot& snap, std:
         if (es.moduleId != targetModuleId || (requirePub && !es.isPub)) continue;
         if (matchesCompletionPrefix(es.name, prefix)) addCompletionEntry(items, seen, es.name, 13, "enum " + es.name, es.name, formatEnumHoverMarkdown(es));
     }
+    for (const auto& kv : snap.symbols.unions) {
+        const UnionSymbol& us = kv.second;
+        if (us.moduleId != targetModuleId || (requirePub && !us.isPub)) continue;
+        if (matchesCompletionPrefix(us.name, prefix)) addCompletionEntry(items, seen, us.name, 22, "union " + us.name, us.name, formatUnionHoverMarkdown(snap.arena, us));
+    }
     for (const auto& kv : snap.symbols.aliases) {
         const AliasSymbol& al = kv.second;
         if (al.moduleId != targetModuleId || (requirePub && !al.isPub)) continue;
@@ -245,10 +250,14 @@ inline std::optional<TypeId> resolveVariableTypeInFn(const LspDocumentSnapshot& 
     return varIt->second.typeId;
 }
 
-inline std::string formatUfcsMethodDetail(const AstArena& arena, const FnSymbol& fn) {
+inline std::string formatReceiverMethodSignature(const AstArena& arena, const FnSymbol& fn) {
     std::vector<Param> remainingParams;
     for (size_t i = 1; i < fn.params.size(); ++i) remainingParams.push_back(fn.params[i]);
-    return "ufcs fn " + fn.name + formatFnDetailSignature(arena, remainingParams, fn.returnType, fn.isFallible);
+    return formatFnDetailSignature(arena, remainingParams, fn.returnType, fn.isFallible);
+}
+
+inline std::string formatUfcsMethodDetail(const AstArena& arena, const FnSymbol& fn) {
+    return "ufcs fn " + fn.name + formatReceiverMethodSignature(arena, fn);
 }
 
 inline void collectUfcsCompletionsForType(const LspDocumentSnapshot& snap, std::string_view currentModuleId, TypeId recvTid, std::string_view prefix, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
@@ -293,6 +302,20 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
             }
             return;
         }
+        const auto unionOpt = resolveUnionSymbolByName(snap.arena, snap.symbols, currentModuleId, receiverName);
+        if (unionOpt.has_value() && (unionOpt->moduleId == currentModuleId || unionOpt->isPub)) {
+            for (const auto& uv : unionOpt->variants) {
+                if (!matchesCompletionPrefix(uv.name, prefix)) continue;
+                TypeId vtid = uv.type;
+                const auto vit = unionOpt->variantTypes.find(uv.name);
+                if (vit != unionOpt->variantTypes.end()) {
+                    vtid = vit->second;
+                }
+                const std::string detail = "fn(payload as " + formatCleanbasicType(snap.arena, vtid) + ") as " + unionOpt->name;
+                addCompletionEntry(items, seen, uv.name, 2, detail);
+            }
+            return;
+        }
         const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
         if (modMapIt != snap.symbols.modules.end()) {
             const auto aliasIt = modMapIt->second.find(std::string(receiverName));
@@ -303,59 +326,13 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
     const TypeId recvTid = resolveAlias(snap.arena, snap.symbols, currentModuleId, varTidOpt.value());
     if (recvTid == INVALID_ID || recvTid >= snap.arena.types.size()) return;
     const TypeNode& recvNode = snap.arena.types[recvTid];
-    const bool recvIsEnum = isEnumType(snap.symbols, recvTid, snap.arena, currentModuleId);
 
-    // Built-in receiver methods
-    if (recvNode.name == "list" || recvNode.name == "dict" || recvNode.name == "str" || recvNode.name == "bytes") {
-        if (matchesCompletionPrefix("len", prefix)) addCompletionEntry(items, seen, "len", 2, "fn() as int");
-    }
-    if (recvNode.name == "list") {
-        std::string elemType = "T";
-        if (!recvNode.typeArgs.empty()) elemType = formatCleanbasicType(snap.arena, recvNode.typeArgs[0]);
-        if (matchesCompletionPrefix("push", prefix)) addCompletionEntry(items, seen, "push", 2, "fn(item as " + elemType + ")");
-        if (matchesCompletionPrefix("pop", prefix)) addCompletionEntry(items, seen, "pop", 2, "fn() as " + elemType);
-        if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
-    }
-    if (recvNode.name == "dict") {
-        std::string keyType = "K";
-        std::string valType = "V";
-        if (!recvNode.typeArgs.empty()) keyType = formatCleanbasicType(snap.arena, recvNode.typeArgs[0]);
-        if (recvNode.typeArgs.size() >= 2) valType = formatCleanbasicType(snap.arena, recvNode.typeArgs[1]);
-        if (matchesCompletionPrefix("get", prefix)) addCompletionEntry(items, seen, "get", 2, "fn(key as " + keyType + ", defaultValue as " + valType + ") as " + valType);
-        if (matchesCompletionPrefix("has", prefix)) addCompletionEntry(items, seen, "has", 2, "fn(key as " + keyType + ") as bool");
-        if (matchesCompletionPrefix("remove", prefix)) addCompletionEntry(items, seen, "remove", 2, "fn(key as " + keyType + ") as bool");
-        if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
-    }
-    if (recvNode.name == "bytes") {
-        if (matchesCompletionPrefix("push", prefix)) addCompletionEntry(items, seen, "push", 2, "fn(byteVal as int)");
-        if (matchesCompletionPrefix("pop", prefix)) addCompletionEntry(items, seen, "pop", 2, "fn() as int");
-        if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
-        if (matchesCompletionPrefix("slice", prefix)) addCompletionEntry(items, seen, "slice", 2, "fn(start as int, stop as int) as bytes");
-        if (matchesCompletionPrefix("sliceFrom", prefix)) addCompletionEntry(items, seen, "sliceFrom", 2, "fn(start as int) as bytes");
-        if (matchesCompletionPrefix("toUtf8", prefix)) addCompletionEntry(items, seen, "toUtf8", 2, "fn() as str can error");
-        if (matchesCompletionPrefix("toHex", prefix)) addCompletionEntry(items, seen, "toHex", 2, "fn() as str");
-        const std::vector<std::string> readMethods = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
-        for (const auto& rm : readMethods) {
-            if (matchesCompletionPrefix(rm, prefix)) addCompletionEntry(items, seen, rm, 2, "fn(offset as int) as int");
+    // Built-in receiver methods from shared table
+    const auto builtinMethods = getBuiltinReceiverMethods(snap.arena, snap.symbols, currentModuleId, recvTid);
+    for (const auto& bm : builtinMethods) {
+        if (matchesCompletionPrefix(bm.name, prefix)) {
+            addCompletionEntry(items, seen, bm.name, 2, "fn" + formatReceiverMethodSignature(snap.arena, bm));
         }
-        const std::vector<std::string> writeMethods = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
-        for (const auto& wm : writeMethods) {
-            if (matchesCompletionPrefix(wm, prefix)) addCompletionEntry(items, seen, wm, 2, "fn(value as int, offset as int)");
-        }
-    }
-    if (recvNode.name == "str") {
-        if (matchesCompletionPrefix("toBytes", prefix)) addCompletionEntry(items, seen, "toBytes", 2, "fn() as bytes");
-        if (matchesCompletionPrefix("fromHex", prefix)) addCompletionEntry(items, seen, "fromHex", 2, "fn() as bytes can error");
-        if (matchesCompletionPrefix("byteAt", prefix)) addCompletionEntry(items, seen, "byteAt", 2, "fn(idx as int) as int");
-    }
-    if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvNode.name == "str" || recvNode.name == "err" || recvIsEnum) {
-        if (matchesCompletionPrefix("toStr", prefix)) addCompletionEntry(items, seen, "toStr", 2, "fn() as str");
-    }
-    if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvIsEnum) {
-        if (matchesCompletionPrefix("toInt", prefix)) addCompletionEntry(items, seen, "toInt", 2, "fn() as int");
-    }
-    if (recvNode.name == "int" || recvNode.name == "float") {
-        if (matchesCompletionPrefix("toFloat", prefix)) addCompletionEntry(items, seen, "toFloat", 2, "fn() as float");
     }
 
     if (recvTid == snap.symbols.typeErr || recvNode.name == "err") {
@@ -457,14 +434,14 @@ inline void collectGeneralScopeCompletions(const LspDocumentSnapshot& snap, std:
         }
         collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, true, true, items, seen);
     }
-    const std::vector<std::pair<std::string, std::string>> builtins = {{"print", "fn print(values...)"}, {"error", "fn error(msg as str, [code=1]) as err"}};
+    const std::vector<std::pair<std::string, std::string>> builtins = {{"print", "fn print(values...)"}, {"error", "fn error(msg as str, [code=1]) as err"}, {"assert", "fn assert(cond as bool, [msg as str]) can error"}};
     for (const auto& b : builtins) if (matchesCompletionPrefix(b.first, prefix)) {
         std::string doc;
         const auto docOpt = formatBuiltinHoverMarkdown(b.first);
         if (docOpt.has_value()) doc = docOpt.value();
         addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
     }
-    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "enum", "end enum", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "on error", "end error", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
+    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "enum", "end enum", "union", "end union", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "until", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "on error", "end error", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
     for (const auto& kw : keywords) if (matchesCompletionPrefix(kw, prefix)) addCompletionEntry(items, seen, kw, 14, "keyword");
 }
 
@@ -554,8 +531,42 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
             }
             return SignatureHelpData{"fn .fromHex() as bytes can error", "", {}, 0};
         }
+        if (callCtx.calleeName == "slice") {
+            uint32_t activeIdx = callCtx.activeParam;
+            if (activeIdx > 1) {
+                activeIdx = 1;
+            }
+            return SignatureHelpData{"fn .slice(start as int, stop as int)", "", {"start as int", "stop as int"}, activeIdx};
+        }
+        if (callCtx.calleeName == "sliceFrom") return SignatureHelpData{"fn .sliceFrom(start as int)", "", {"start as int"}, 0};
+        if (callCtx.calleeName == "contains") return SignatureHelpData{"fn .contains(val as T) as bool", "", {"val as T"}, 0};
+        if (callCtx.calleeName == "sort") return SignatureHelpData{"fn .sort()", "", {}, 0};
+        if (callCtx.calleeName == "removeAt") return SignatureHelpData{"fn .removeAt(idx as int) as T", "", {"idx as int"}, 0};
+        if (callCtx.calleeName == "keys") return SignatureHelpData{"fn .keys() as list[K]", "", {}, 0};
+        if (callCtx.calleeName == "bitAnd") return SignatureHelpData{"fn .bitAnd(y as int) as int", "", {"y as int"}, 0};
+        if (callCtx.calleeName == "bitOr") return SignatureHelpData{"fn .bitOr(y as int) as int", "", {"y as int"}, 0};
+        if (callCtx.calleeName == "bitXor") return SignatureHelpData{"fn .bitXor(y as int) as int", "", {"y as int"}, 0};
+        if (callCtx.calleeName == "bitNot") return SignatureHelpData{"fn .bitNot() as int", "", {}, 0};
+        if (callCtx.calleeName == "shl") return SignatureHelpData{"fn .shl(bits as int) as int", "", {"bits as int"}, 0};
+        if (callCtx.calleeName == "shr") return SignatureHelpData{"fn .shr(bits as int) as int", "", {"bits as int"}, 0};
+        if (callCtx.calleeName == "kind") return SignatureHelpData{"fn .kind() as str", "", {}, 0};
     }
     if (!snap.valid) return std::nullopt;
+    if (callCtx.hasReceiver && !resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName).has_value()) {
+        const auto unionOpt = resolveUnionSymbolByName(snap.arena, snap.symbols, currentModuleId, callCtx.receiverName);
+        if (unionOpt.has_value()) {
+            const auto vtIt = unionOpt->variantTypes.find(callCtx.calleeName);
+            if (vtIt != unionOpt->variantTypes.end()) {
+                const std::string pLabel = "payload as " + formatCleanbasicType(snap.arena, vtIt->second);
+                SignatureHelpData sig{};
+                sig.label = unionOpt->name + "." + callCtx.calleeName + "(" + pLabel + ") as " + unionOpt->name;
+                sig.documentation = formatUnionHoverMarkdown(snap.arena, unionOpt.value());
+                sig.paramLabels.push_back(pLabel);
+                sig.activeParameter = 0;
+                return sig;
+            }
+        }
+    }
     const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
     if (tsOpt.has_value()) {
         SignatureHelpData sig{};

@@ -42,6 +42,8 @@ struct FnSymbol {
     uint32_t col = 1;
     uint32_t endLine = 1;
     bool isBuiltinReceiver = false;
+    bool isFnValueCall = false;
+    TypeId fnTypeId = INVALID_ID;
     std::vector<FnSymbol> overloads;
 };
 
@@ -52,7 +54,21 @@ struct EnumSymbol {
     std::vector<EnumMember> members;
     std::unordered_map<std::string, int64_t> memberValues;
     bool isPub = false;
-    bool hasExplicitIntType = false;
+    std::string cppName;
+    std::string fileName = "main.cb";
+    uint32_t line = 1;
+    uint32_t col = 1;
+    uint32_t endLine = 1;
+};
+
+struct UnionSymbol {
+    std::string name;
+    std::string moduleId;
+    std::string key;
+    std::vector<UnionVariant> variants;
+    std::unordered_map<std::string, TypeId> variantTypes;
+    std::unordered_map<std::string, size_t> variantIndices;
+    bool isPub = false;
     std::string cppName;
     std::string fileName = "main.cb";
     uint32_t line = 1;
@@ -102,6 +118,7 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
     std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, EnumSymbol> enums;
+    std::unordered_map<std::string, UnionSymbol> unions;
     std::unordered_map<std::string, ConstSymbol> constants;
     std::unordered_map<std::string, FnSymbol> functions;
     std::vector<std::string> headers;
@@ -130,6 +147,34 @@ struct AnalysisResult {
     DiagnosticError error;
 };
 
+inline TypeId getFnTypeId(const AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
+    TypeNode node{};
+    node.name = "fn";
+    node.isFallible = fn.isFallible;
+    if (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType)) {
+        node.returnType = fn.returnType;
+    }
+    for (const auto& p : fn.params) {
+        node.typeArgs.push_back(p.typeId);
+        node.paramByref.push_back(p.isByref);
+    }
+    return arena.findTypeNode(node);
+}
+
+inline TypeId addFnTypeId(AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
+    TypeNode node{};
+    node.name = "fn";
+    node.isFallible = fn.isFallible;
+    if (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType)) {
+        node.returnType = fn.returnType;
+    }
+    for (const auto& p : fn.params) {
+        node.typeArgs.push_back(p.typeId);
+        node.paramByref.push_back(p.isByref);
+    }
+    return arena.addType(std::move(node));
+}
+
 inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     symbols.typeInt = arena.findOrAddType("int");
     symbols.typeFloat = arena.findOrAddType("float");
@@ -142,6 +187,14 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     symbols.typeCptr = arena.findOrAddType("cptr");
     symbols.typeBytes = arena.findOrAddType("bytes");
 
+    arena.findOrAddType("list", {symbols.typeInt});
+    arena.findOrAddType("list", {symbols.typeFloat});
+    arena.findOrAddType("list", {symbols.typeStr});
+    arena.findOrAddType("list", {symbols.typeBool});
+    arena.findOrAddType("list", {symbols.typeBytes});
+    arena.findOrAddType("list", {symbols.typeCptr});
+    arena.findOrAddType("list", {symbols.typeErr});
+
     TypeSymbol errType{};
     errType.name = "err";
     errType.moduleId = "";
@@ -149,8 +202,12 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     errType.isPub = true;
     errType.fields["msg"] = symbols.typeStr;
     errType.fields["code"] = symbols.typeInt;
+    errType.fields["file"] = symbols.typeStr;
+    errType.fields["line"] = symbols.typeInt;
     errType.fieldOrder.push_back(FieldDecl{1, 1, "msg", symbols.typeStr});
     errType.fieldOrder.push_back(FieldDecl{1, 1, "code", symbols.typeInt});
+    errType.fieldOrder.push_back(FieldDecl{1, 1, "file", symbols.typeStr});
+    errType.fieldOrder.push_back(FieldDecl{1, 1, "line", symbols.typeInt});
     errType.cppName = "cbErr";
     symbols.types[errType.key] = std::move(errType);
 
@@ -168,11 +225,11 @@ inline bool isBuiltinTypeName(std::string_view name) {
     return name == "int" || name == "float" || name == "str" || name == "bool" ||
            name == "void" || name == "auto" || name == "null" ||
            name == "err" || name == "list" || name == "dict" || name == "cptr" ||
-           name == "bytes";
+           name == "bytes" || name == "fn";
 }
 
 inline bool isBuiltinSymbolName(std::string_view name) {
-    return name == "err" || name == "print";
+    return name == "err" || name == "print" || name == "error" || name == "assert";
 }
 
 inline bool isModuleAliasInScope(
@@ -220,7 +277,7 @@ inline std::string resolveSymbolKey(
     }
 
     const std::string key = symbolKey(currentModuleId, name);
-    if (symbols.types.count(key) > 0 || symbols.enums.count(key) > 0 || symbols.aliases.count(key) > 0 || symbols.functions.count(key) > 0 || symbols.constants.count(key) > 0) {
+    if (symbols.types.count(key) > 0 || symbols.enums.count(key) > 0 || symbols.unions.count(key) > 0 || symbols.aliases.count(key) > 0 || symbols.functions.count(key) > 0 || symbols.constants.count(key) > 0) {
         return key;
     }
     if (isBuiltinSymbolName(name)) {
@@ -229,20 +286,11 @@ inline std::string resolveSymbolKey(
     return key;
 }
 
-// Forward declarations for cross-file recursion
 inline TypeId resolveAlias(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
     TypeId tid
-);
-
-inline TypeId inferExprType(
-    const AstArena& arena,
-    ExprId exprId,
-    const GlobalSymbolTable& symbols,
-    const std::unordered_map<std::string, VarSymbol>& scope,
-    std::string_view currentModuleId
 );
 
 inline TypeNode resolveAliasFromNode(
@@ -272,6 +320,9 @@ inline TypeNode resolveAliasFromNode(
         const TypeNode& aliased = arena.types[aliasedId];
         curr.name = aliased.name;
         curr.typeArgs = aliased.typeArgs;
+        curr.paramByref = aliased.paramByref;
+        curr.returnType = aliased.returnType;
+        curr.isFallible = aliased.isFallible;
     }
 
     if (!curr.name.empty() && !isBuiltinTypeName(curr.name)) {
@@ -283,11 +334,105 @@ inline TypeNode resolveAliasFromNode(
             const auto eit = symbols.enums.find(typeKey);
             if (eit != symbols.enums.end()) {
                 curr.name = eit->second.key;
+            } else {
+                const auto uit = symbols.unions.find(typeKey);
+                if (uit != symbols.unions.end()) {
+                    curr.name = uit->second.key;
+                }
             }
         }
     }
 
+    for (TypeId& argTid : curr.typeArgs) {
+        argTid = resolveAlias(arena, symbols, activeModId, argTid);
+    }
+    if (curr.returnType != INVALID_ID) {
+        curr.returnType = resolveAlias(arena, symbols, activeModId, curr.returnType);
+        if (arena.isVoid(curr.returnType)) {
+            curr.returnType = INVALID_ID;
+        }
+    }
+
     return curr;
+}
+
+inline TypeNode resolveAliasNode(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeId tid
+) {
+    if (tid >= arena.types.size()) {
+        return TypeNode{};
+    }
+    return resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
+}
+
+inline TypeId resolveAlias(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeId tid
+) {
+    if (tid >= arena.types.size()) {
+        return tid;
+    }
+    const TypeNode resolvedNode = resolveAliasNode(arena, symbols, currentModuleId, tid);
+    const TypeId found = arena.findTypeNode(resolvedNode);
+    if (found != INVALID_ID) {
+        return found;
+    }
+    return tid;
+}
+
+inline TypeId canonicalizeType(
+    AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeId tid
+) {
+    if (tid >= arena.types.size()) {
+        return tid;
+    }
+    TypeNode resolvedNode = resolveAliasNode(arena, symbols, currentModuleId, tid);
+    for (TypeId& argTid : resolvedNode.typeArgs) {
+        argTid = canonicalizeType(arena, symbols, currentModuleId, argTid);
+    }
+    if (resolvedNode.returnType != INVALID_ID) {
+        resolvedNode.returnType = canonicalizeType(arena, symbols, currentModuleId, resolvedNode.returnType);
+        if (arena.isVoid(resolvedNode.returnType)) {
+            resolvedNode.returnType = INVALID_ID;
+        }
+    }
+    const TypeId canonicalTid = arena.addType(std::move(resolvedNode));
+    arena.findOrAddType("list", {canonicalTid});
+    return canonicalTid;
+}
+
+inline bool isEnumType(
+    const GlobalSymbolTable& symbols,
+    TypeId tid,
+    const AstArena& arena,
+    std::string_view currentModuleId
+) {
+    if (tid >= arena.types.size()) {
+        return false;
+    }
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
+    return symbols.enums.count(resolved.name) > 0;
+}
+
+inline bool isUnionType(
+    const GlobalSymbolTable& symbols,
+    TypeId tid,
+    const AstArena& arena,
+    std::string_view currentModuleId
+) {
+    if (tid >= arena.types.size()) {
+        return false;
+    }
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
+    return symbols.unions.count(resolved.name) > 0;
 }
 
 inline std::optional<TypeSymbol> resolveTypeSymbolByName(
@@ -311,7 +456,7 @@ inline std::optional<TypeSymbol> resolveTypeSymbolByName(
             return std::nullopt;
         }
     }
-    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(rawName), {}});
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(rawName), {}, {}, INVALID_ID, false});
     const auto it = symbols.types.find(resolved.name);
     if (it != symbols.types.end()) {
         return it->second;
@@ -404,6 +549,130 @@ inline bool ufcsParamMatchesReceiver(
     return p0Resolved.name == recvTypeKey;
 }
 
+inline Param makeBuiltinParam(std::string_view name, TypeId tid, bool isByref = false) {
+    Param p{};
+    p.name = std::string(name);
+    p.typeId = tid;
+    p.isByref = isByref;
+    return p;
+}
+
+inline FnSymbol makeBuiltinReceiverMethod(
+    std::string_view name,
+    TypeId recvTid,
+    bool mutatesRecv,
+    TypeId returnType,
+    std::vector<Param> extraParams = {},
+    bool isFallible = false
+) {
+    FnSymbol fs{};
+    fs.name = std::string(name);
+    fs.returnType = returnType;
+    fs.isFallible = isFallible;
+    fs.isBuiltinReceiver = true;
+    fs.params.reserve(1 + extraParams.size());
+    fs.params.push_back(makeBuiltinParam("self", recvTid, mutatesRecv));
+    for (auto& ep : extraParams) {
+        fs.params.push_back(std::move(ep));
+    }
+    return fs;
+}
+
+inline std::vector<FnSymbol> getBuiltinReceiverMethods(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeId recvTid
+) {
+    std::vector<FnSymbol> methods;
+    if (recvTid >= arena.types.size()) {
+        return methods;
+    }
+    const TypeNode resolvedRecvNode = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[recvTid]);
+    const std::string& recvTypeKey = resolvedRecvNode.name;
+    const bool isEnumRecv = isEnumType(symbols, recvTid, arena, currentModuleId);
+
+    if (recvTypeKey == "str" || recvTypeKey == "list" || recvTypeKey == "dict" || recvTypeKey == "bytes") {
+        methods.push_back(makeBuiltinReceiverMethod("len", recvTid, false, symbols.typeInt));
+    }
+    const bool isUnionRecv = isUnionType(symbols, recvTid, arena, currentModuleId);
+
+    if (recvTypeKey == "list") {
+        TypeId elemType = symbols.typeInt;
+        if (!resolvedRecvNode.typeArgs.empty()) {
+            elemType = resolvedRecvNode.typeArgs[0];
+        }
+        methods.push_back(makeBuiltinReceiverMethod("push", recvTid, true, symbols.typeVoid, {makeBuiltinParam("item", elemType)}));
+        methods.push_back(makeBuiltinReceiverMethod("pop", recvTid, true, elemType));
+        methods.push_back(makeBuiltinReceiverMethod("clear", recvTid, true, symbols.typeVoid));
+        methods.push_back(makeBuiltinReceiverMethod("slice", recvTid, false, recvTid, {makeBuiltinParam("start", symbols.typeInt), makeBuiltinParam("stop", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("sliceFrom", recvTid, false, recvTid, {makeBuiltinParam("start", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("contains", recvTid, false, symbols.typeBool, {makeBuiltinParam("val", elemType)}));
+        methods.push_back(makeBuiltinReceiverMethod("sort", recvTid, true, symbols.typeVoid));
+        methods.push_back(makeBuiltinReceiverMethod("removeAt", recvTid, true, elemType, {makeBuiltinParam("idx", symbols.typeInt)}));
+    } else if (recvTypeKey == "dict") {
+        TypeId keyType = symbols.typeStr;
+        TypeId valType = symbols.typeInt;
+        if (!resolvedRecvNode.typeArgs.empty()) {
+            keyType = resolvedRecvNode.typeArgs[0];
+        }
+        if (resolvedRecvNode.typeArgs.size() >= 2) {
+            valType = resolvedRecvNode.typeArgs[1];
+        }
+        TypeId keyListTid = arena.findType("list", {keyType});
+        if (keyListTid == INVALID_ID) {
+            keyListTid = symbols.typeAuto;
+        }
+        methods.push_back(makeBuiltinReceiverMethod("get", recvTid, false, valType, {makeBuiltinParam("key", keyType), makeBuiltinParam("defaultValue", valType)}));
+        methods.push_back(makeBuiltinReceiverMethod("has", recvTid, false, symbols.typeBool, {makeBuiltinParam("key", keyType)}));
+        methods.push_back(makeBuiltinReceiverMethod("remove", recvTid, true, symbols.typeBool, {makeBuiltinParam("key", keyType)}));
+        methods.push_back(makeBuiltinReceiverMethod("clear", recvTid, true, symbols.typeVoid));
+        methods.push_back(makeBuiltinReceiverMethod("keys", recvTid, false, keyListTid));
+    } else if (recvTypeKey == "bytes") {
+        methods.push_back(makeBuiltinReceiverMethod("push", recvTid, true, symbols.typeVoid, {makeBuiltinParam("byteVal", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("pop", recvTid, true, symbols.typeInt));
+        methods.push_back(makeBuiltinReceiverMethod("clear", recvTid, true, symbols.typeVoid));
+        methods.push_back(makeBuiltinReceiverMethod("slice", recvTid, false, symbols.typeBytes, {makeBuiltinParam("start", symbols.typeInt), makeBuiltinParam("stop", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("sliceFrom", recvTid, false, symbols.typeBytes, {makeBuiltinParam("start", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("toUtf8", recvTid, false, symbols.typeStr, {}, true));
+        methods.push_back(makeBuiltinReceiverMethod("toHex", recvTid, false, symbols.typeStr));
+        const std::vector<std::string_view> readNames = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
+        for (const auto rn : readNames) {
+            methods.push_back(makeBuiltinReceiverMethod(rn, recvTid, false, symbols.typeInt, {makeBuiltinParam("offset", symbols.typeInt)}));
+        }
+        const std::vector<std::string_view> writeNames = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
+        for (const auto wn : writeNames) {
+            methods.push_back(makeBuiltinReceiverMethod(wn, recvTid, true, symbols.typeVoid, {makeBuiltinParam("value", symbols.typeInt), makeBuiltinParam("offset", symbols.typeInt)}));
+        }
+    } else if (recvTypeKey == "str") {
+        methods.push_back(makeBuiltinReceiverMethod("toBytes", recvTid, false, symbols.typeBytes));
+        methods.push_back(makeBuiltinReceiverMethod("fromHex", recvTid, false, symbols.typeBytes, {}, true));
+        methods.push_back(makeBuiltinReceiverMethod("byteAt", recvTid, false, symbols.typeInt, {makeBuiltinParam("idx", symbols.typeInt)}));
+    }
+
+    if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || recvTypeKey == "str" || recvTypeKey == "err" || isEnumRecv) {
+        methods.push_back(makeBuiltinReceiverMethod("toStr", recvTid, false, symbols.typeStr));
+    }
+    if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || isEnumRecv) {
+        methods.push_back(makeBuiltinReceiverMethod("toInt", recvTid, false, symbols.typeInt));
+    }
+    if (recvTypeKey == "int" || recvTypeKey == "float") {
+        methods.push_back(makeBuiltinReceiverMethod("toFloat", recvTid, false, symbols.typeFloat));
+    }
+    if (recvTypeKey == "int") {
+        methods.push_back(makeBuiltinReceiverMethod("bitAnd", recvTid, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("bitOr", recvTid, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("bitXor", recvTid, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("bitNot", recvTid, false, symbols.typeInt));
+        methods.push_back(makeBuiltinReceiverMethod("shl", recvTid, false, symbols.typeInt, {makeBuiltinParam("bits", symbols.typeInt)}));
+        methods.push_back(makeBuiltinReceiverMethod("shr", recvTid, false, symbols.typeInt, {makeBuiltinParam("bits", symbols.typeInt)}));
+    }
+    if (isUnionRecv) {
+        methods.push_back(makeBuiltinReceiverMethod("kind", recvTid, false, symbols.typeStr));
+    }
+    return methods;
+}
+
 inline std::optional<FnSymbol> resolveUfcsFn(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -411,193 +680,18 @@ inline std::optional<FnSymbol> resolveUfcsFn(
     TypeId recvTid,
     std::string_view methodName
 ) {
+    const auto builtinMethods = getBuiltinReceiverMethods(arena, symbols, currentModuleId, recvTid);
+    for (const auto& bm : builtinMethods) {
+        if (bm.name == methodName) {
+            return bm;
+        }
+    }
+
     TypeNode resolvedRecvNode{};
     if (recvTid < arena.types.size()) {
         resolvedRecvNode = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[recvTid]);
     }
-    std::string recvTypeKey = resolvedRecvNode.name;
-    if (!recvTypeKey.empty() && !isBuiltinTypeName(recvTypeKey)) {
-        recvTypeKey = resolveSymbolKey(symbols, currentModuleId, recvTypeKey);
-    }
-
-    const bool isEnumRecv = (symbols.enums.count(recvTypeKey) > 0 ||
-                             symbols.enums.count(resolveSymbolKey(symbols, currentModuleId, recvTypeKey)) > 0);
-
-    // Built-in receiver methods
-    if (methodName == "len") {
-        if (recvTypeKey == "str" || recvTypeKey == "list" || recvTypeKey == "dict" || recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "len";
-            fs.returnType = symbols.typeInt;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "push") {
-        if (recvTypeKey == "list" || recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "push";
-            fs.returnType = symbols.typeVoid;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "pop") {
-        if (recvTypeKey == "list") {
-            TypeId elemType = symbols.typeInt;
-            if (!resolvedRecvNode.typeArgs.empty()) {
-                elemType = resolvedRecvNode.typeArgs[0];
-            }
-            FnSymbol fs{};
-            fs.name = "pop";
-            fs.returnType = elemType;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "pop";
-            fs.returnType = symbols.typeInt;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "clear") {
-        if (recvTypeKey == "list" || recvTypeKey == "dict" || recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "clear";
-            fs.returnType = symbols.typeVoid;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "get") {
-        if (recvTypeKey == "dict") {
-            TypeId valType = symbols.typeInt;
-            if (resolvedRecvNode.typeArgs.size() >= 2) {
-                valType = resolvedRecvNode.typeArgs[1];
-            }
-            FnSymbol fs{};
-            fs.name = "get";
-            fs.returnType = valType;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "has") {
-        if (recvTypeKey == "dict") {
-            FnSymbol fs{};
-            fs.name = "has";
-            fs.returnType = symbols.typeBool;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "remove") {
-        if (recvTypeKey == "dict") {
-            FnSymbol fs{};
-            fs.name = "remove";
-            fs.returnType = symbols.typeBool;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "toStr") {
-        if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || recvTypeKey == "str" || recvTypeKey == "err" || isEnumRecv) {
-            FnSymbol fs{};
-            fs.name = "toStr";
-            fs.returnType = symbols.typeStr;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "toInt") {
-        if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || isEnumRecv) {
-            FnSymbol fs{};
-            fs.name = "toInt";
-            fs.returnType = symbols.typeInt;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "toFloat") {
-        if (recvTypeKey == "int" || recvTypeKey == "float") {
-            FnSymbol fs{};
-            fs.name = "toFloat";
-            fs.returnType = symbols.typeFloat;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "slice") {
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "slice";
-            fs.returnType = symbols.typeBytes;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "sliceFrom") {
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "sliceFrom";
-            fs.returnType = symbols.typeBytes;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "toUtf8") {
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "toUtf8";
-            fs.returnType = symbols.typeStr;
-            fs.isFallible = true;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "toBytes") {
-        if (recvTypeKey == "str") {
-            FnSymbol fs{};
-            fs.name = "toBytes";
-            fs.returnType = symbols.typeBytes;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "byteAt") {
-        if (recvTypeKey == "str") {
-            FnSymbol fs{};
-            fs.name = "byteAt";
-            fs.returnType = symbols.typeInt;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "toHex") {
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = "toHex";
-            fs.returnType = symbols.typeStr;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "fromHex") {
-        if (recvTypeKey == "str") {
-            FnSymbol fs{};
-            fs.name = "fromHex";
-            fs.returnType = symbols.typeBytes;
-            fs.isFallible = true;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "readU16Le" || methodName == "readU16Be" ||
-               methodName == "readU32Le" || methodName == "readU32Be" ||
-               methodName == "readU64Le" || methodName == "readU64Be") {
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = std::string(methodName);
-            fs.returnType = symbols.typeInt;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    } else if (methodName == "writeU16Le" || methodName == "writeU16Be" ||
-               methodName == "writeU32Le" || methodName == "writeU32Be" ||
-               methodName == "writeU64Le" || methodName == "writeU64Be") {
-        if (recvTypeKey == "bytes") {
-            FnSymbol fs{};
-            fs.name = std::string(methodName);
-            fs.returnType = symbols.typeVoid;
-            fs.isBuiltinReceiver = true;
-            return fs;
-        }
-    }
+    const std::string& recvTypeKey = resolvedRecvNode.name;
 
     // UFCS Step 1: Current module
     const std::string localKey = symbolKey(currentModuleId, methodName);
@@ -658,6 +752,108 @@ inline std::optional<EnumSymbol> resolveEnumSymbol(
         return it3->second;
     }
     return std::nullopt;
+}
+
+inline std::optional<UnionSymbol> resolveUnionSymbolByName(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    std::string_view typeName
+) {
+    const std::string localKey = symbolKey(currentModuleId, typeName);
+    const auto it = symbols.unions.find(localKey);
+    if (it != symbols.unions.end()) {
+        return it->second;
+    }
+    const std::string rootKey = symbolKey("", typeName);
+    const auto it2 = symbols.unions.find(rootKey);
+    if (it2 != symbols.unions.end()) {
+        return it2->second;
+    }
+    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
+    const auto it3 = symbols.unions.find(normKey);
+    if (it3 != symbols.unions.end()) {
+        return it3->second;
+    }
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(typeName), {}, {}, INVALID_ID, false});
+    const auto it4 = symbols.unions.find(resolved.name);
+    if (it4 != symbols.unions.end()) {
+        return it4->second;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<UnionSymbol> resolveUnionSymbol(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    TypeId tid
+) {
+    if (tid == INVALID_ID || tid >= arena.types.size()) {
+        return std::nullopt;
+    }
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
+    const auto it = symbols.unions.find(resolved.name);
+    if (it != symbols.unions.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<UnionSymbol> resolveUnionVariantAccess(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    const FieldAccess& faccess
+) {
+    if (const auto* tgtIdent = arena.getExpr<Identifier>(faccess.target)) {
+        if (scope.find(tgtIdent->name) == scope.end()) {
+            const auto uOpt = resolveUnionSymbolByName(arena, symbols, currentModuleId, tgtIdent->name);
+            if (uOpt.has_value()) {
+                return uOpt;
+            }
+        }
+    }
+    if (const auto* innerFa = arena.getExpr<FieldAccess>(faccess.target)) {
+        if (const auto* modIdent = arena.getExpr<Identifier>(innerFa->target)) {
+            std::string targetModId;
+            if (isModuleAliasInScope(symbols, currentModuleId, modIdent->name, scope, targetModId)) {
+                return resolveUnionSymbolByName(arena, symbols, targetModId, innerFa->fieldName);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+struct ResolvedUnionVariantCall {
+    UnionSymbol unionSym;
+    std::string variantName;
+    size_t variantIndex = 0;
+    TypeId payloadType = INVALID_ID;
+};
+
+inline std::optional<ResolvedUnionVariantCall> resolveUnionVariantConstructor(
+    const AstArena& arena,
+    const FuncCall& call,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const std::unordered_map<std::string, VarSymbol>& scope = {}
+) {
+    const auto* access = arena.getExpr<FieldAccess>(call.callee);
+    if (access == nullptr) {
+        return std::nullopt;
+    }
+    const auto uOpt = resolveUnionVariantAccess(arena, symbols, currentModuleId, scope, *access);
+    if (!uOpt.has_value()) {
+        return std::nullopt;
+    }
+    const auto idxIt = uOpt->variantIndices.find(access->fieldName);
+    const auto typeIt = uOpt->variantTypes.find(access->fieldName);
+    if (idxIt == uOpt->variantIndices.end() || typeIt == uOpt->variantTypes.end()) {
+        return std::nullopt;
+    }
+    return ResolvedUnionVariantCall{*uOpt, access->fieldName, idxIt->second, typeIt->second};
 }
 
 inline std::optional<EnumSymbol> resolveEnumMemberAccess(
@@ -727,14 +923,6 @@ inline std::optional<ConstSymbol> resolveModuleConstAccess(
     return std::nullopt;
 }
 
-inline bool isEnumType(const GlobalSymbolTable& symbols, TypeId tid, const AstArena& arena, std::string_view currentModuleId) {
-    if (tid >= arena.types.size()) return false;
-    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
-    if (symbols.enums.find(resolved.name) != symbols.enums.end()) return true;
-    const std::string k = resolveSymbolKey(symbols, currentModuleId, resolved.name);
-    return symbols.enums.find(k) != symbols.enums.end();
-}
-
 inline bool fnMatchesArgCount(const FnSymbol& fn, size_t totalArgs, bool isUfcs = false) {
     size_t startIdx = 0;
     if (isUfcs) {
@@ -756,84 +944,146 @@ inline bool fnMatchesArgCount(const FnSymbol& fn, size_t totalArgs, bool isUfcs 
     return totalArgs >= minArgs;
 }
 
-inline std::optional<FnSymbol> resolveFuncCall(
+inline const FnSymbol& selectBestFnOverload(const FnSymbol& primary, size_t totalArgs) {
+    if (!primary.overloads.empty()) {
+        if (primary.params.size() == totalArgs) {
+            return primary;
+        }
+        for (const auto& ov : primary.overloads) {
+            if (ov.params.size() == totalArgs) {
+                return ov;
+            }
+        }
+        if (fnMatchesArgCount(primary, totalArgs, false)) {
+            return primary;
+        }
+        for (const auto& ov : primary.overloads) {
+            if (fnMatchesArgCount(ov, totalArgs, false)) {
+                return ov;
+            }
+        }
+    }
+    return primary;
+}
+
+inline TypeId inferExprType(
     const AstArena& arena,
-    const FuncCall& call,
+    ExprId exprId,
     const GlobalSymbolTable& symbols,
-    std::string_view currentModuleId,
-    const std::unordered_map<std::string, VarSymbol>& scope = {}
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    std::string_view currentModuleId
+);
+
+inline std::optional<FnSymbol> resolveBareFnRef(
+    const AstArena& arena,
+    ExprId exprId,
+    const GlobalSymbolTable& symbols,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    std::string_view currentModuleId
 ) {
-    const size_t totalArgs = call.args.size() + call.namedArgs.size();
-    if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
-        const std::string key = resolveSymbolKey(symbols, currentModuleId, ident->name);
+    if (exprId >= arena.exprs.size()) {
+        return std::nullopt;
+    }
+    if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
+        if (scope.find(ident->name) != scope.end()) {
+            return std::nullopt;
+        }
+        if (resolveConstSymbol(symbols, currentModuleId, scope, ident->name).has_value()) {
+            return std::nullopt;
+        }
+        if (isBuiltinSymbolName(ident->name)) {
+            return std::nullopt;
+        }
+        const std::string key = symbolKey(currentModuleId, ident->name);
         const auto it = symbols.functions.find(key);
         if (it != symbols.functions.end()) {
-            if (!it->second.overloads.empty()) {
-                if (it->second.params.size() == totalArgs) {
-                    return it->second;
-                }
-                for (const auto& ov : it->second.overloads) {
-                    if (ov.params.size() == totalArgs) {
-                        return ov;
-                    }
-                }
-                if (fnMatchesArgCount(it->second, totalArgs, false)) {
-                    return it->second;
-                }
-                for (const auto& ov : it->second.overloads) {
-                    if (fnMatchesArgCount(ov, totalArgs, false)) {
-                        return ov;
-                    }
-                }
-            }
             return it->second;
         }
         return std::nullopt;
     }
-
-    if (const auto* access = arena.getExpr<FieldAccess>(call.callee)) {
-        if (const auto* tgtIdent = arena.getExpr<Identifier>(access->target)) {
+    if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
+        if (const auto* modIdent = arena.getExpr<Identifier>(fa->target)) {
             std::string targetModId;
-            if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent->name, scope, targetModId)) {
-                const std::string key = symbolKey(targetModId, access->fieldName);
+            if (isModuleAliasInScope(symbols, currentModuleId, modIdent->name, scope, targetModId)) {
+                const std::string key = symbolKey(targetModId, fa->fieldName);
                 const auto it = symbols.functions.find(key);
                 if (it != symbols.functions.end()) {
-                    if (!it->second.overloads.empty()) {
-                        if (it->second.params.size() == totalArgs) {
-                            return it->second;
-                        }
-                        for (const auto& ov : it->second.overloads) {
-                            if (ov.params.size() == totalArgs) {
-                                return ov;
-                            }
-                        }
-                        if (fnMatchesArgCount(it->second, totalArgs, false)) {
-                            return it->second;
-                        }
-                        for (const auto& ov : it->second.overloads) {
-                            if (fnMatchesArgCount(ov, totalArgs, false)) {
-                                return ov;
-                            }
-                        }
-                    }
                     return it->second;
                 }
-                return std::nullopt;
-            }
-            if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end() && access->fieldName == "fromHex") {
-                FnSymbol fs{};
-                fs.name = "fromHex";
-                fs.returnType = symbols.typeBytes;
-                fs.isFallible = true;
-                fs.isBuiltinReceiver = true;
-                return fs;
             }
         }
-        const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
-        return resolveUfcsFn(arena, symbols, currentModuleId, recvTid, access->fieldName);
     }
-
     return std::nullopt;
+}
+
+inline FnSymbol makeFnSymbolFromTypeNode(
+    std::string_view name,
+    std::string_view moduleId,
+    const TypeNode& fnNode,
+    TypeId voidTid
+) {
+    FnSymbol fs{};
+    fs.name = std::string(name);
+    fs.moduleId = std::string(moduleId);
+    fs.isFallible = fnNode.isFallible;
+    fs.isFnValueCall = true;
+    if (fnNode.returnType != INVALID_ID) {
+        fs.returnType = fnNode.returnType;
+    } else {
+        fs.returnType = voidTid;
+    }
+    fs.params.reserve(fnNode.typeArgs.size());
+    for (size_t i = 0; i < fnNode.typeArgs.size(); ++i) {
+        Param p{};
+        p.name = "arg" + std::to_string(i + 1);
+        p.typeId = fnNode.typeArgs[i];
+        if (i < fnNode.paramByref.size()) {
+            p.isByref = fnNode.paramByref[i];
+        }
+        fs.params.push_back(std::move(p));
+    }
+    return fs;
+}
+
+inline bool isUfcsCallExpr(
+    const AstArena& arena,
+    const FuncCall& call,
+    const GlobalSymbolTable& symbols,
+    std::string_view currentModuleId,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    ExprId* outRecvExprId = nullptr
+) {
+    const auto* calleeFa = arena.getExpr<FieldAccess>(call.callee);
+    if (calleeFa == nullptr) {
+        return false;
+    }
+    if (const auto* tgtIdent = arena.getExpr<Identifier>(calleeFa->target)) {
+        std::string targetModId;
+        if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent->name, scope, targetModId)) {
+            return false;
+        }
+        if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end() && calleeFa->fieldName == "fromHex") {
+            return false;
+        }
+    }
+    if (resolveUnionVariantAccess(arena, symbols, currentModuleId, scope, *calleeFa).has_value()) {
+        return false;
+    }
+    const TypeId recvTid = inferExprType(arena, calleeFa->target, symbols, scope, currentModuleId);
+    const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, recvTid);
+    if (tsOpt.has_value()) {
+        const auto fit = tsOpt->fields.find(calleeFa->fieldName);
+        if (fit != tsOpt->fields.end()) {
+            const TypeNode fieldResolved = resolveAliasNode(arena, symbols, tsOpt->moduleId, fit->second);
+            if (fieldResolved.name == "fn") {
+                return false;
+            }
+        }
+    }
+    if (outRecvExprId != nullptr) {
+        *outRecvExprId = calleeFa->target;
+    }
+    return true;
 }
 
 inline std::optional<TypeSymbol> resolveStructConstructor(
@@ -862,33 +1112,277 @@ inline std::optional<TypeSymbol> resolveStructConstructor(
     return std::nullopt;
 }
 
-inline TypeNode resolveAliasNode(
+inline std::optional<FnSymbol> resolveFuncCall(
     const AstArena& arena,
+    const FuncCall& call,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
-    TypeId tid
+    const std::unordered_map<std::string, VarSymbol>& scope = {}
+);
+
+inline TypeId inferExprType(
+    const AstArena& arena,
+    ExprId exprId,
+    const GlobalSymbolTable& symbols,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    std::string_view currentModuleId
 ) {
-    if (tid >= arena.types.size()) {
-        return TypeNode{};
+    if (exprId >= arena.exprs.size()) {
+        return symbols.typeAuto;
     }
-    return resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
+
+    if (const auto* lit = arena.getExpr<NumberLiteral>(exprId)) {
+        if (lit->isFloat) {
+            return symbols.typeFloat;
+        }
+        return symbols.typeInt;
+    }
+
+    if (arena.getExpr<StringLiteral>(exprId) != nullptr) {
+        return symbols.typeStr;
+    }
+
+    if (arena.getExpr<BytesLiteral>(exprId) != nullptr) {
+        return symbols.typeBytes;
+    }
+
+    if (arena.getExpr<BoolLiteral>(exprId) != nullptr) {
+        return symbols.typeBool;
+    }
+
+    if (arena.getExpr<NullLiteral>(exprId) != nullptr) {
+        return symbols.typeNull;
+    }
+
+    if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
+        const auto it = scope.find(ident->name);
+        if (it != scope.end()) {
+            return it->second.typeId;
+        }
+        const auto cOpt = resolveConstSymbol(symbols, currentModuleId, scope, ident->name);
+        if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
+            return cOpt->typeId;
+        }
+        const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
+        if (bareFnOpt.has_value() && bareFnOpt->fnTypeId != INVALID_ID) {
+            return bareFnOpt->fnTypeId;
+        }
+        return symbols.typeAuto;
+    }
+
+    if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
+        TypeId elemType = symbols.typeInt;
+        if (!llit->elements.empty()) {
+            elemType = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, llit->elements[0], symbols, scope, currentModuleId));
+        }
+        const TypeId listTid = arena.findType("list", {elemType});
+        if (listTid != INVALID_ID) {
+            return listTid;
+        }
+        return symbols.typeAuto;
+    }
+
+    if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
+        TypeId kType = symbols.typeStr;
+        TypeId vType = symbols.typeInt;
+        if (!dlit->entries.empty()) {
+            kType = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].key, symbols, scope, currentModuleId));
+            vType = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].value, symbols, scope, currentModuleId));
+        }
+        const TypeId dictTid = arena.findType("dict", {kType, vType});
+        if (dictTid != INVALID_ID) {
+            return dictTid;
+        }
+        return symbols.typeAuto;
+    }
+
+    if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
+        const auto enumOpt = resolveEnumMemberAccess(arena, symbols, currentModuleId, scope, *faccess);
+        if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
+            const TypeId tid = arena.findType(enumOpt->key, {});
+            if (tid != INVALID_ID) {
+                return tid;
+            }
+        }
+        const auto cOpt = resolveModuleConstAccess(arena, symbols, currentModuleId, scope, *faccess);
+        if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
+            return cOpt->typeId;
+        }
+        const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
+        if (bareFnOpt.has_value() && bareFnOpt->fnTypeId != INVALID_ID) {
+            return bareFnOpt->fnTypeId;
+        }
+        const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
+        const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
+        if (tsOpt.has_value()) {
+            const auto fit = tsOpt->fields.find(faccess->fieldName);
+            if (fit != tsOpt->fields.end()) {
+                return fit->second;
+            }
+        }
+        return symbols.typeAuto;
+    }
+
+    if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
+        const TypeId targetTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId);
+        if (targetTid < arena.types.size()) {
+            const TypeNode tnode = resolveAliasNode(arena, symbols, currentModuleId, targetTid);
+            if (tnode.name == "list" && !tnode.typeArgs.empty()) {
+                return tnode.typeArgs[0];
+            }
+            if (tnode.name == "dict" && tnode.typeArgs.size() == 2) {
+                return tnode.typeArgs[1];
+            }
+            if (tnode.name == "bytes") {
+                return symbols.typeInt;
+            }
+            if (tnode.name == "str") {
+                return symbols.typeStr;
+            }
+        }
+        return symbols.typeAuto;
+    }
+
+    if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
+        const auto fnOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+        if (fnOpt.has_value() && fnOpt->returnType != INVALID_ID) {
+            return resolveAlias(arena, symbols, fnOpt->moduleId, fnOpt->returnType);
+        }
+        const auto structOpt = resolveStructConstructor(arena, *call, symbols, currentModuleId, scope);
+        if (structOpt.has_value()) {
+            const TypeId rawTid = arena.findType(structOpt->key, {});
+            if (rawTid != INVALID_ID) {
+                return rawTid;
+            }
+        }
+        const auto unionVarOpt = resolveUnionVariantConstructor(arena, *call, symbols, currentModuleId, scope);
+        if (unionVarOpt.has_value()) {
+            const TypeId rawTid = arena.findType(unionVarOpt->unionSym.key, {});
+            if (rawTid != INVALID_ID) {
+                return rawTid;
+            }
+        }
+        return symbols.typeVoid;
+    }
+
+    if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
+        if (uop->op == "not") {
+            return symbols.typeBool;
+        }
+        return inferExprType(arena, uop->operand, symbols, scope, currentModuleId);
+    }
+
+    if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
+        if (bop->op == "and" || bop->op == "or" ||
+            bop->op == "==" || bop->op == "!=" ||
+            bop->op == "<" || bop->op == ">" ||
+            bop->op == "<=" || bop->op == ">=") {
+            return symbols.typeBool;
+        }
+        if (bop->op == "&") {
+            return symbols.typeStr;
+        }
+        const TypeId leftTid = inferExprType(arena, bop->left, symbols, scope, currentModuleId);
+        const TypeId rightTid = inferExprType(arena, bop->right, symbols, scope, currentModuleId);
+        std::string_view leftName = "";
+        if (leftTid < arena.types.size()) {
+            leftName = arena.types[leftTid].name;
+        }
+        std::string_view rightName = "";
+        if (rightTid < arena.types.size()) {
+            rightName = arena.types[rightTid].name;
+        }
+
+        if (leftName == "str" || rightName == "str") {
+            return symbols.typeStr;
+        }
+        if (leftName == "float" || rightName == "float") {
+            return symbols.typeFloat;
+        }
+        return leftTid;
+    }
+
+    return symbols.typeAuto;
 }
 
-inline TypeId resolveAlias(
+inline std::optional<FnSymbol> resolveFuncCall(
     const AstArena& arena,
+    const FuncCall& call,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
-    TypeId tid
+    const std::unordered_map<std::string, VarSymbol>& scope
 ) {
-    if (tid >= arena.types.size()) {
-        return tid;
+    const size_t totalArgs = call.args.size() + call.namedArgs.size();
+    if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
+        const auto varIt = scope.find(ident->name);
+        if (varIt != scope.end()) {
+            const TypeNode resolved = resolveAliasNode(arena, symbols, currentModuleId, varIt->second.typeId);
+            if (resolved.name == "fn") {
+                return makeFnSymbolFromTypeNode(ident->name, currentModuleId, resolved, symbols.typeVoid);
+            }
+        }
+        const auto cOpt = resolveConstSymbol(symbols, currentModuleId, scope, ident->name);
+        if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
+            const TypeNode resolved = resolveAliasNode(arena, symbols, currentModuleId, cOpt->typeId);
+            if (resolved.name == "fn") {
+                return makeFnSymbolFromTypeNode(ident->name, currentModuleId, resolved, symbols.typeVoid);
+            }
+        }
+        const std::string key = resolveSymbolKey(symbols, currentModuleId, ident->name);
+        const auto it = symbols.functions.find(key);
+        if (it != symbols.functions.end()) {
+            return selectBestFnOverload(it->second, totalArgs);
+        }
+        return std::nullopt;
     }
-    const TypeNode resolvedNode = resolveAliasNode(arena, symbols, currentModuleId, tid);
-    const TypeId found = findType(arena, resolvedNode.name, resolvedNode.typeArgs);
-    if (found != INVALID_ID) {
-        return found;
+
+    if (const auto* access = arena.getExpr<FieldAccess>(call.callee)) {
+        if (const auto* tgtIdent = arena.getExpr<Identifier>(access->target)) {
+            std::string targetModId;
+            if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent->name, scope, targetModId)) {
+                const std::string key = symbolKey(targetModId, access->fieldName);
+                const auto it = symbols.functions.find(key);
+                if (it != symbols.functions.end()) {
+                    return selectBestFnOverload(it->second, totalArgs);
+                }
+                return std::nullopt;
+            }
+            if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end() && access->fieldName == "fromHex") {
+                FnSymbol fs{};
+                fs.name = "fromHex";
+                fs.returnType = symbols.typeBytes;
+                fs.isFallible = true;
+                fs.isBuiltinReceiver = true;
+                fs.params.push_back(makeBuiltinParam("hex", symbols.typeStr, false));
+                return fs;
+            }
+        }
+        if (resolveUnionVariantAccess(arena, symbols, currentModuleId, scope, *access).has_value()) {
+            return std::nullopt;
+        }
+        const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
+        const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, recvTid);
+        if (tsOpt.has_value()) {
+            const auto fit = tsOpt->fields.find(access->fieldName);
+            if (fit != tsOpt->fields.end()) {
+                const TypeNode fieldResolved = resolveAliasNode(arena, symbols, tsOpt->moduleId, fit->second);
+                if (fieldResolved.name == "fn") {
+                    return makeFnSymbolFromTypeNode(access->fieldName, currentModuleId, fieldResolved, symbols.typeVoid);
+                }
+            }
+        }
+        return resolveUfcsFn(arena, symbols, currentModuleId, recvTid, access->fieldName);
     }
-    return tid;
+
+    const TypeId calleeTid = inferExprType(arena, call.callee, symbols, scope, currentModuleId);
+    if (calleeTid < arena.types.size()) {
+        const TypeNode resolved = resolveAliasNode(arena, symbols, currentModuleId, calleeTid);
+        if (resolved.name == "fn") {
+            return makeFnSymbolFromTypeNode("fn", currentModuleId, resolved, symbols.typeVoid);
+        }
+    }
+
+    return std::nullopt;
 }
 
 } // namespace cb

@@ -3,6 +3,7 @@
 
 #include "src/cleanbasic/ast.hpp"
 #include "src/cleanbasic/diagnostics.hpp"
+#include "src/cleanbasic/json.hpp"
 #include "src/cleanbasic/lexer.hpp"
 
 #include <cstddef>
@@ -29,6 +30,23 @@ inline std::string stripQuotes(std::string_view raw) {
         return std::string(raw.substr(1, raw.size() - 2));
     }
     return std::string(raw);
+}
+
+inline int64_t parseIntegerLiteral(std::string_view raw) {
+    std::string cleaned;
+    cleaned.reserve(raw.size());
+    for (char c : raw) {
+        if (c != '_') {
+            cleaned.push_back(c);
+        }
+    }
+    if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X')) {
+        return static_cast<int64_t>(std::stoull(cleaned.substr(2), nullptr, 16));
+    }
+    if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'b' || cleaned[1] == 'B')) {
+        return static_cast<int64_t>(std::stoull(cleaned.substr(2), nullptr, 2));
+    }
+    return std::stoll(cleaned, nullptr, 10);
 }
 
 inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string* errorOut = nullptr) {
@@ -65,21 +83,13 @@ inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string
                     if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
                     return bytes;
                 }
-                char h1 = raw[i + 2];
-                char h2 = raw[i + 3];
-                auto hexVal = [](char c) -> int {
-                    if (c >= '0' && c <= '9') return c - '0';
-                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-                    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-                    return -1;
-                };
-                int v1 = hexVal(h1);
-                int v2 = hexVal(h2);
-                if (v1 == -1 || v2 == -1) {
+                const auto v1 = jsonHexDigitValue(raw[i + 2]);
+                const auto v2 = jsonHexDigitValue(raw[i + 3]);
+                if (!v1.has_value() || !v2.has_value()) {
                     if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
                     return bytes;
                 }
-                bytes.push_back(static_cast<uint8_t>((v1 << 4) | v2));
+                bytes.push_back(static_cast<uint8_t>((v1.value() << 4) | v2.value()));
                 i += 4;
             } else {
                 bytes.push_back(static_cast<uint8_t>(esc));
@@ -170,6 +180,23 @@ public:
             return tok;
         }
         setParseError(tok, "Expected identifier or type name");
+    }
+
+    template <typename T, typename ParseItemFn>
+    std::vector<T> parseCommaSeparated(std::string_view closingTokKind, ParseItemFn parseItem) {
+        std::vector<T> items;
+        if (!check(closingTokKind)) {
+            items.push_back(parseItem());
+            while (check("COMMA")) {
+                match("COMMA");
+                if (check(closingTokKind)) {
+                    break;
+                }
+                items.push_back(parseItem());
+            }
+        }
+        match(closingTokKind);
+        return items;
     }
 
     void skipNewlines() {
@@ -267,48 +294,21 @@ public:
 
         if (check("LBRACKET")) {
             const Token bTok = match("LBRACKET");
-            std::vector<ExprId> elements;
-            if (!check("RBRACKET")) {
-                elements.push_back(parseExpr());
-                while (check("COMMA")) {
-                    match("COMMA");
-                    if (check("RBRACKET")) {
-                        break;
-                    }
-                    elements.push_back(parseExpr());
-                }
-            }
-            match("RBRACKET");
             ListLiteral node{};
-            node.elements = std::move(elements);
+            node.elements = parseCommaSeparated<ExprId>("RBRACKET", [&]() { return parseExpr(); });
             return arena.addExpr(bTok.line, bTok.col, std::move(node));
         }
 
         if (check("LBRACE")) {
             const Token bTok = match("LBRACE");
-            std::vector<DictEntry> entries;
-            if (!check("RBRACE")) {
-                DictEntry first{};
-                first.key = parseExpr();
-                match("COLON");
-                first.value = parseExpr();
-                entries.push_back(std::move(first));
-
-                while (check("COMMA")) {
-                    match("COMMA");
-                    if (check("RBRACE")) {
-                        break;
-                    }
-                    DictEntry entry{};
-                    entry.key = parseExpr();
-                    match("COLON");
-                    entry.value = parseExpr();
-                    entries.push_back(std::move(entry));
-                }
-            }
-            match("RBRACE");
             DictLiteral node{};
-            node.entries = std::move(entries);
+            node.entries = parseCommaSeparated<DictEntry>("RBRACE", [&]() {
+                DictEntry entry{};
+                entry.key = parseExpr();
+                match("COLON");
+                entry.value = parseExpr();
+                return entry;
+            });
             return arena.addExpr(bTok.line, bTok.col, std::move(node));
         }
 
@@ -439,6 +439,50 @@ public:
 
     TypeId parseType() {
         const Token start = current();
+        if (check("KEYWORD", "fn")) {
+            match("KEYWORD", "fn");
+            match("LPAREN");
+            TypeNode fnNode{};
+            fnNode.line = start.line;
+            fnNode.col = start.col;
+            fnNode.name = "fn";
+            skipNewlines();
+            while (!check("RPAREN") && !check("EOF")) {
+                bool isByref = false;
+                if (check("KEYWORD", "byref")) {
+                    match("KEYWORD", "byref");
+                    isByref = true;
+                }
+                if (checkAnyIdentOrType() && peekOffset(1).kind == "KEYWORD" && peekOffset(1).value == "as") {
+                    matchIdentOrType();
+                    match("KEYWORD", "as");
+                }
+                const TypeId paramTid = parseType();
+                fnNode.typeArgs.push_back(paramTid);
+                fnNode.paramByref.push_back(isByref);
+                skipNewlines();
+                if (check("COMMA")) {
+                    match("COMMA");
+                    skipNewlines();
+                } else {
+                    break;
+                }
+            }
+            match("RPAREN");
+            if (check("KEYWORD", "as")) {
+                match("KEYWORD", "as");
+                const TypeId retTid = parseType();
+                if (!arena.isVoid(retTid)) {
+                    fnNode.returnType = retTid;
+                }
+            }
+            if (check("KEYWORD", "can error")) {
+                match("KEYWORD", "can error");
+                fnNode.isFallible = true;
+            }
+            return arena.addType(std::move(fnNode));
+        }
+
         const Token tok = matchIdentOrType();
         std::string typeName = tok.value;
 
@@ -455,10 +499,12 @@ public:
             match("RBRACKET");
         } else if (typeName == "dict" && check("LBRACKET")) {
             match("LBRACKET");
-            typeArgs.push_back(parseType());
+            const TypeId keyTid = parseType();
+            typeArgs.push_back(keyTid);
             match("COMMA");
             typeArgs.push_back(parseType());
             match("RBRACKET");
+            arena.findOrAddType("list", {keyTid}, start.line, start.col);
         }
 
         TypeNode node{};
@@ -623,7 +669,13 @@ public:
             }
             const Token eqTok = match("ASSIGN");
             const ExprId startExpr = parseExpr();
-            match("KEYWORD", "to");
+            bool inclusive = true;
+            if (check("KEYWORD", "until")) {
+                match("KEYWORD", "until");
+                inclusive = false;
+            } else {
+                match("KEYWORD", "to");
+            }
             const ExprId endExpr = parseExpr();
             bool hasStep = false;
             ExprId stepExpr = INVALID_ID;
@@ -632,7 +684,7 @@ public:
                 hasStep = true;
                 stepExpr = parseExpr();
             }
-            rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr, true};
+            rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr, inclusive};
         } else {
             match("KEYWORD", "in");
             hasIterable = true;
@@ -661,11 +713,19 @@ public:
                 match("COMMA");
                 matchExprs.push_back(parseExpr());
             }
+            std::string bindingName;
+            if (check("KEYWORD", "as")) {
+                if (matchExprs.size() != 1) {
+                    setParseError(current(), "Case payload binding ('as <ident>') requires a single variant in 'case'");
+                }
+                match("KEYWORD", "as");
+                bindingName = match("IDENT").value;
+            }
             expectNewlineOrEof();
             std::vector<StmtId> caseBody = parseStmtBlockUntil(
                 {"case", "case else", "end select"}, "Unclosed 'case' in 'select case', expected 'end select'"
             );
-            cases.push_back(SelectCase{caseTok.line, caseTok.col, std::move(matchExprs), std::move(caseBody)});
+            cases.push_back(SelectCase{caseTok.line, caseTok.col, std::move(matchExprs), std::move(caseBody), std::move(bindingName)});
         }
 
         bool hasCaseElse = false;
@@ -857,6 +917,7 @@ public:
                 check("KEYWORD", "fn") ||
                 check("KEYWORD", "type") ||
                 check("KEYWORD", "enum") ||
+                check("KEYWORD", "union") ||
                 check("KEYWORD", "const") ||
                 check("KEYWORD", "alias") ||
                 check("KEYWORD", "import") ||
@@ -909,11 +970,9 @@ public:
     DeclId parseEnumDecl(bool isPub, const Token& startTok) {
         match("KEYWORD", "enum");
         const Token nameTok = match("IDENT");
-        bool hasExplicitIntType = false;
         if (check("KEYWORD", "as")) {
             match("KEYWORD", "as");
             match("TYPE_KW", "int");
-            hasExplicitIntType = true;
         }
         expectNewlineOrEof();
 
@@ -941,7 +1000,7 @@ public:
                     setParseError(numTok, "Enum member value must be an integer");
                 }
                 hasVal = true;
-                int64_t parsed = std::stoll(numTok.value);
+                int64_t parsed = parseIntegerLiteral(numTok.value);
                 if (isNeg) {
                     parsed = -parsed;
                 }
@@ -961,7 +1020,41 @@ public:
         decl.name = nameTok.value;
         decl.members = std::move(members);
         decl.isPub = isPub;
-        decl.hasExplicitIntType = hasExplicitIntType;
+        return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, endTok.line, nameTok.line, nameTok.col);
+    }
+
+    DeclId parseUnionDecl(bool isPub, const Token& startTok) {
+        match("KEYWORD", "union");
+        const Token nameTok = match("IDENT");
+        expectNewlineOrEof();
+
+        std::vector<UnionVariant> variants;
+        while (!check("KEYWORD", "end union")) {
+            if (check("EOF")) {
+                setParseError(current(), "Unclosed 'union " + nameTok.value + "', expected 'end union'");
+            }
+            const Token varTok = match("IDENT");
+            match("KEYWORD", "as");
+            const TypeId varType = parseType();
+            UnionVariant uv{};
+            uv.name = varTok.value;
+            uv.type = varType;
+            uv.line = varTok.line;
+            uv.col = varTok.col;
+            variants.push_back(std::move(uv));
+            expectNewlineOrEof();
+        }
+        if (variants.empty()) {
+            setParseError(nameTok, "Union '" + nameTok.value + "' must declare at least one variant");
+        }
+
+        const Token endTok = match("KEYWORD", "end union");
+        expectNewlineOrEof();
+
+        UnionDecl decl{};
+        decl.name = nameTok.value;
+        decl.variants = std::move(variants);
+        decl.isPub = isPub;
         return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, endTok.line, nameTok.line, nameTok.col);
     }
 
@@ -1019,18 +1112,7 @@ public:
         const Token nameTok = match("IDENT");
         match("LPAREN");
 
-        std::vector<Param> params;
-        if (!check("RPAREN")) {
-            params.push_back(parseParam());
-            while (check("COMMA")) {
-                match("COMMA");
-                if (check("RPAREN")) {
-                    break;
-                }
-                params.push_back(parseParam());
-            }
-        }
-        match("RPAREN");
+        std::vector<Param> params = parseCommaSeparated<Param>("RPAREN", [&]() { return parseParam(); });
 
         TypeId returnType = arena.findOrAddType("void", {}, startTok.line, startTok.col);
         bool isFallible = false;
@@ -1119,6 +1201,13 @@ public:
             return parseEnumDecl(isPub, tok);
         }
 
+        if (check("KEYWORD", "union")) {
+            if (isExtern) {
+                setParseError(current(), "'extern' cannot be applied to 'union'");
+            }
+            return parseUnionDecl(isPub, tok);
+        }
+
         if (check("KEYWORD", "const")) {
             if (isExtern) {
                 setParseError(current(), "'extern' cannot be applied to 'const'");
@@ -1130,7 +1219,7 @@ public:
             return parseFnDecl(isPub, isExtern, tok);
         }
 
-        setParseError(current(), "Expected top-level declaration ('import', 'const', 'alias', 'type', 'enum', or 'fn')");
+        setParseError(current(), "Expected top-level declaration ('import', 'const', 'alias', 'type', 'enum', 'union', or 'fn')");
     }
 
     Program parseProgram() {
@@ -1146,8 +1235,6 @@ public:
         return prog;
     }
 };
-
-using ParserState = Parser;
 
 // ==========================================
 // Main Parse Entry Point

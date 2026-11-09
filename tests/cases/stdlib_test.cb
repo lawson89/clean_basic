@@ -1,0 +1,72 @@
+' EXPECT_CPP: cbStampError
+' EXPECT_CPP: cbAssertCmp
+' EXPECT_CPP: std::function<
+' EXPECT_OUT: Running suite: Standard Library Tests
+' EXPECT_OUT:   [PASS] assert & fn types
+' EXPECT_OUT:   [PASS] assert fail diagnostics
+' EXPECT_OUT:   [PASS] custom message & stdlib stamp
+' EXPECT_OUT: Passed: 3, Failed: 0
+
+import "std/test"
+
+alias BinaryOp = fn(int, int) as int
+alias NamedBinaryOp = fn(lhs as int, rhs as int) as int
+alias Mutator = fn(byref target as int, delta as int)
+
+fn addInts(a as int, b as int) as int
+    return a + b
+end fn
+
+fn mulInts(a as int, b as int) as int
+    return a * b
+end fn
+
+fn applyOp(op as NamedBinaryOp, x as int, y as int) as int
+    return op(x, y)
+end fn
+
+fn addInPlace(byref target as int, delta as int)
+    target += delta
+end fn
+
+fn testAssert() can error
+    assert(1 == 1)
+    assert(2 + 2 == 4)
+
+    dim op as BinaryOp = addInts
+    assert(op(10, 20) == 30)
+    assert(applyOp(mulInts, 6, 7) == 42)
+
+    dim mut as Mutator = addInPlace
+    dim counter = 10
+    mut(counter, 15)
+    assert(counter == 25)
+end fn
+
+fn testAssertFail() can error
+    on error e
+        assert(e.msg.contains("Assertion failed (left == right): got 1, expected 2"))
+        assert(e.file.contains("stdlib_test.cb"))
+        assert(e.line > 0)
+        return
+    end error
+    assert(1 == 2)
+end fn
+
+fn testCustomMsg() can error
+    on error e
+        assert(e.msg == "custom message")
+        assert(e.file.contains("stdlib_test.cb"))
+        assert(e.line > 0)
+        return
+    end error
+    assert(false, "custom message")
+end fn
+
+fn main() as int
+    dim s = test.newSuite("Standard Library Tests")
+    s.add("assert & fn types", testAssert)
+    s.add("assert fail diagnostics", testAssertFail)
+    s.add("custom message & stdlib stamp", testCustomMsg)
+    return s.run()
+end fn

@@ -1,7 +1,7 @@
 ' CleanBasic Standard Library: std/json
 ' Value-semantic RFC 8259 JSON DOM, parser, builder, and serializer
 
-import header "json_bridge.hpp"
+import header "json/json_bridge.hpp"
 
 pub extern type CbJsonDoc
 pub extern type CbJsonVal

@@ -1,7 +1,7 @@
 ' CleanBasic Standard Library: std/fs
 ' Filesystem I/O, slot-table streaming File handle, metadata, directory, and path utilities
 
-import header "fs_bridge.hpp"
+import header "fs/fs_bridge.hpp"
 
 pub extern type CbFile
 pub alias File = CbFile

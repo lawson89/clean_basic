@@ -33,10 +33,10 @@ struct LexResult {
 
 | Token `kind` | Examples (`Token::value`) | Description |
 | :--- | :--- | :--- |
-| `KEYWORD` | `enum`, `end enum`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
+| `KEYWORD` | `enum`, `end enum`, `union`, `end union`, `until`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
 | `TYPE_KW` | `int`, `float`, `bool`, `str`, `bytes`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
-| `NUMBER` | `42`, `3.14159`, `0` | Integer or decimal floating-point numeric literals. |
+| `NUMBER` | `42`, `1_000_000`, `0xFF_00`, `0b1010_0101`, `3.141_592` | Decimal, hexadecimal (`0x...`), or binary (`0b...`) integer literals and decimal floating-point literals (supporting `_` digit separators). |
 | `STRING` | `"Alice"`, `"IP cannot be empty"` | Double-quoted string literals (retaining outer quotes until stripped by `stripQuotes` in the parser; supports `\` escape sequences). Interpolated strings (`$"Hello {user.name}!"`) are desugared directly in the lexer into parenthesized `&` concatenation expressions `("Hello " & (user.name) & "!")` with `{{` and `}}` brace escaping. |
 | `BYTES` | `b"GIF89a"`, `B"\x7fELF"` | Byte string literals prefixed with `b"` or `B"`. |
 | `OP_CMP` | `==`, `!=`, `<`, `>`, `<=`, `>=` | Relational and equality comparison operators. |
@@ -69,7 +69,7 @@ CleanBasic uses natural multi-word BASIC block terminators and clauses. When the
 | `else` | `if` | `"else if"` |
 | `on` | `error` | `"on error"` |
 | `can` | `error` | `"can error"` |
-| `end` | `select`, `if`, `fn`, `type`, `enum`, `for`, `defer`, `error` | `"end select"`, `"end if"`, `"end fn"`, `"end type"`, `"end enum"`, `"end for"`, `"end defer"`, `"end error"` |
+| `end` | `select`, `if`, `fn`, `type`, `enum`, `union`, `for`, `while`, `defer`, `error` | `"end select"`, `"end if"`, `"end fn"`, `"end type"`, `"end enum"`, `"end union"`, `"end for"`, `"end while"`, `"end defer"`, `"end error"` |
 
 Coalescing these in the lexer keeps the parser LL(1) on block boundaries without requiring arbitrary backtracking.
 
@@ -86,7 +86,7 @@ Note that single `&` is a valid `OP_ARITH` token used for automatic string conca
 
 ## 2. Recursive-Descent Parser (`src/cleanbasic/parser.hpp`)
 
-The parser consumes the `std::vector<Token>` stream using `cb::ParserState` (which holds the token cursor `pos`, `fileName`, `AstArena`, and error flag) and populates the arena.
+The parser consumes the `std::vector<Token>` stream using `cb::Parser` (which holds the token cursor `pos`, `fileName`, and `AstArena`) and populates the arena.
 
 ### 2.1 Expression Precedence Hierarchy
 
@@ -171,7 +171,7 @@ Inside a function body, `parseStatement()` dispatches on leading keywords:
 | `dim` or `const` | `parseAssignmentOrExprStmt` | Parses `(dim\|const) <IDENT> [as <Type>] = <Expr>` into a `VarAssignment` with `isDim = true` or `isConst = true`. |
 | Any expression starter | `parseAssignmentOrExprStmt` | Parses lhs `firstExpr = parseExpr()`. If the next token is `ASSIGN` (`=`), parses rhs `valExpr` and emits a `VarAssignment` (covering variable reassignment, struct field mutation `p.health = 10`, and container index assignment `nums[0] = 5`). Otherwise, emits an `ExprStmt` (e.g., `print("hi")` or `hero.heal(10)`). |
 | `if` | `parseIfStmt` | Parses `if <Expr>`, zero or more `else if <Expr>` branches (`ElseIfBranch`), optional `else` branch, and terminating `end if` into `IfStmt`. |
-| `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, parses `<start> to <end> [step <step>]`, and sets `rangeSpec.inclusive = true`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal` or `for k, v in dictVal`). Terminated by `end for`. |
+| `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, and parses inclusive `<start> to <end> [step <step>]` into `rangeSpec`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal` or `for k, v in dictVal`). Terminated by `end for`. |
 | `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr1>[, <matchExpr2>...]` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
 | `on error` | `parseOnErrorStmt` | Parses `on error <errIdent>`, statement list body, and `end error` into `ErrorBlock`. |
 | `defer` | `parseDeferStmt` | Parses `defer`, statement list body, and `end defer` into `DeferStmt`. |

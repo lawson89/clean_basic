@@ -1,6 +1,6 @@
 # Unity C++17 Code Generation, Runtime Preamble & C/C++ Interop
 
-This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/emitter_types.hpp` and `src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, RAII `defer` guards, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
+This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/runtime_preamble.hpp` and `src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, RAII `defer` guards, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
 
 ### Related Documentation
 * [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
@@ -57,6 +57,8 @@ Every generated `build.cpp` begins with a lightweight, zero-allocation runtime p
 struct [[nodiscard]] CbError {
     std::string msg = "";
     int64_t code = 0;
+    std::string file = "";
+    int64_t line = 0;
 };
 
 inline std::string cbToStr(const std::string& val) { return val; }
@@ -99,10 +101,12 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 | `str` | `std::string` | `std::string("")` | Value-semantics string; literals emit `std::string("...")`. |
 | `bytes` | `std::vector<uint8_t>` | `std::vector<uint8_t>{}` | Raw binary buffer; byte literals emit initializer lists. |
 | `cptr` | `void*` | `void*{}` (`nullptr`) | Opaque C pointer for C/C++ FFI interop. |
-| `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`); marked `[[nodiscard]]`. |
+| `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`, `.file`, `.line`); marked `[[nodiscard]]`. |
+| `fn(T1, ...) [as R] [can error]` | `std::function<Ret(Param1, ...)>` | `std::function<...>{}` | Stateless function reference type (supports `byref` parameters and `can error` return lowering). |
 | `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; rvalue reads lower to bounds-safe `cbListGet(v, i)`; `.push(x)` lowers to `.push_back(x)`. |
 | `dict[K, V]` | `std::unordered_map<MappedK, MappedV>` | `std::unordered_map<...>{}` | Hash table; rvalue reads lower to const-safe `cbDictAt(d, k)` and `.get(k, def)` lowers to `cbDictGet(d, k, def)`. |
 | User `enum Foo` | `Foo` / `cb_m_a__Foo` | `static_cast<Foo>(0)` | Emitted as C++17 `enum class : int64_t`. |
+| User `union Bar` | `struct Bar` / `struct cb_m_a__Bar` | `Bar{}` | POD wrapper struct around `std::variant<MappedT0, ...> _data{}` constructed via `std::in_place_index<Idx>`. |
 | User `type Foo` (root) | `struct Foo` | `Foo{}` | Pure value semantics (stack allocated, passed by const ref or `byref`). |
 | User `type Foo` (module `m/a`) | `struct cb_m_a__Foo` | `cb_m_a__Foo{}` | Mangled module-scoped POD struct. |
 | `extern type Bar` | `Bar` | `Bar{}` | Unmangled external C/C++ type from `import header`. |
@@ -196,10 +200,11 @@ void startServer() {
 
 ## 5. Lowering for `select case` (`switch` Jump Tables & String Equality Chains)
 
-`select case <target>` supports `int`, `bool`, `str`, and `enum` expressions:
+`select case <target>` supports `int`, `bool`, `str`, `enum`, and tagged `union` expressions:
 * **Integral, Boolean & Enum Targets (`int`, `bool`, `enum`):** Emitted as a native C++ `switch` statement. Multi-value clauses (`case 1, 2:`) emit stacked case labels (`case 1:
 case 2: {`) sharing a scoped compound block with an implicit `break;`.
 * **String Targets (`str`):** Emitted inside a scoped compound block by evaluating `target` once into a temporary variable (`const auto _sel_1 = <target>;`) followed by an `if (_sel_1 == <m1> || _sel_1 == <m2>) { ... } else if (...) { ... } else { ... }` equality chain.
+* **Tagged Union Targets (`union`):** Evaluates `target` once into `const auto _sel_1 = <target>;` and switches on `static_cast<int64_t>(_sel_1._data.index())`, binding `auto <binding> = std::get<Idx>(_sel_1._data);` when `case <variant> as <binding>` is used.
 
 **CleanBasic Source:**
 ```vb

@@ -1,11 +1,11 @@
 ' EXPECT_CPP: struct [[nodiscard]] CbError {
 ' EXPECT_CPP: struct Connection {
 ' EXPECT_CPP: [[nodiscard]] std::tuple<Connection, CbError> connect(const std::string& ip)
-' EXPECT_CPP: return { Connection{}, CbError{std::string("IP cannot be empty"), 408} };
+' EXPECT_CPP: return { Connection{}, CbError{std::string("IP cannot be empty"), 408,
 ' EXPECT_CPP: return { Connection{1}, CbError{"", 0} };
 ' EXPECT_CPP: [[nodiscard]] CbError validatePort(int64_t port)
 ' EXPECT_CPP: auto [_val2, _err2] = connect(std::string("192.168.1.1"));
-' EXPECT_CPP: if (cbHasError(_err2)) return { {}, _err2 };
+' EXPECT_CPP: if (cbHasError(_err2)) {
 ' EXPECT_CPP: auto conn = _val2;
 ' EXPECT_CPP: auto _defer_1 = cbDefer([&]() {
 ' EXPECT_CPP: closeConnection(conn);

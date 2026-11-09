@@ -1,18 +1,316 @@
 #ifndef CLEANBASIC_EMITTER_HPP
 #define CLEANBASIC_EMITTER_HPP
 
-#include "src/cleanbasic/emitter_types.hpp"
+#include "src/cleanbasic/analyzer.hpp"
+#include "src/cleanbasic/runtime_preamble.hpp"
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace cb {
 
-inline std::string Emitter::emitAsStrExpr(
-    ExprId exprId,
-    const std::unordered_map<std::string, VarSymbol>& scope
-) {
+inline std::string joinStrings(const std::vector<std::string>& items, std::string_view sep = ", ") {
+    std::string out;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            out += sep;
+        }
+        out += items[i];
+    }
+    return out;
+}
+
+inline std::string sanitizeCppIdent(std::string_view name) {
+    static const std::unordered_set<std::string_view> cppKeywords = {
+        "alignas", "alignof", "and_eq", "asm", "atomic_cancel", "atomic_commit",
+        "atomic_noexcept", "auto", "bitand", "bitor", "bool", "break", "case",
+        "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl",
+        "concept", "const", "consteval", "constexpr", "constinit", "const_cast",
+        "continue", "co_await", "co_return", "co_yield", "decltype", "default",
+        "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit",
+        "export", "extern", "false", "float", "for", "friend", "goto", "if",
+        "inline", "int", "long", "mutable", "namespace", "new", "noexcept",
+        "not_eq", "nullptr", "operator", "or_eq", "private", "protected", "public",
+        "reflexpr", "register", "reinterpret_cast", "requires", "return", "short",
+        "signed", "sizeof", "static", "static_assert", "static_cast", "struct",
+        "switch", "synchronized", "template", "this", "thread_local", "throw",
+        "true", "try", "typedef", "typeid", "typename", "union", "unsigned",
+        "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq"
+    };
+    if (cppKeywords.count(name) > 0) {
+        return std::string(name) + "_";
+    }
+    return std::string(name);
+}
+
+class Emitter {
+    bool isAssertBuiltinCall(const FuncCall& call) const {
+        if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
+            return ident->name == "assert";
+        }
+        return false;
+    }
+
+    bool isErrorBuiltinCall(const FuncCall& call) const {
+        if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
+            return ident->name == "error";
+        }
+        return false;
+    }
+public:
+    const AstArena& arena;
+    const GlobalSymbolTable& symbols;
+    std::vector<std::string> lines;
+    int indentLevel = 0;
+    uint32_t tempCounter = 0;
+    uint32_t deferCounter = 0;
+    std::optional<ErrorBlock> activeErrorBlock = std::nullopt;
+    std::string currentModuleId = "";
+    std::string currentFileName = "main.cb";
+
+    Emitter(const AstArena& arena, const GlobalSymbolTable& symbols)
+        : arena(arena), symbols(symbols) {}
+
+    void emitLine(std::string_view line = "") {
+        if (line.empty()) {
+            lines.emplace_back("");
+        } else {
+            std::string res;
+            res.reserve(static_cast<size_t>(indentLevel * 4) + line.size());
+            for (int i = 0; i < indentLevel; ++i) {
+                res.append("    ");
+            }
+            res.append(line);
+            lines.push_back(std::move(res));
+        }
+    }
+
+    std::string nextTemp(std::string_view prefix = "_tmp") {
+        tempCounter += 1;
+        return std::string(prefix) + "_" + std::to_string(tempCounter);
+    }
+
+    std::pair<std::string, std::string> nextValErrTemps() {
+        tempCounter += 1;
+        const std::string suffix = std::to_string(tempCounter);
+        return {"_val" + suffix, "_err" + suffix};
+    }
+
+    std::string lookupTypeCppName(std::string_view modId, std::string_view name) const {
+        const std::string key = resolveSymbolKey(symbols, modId, name);
+        const auto it = symbols.types.find(key);
+        if (it != symbols.types.end()) {
+            return it->second.cppName;
+        }
+        return std::string(name);
+    }
+
+    std::string lookupEnumCppName(std::string_view modId, std::string_view name) const {
+        const std::string key = resolveSymbolKey(symbols, modId, name);
+        const auto it = symbols.enums.find(key);
+        if (it != symbols.enums.end()) {
+            return it->second.cppName;
+        }
+        return std::string(name);
+    }
+
+    std::string lookupUnionCppName(std::string_view modId, std::string_view name) const {
+        const std::string key = resolveSymbolKey(symbols, modId, name);
+        const auto it = symbols.unions.find(key);
+        if (it != symbols.unions.end()) {
+            return it->second.cppName;
+        }
+        return std::string(name);
+    }
+
+    std::string unionDataVariantCppType(const UnionSymbol& usym) const {
+        std::vector<std::string> varCppTypes;
+        varCppTypes.reserve(usym.variants.size());
+        for (const auto& uv : usym.variants) {
+            varCppTypes.push_back(mapType(usym.moduleId, uv.type));
+        }
+        if (varCppTypes.empty()) {
+            varCppTypes.push_back("int64_t");
+        }
+        return "std::variant<" + joinStrings(varCppTypes) + ">";
+    }
+
+    std::string lookupAliasCppName(std::string_view modId, std::string_view name) const {
+        const std::string key = resolveSymbolKey(symbols, modId, name);
+        const auto it = symbols.aliases.find(key);
+        if (it != symbols.aliases.end()) {
+            return it->second.cppName;
+        }
+        return std::string(name);
+    }
+
+    std::string mapBaseType(std::string_view modId, const TypeNode& t) const {
+        if (t.name == "int") return "int64_t";
+        if (t.name == "float") return "double";
+        if (t.name == "bool") return "bool";
+        if (t.name == "str") return "std::string";
+        if (t.name == "bytes") return "std::vector<uint8_t>";
+        if (t.name == "err") return "CbError";
+        if (t.name == "void") return "void";
+        if (t.name == "auto") return "auto";
+        if (t.name == "cptr") return "void*";
+        if (t.name == "fn") {
+            std::string ret = "void";
+            if (t.returnType != INVALID_ID) {
+                ret = mapType(modId, t.returnType);
+            }
+            if (t.isFallible) {
+                if (ret == "void") {
+                    ret = "CbError";
+                } else {
+                    ret = "std::tuple<" + ret + ", CbError>";
+                }
+            }
+            std::string params;
+            for (size_t i = 0; i < t.typeArgs.size(); ++i) {
+                if (i > 0) params += ", ";
+                bool isByref = false;
+                if (i < t.paramByref.size()) {
+                    isByref = t.paramByref[i];
+                }
+                Param p{1, 1, "", t.typeArgs[i], isByref, false, INVALID_ID};
+                params += mapParamType(modId, p);
+            }
+            return "std::function<" + ret + "(" + params + ")>";
+        }
+        if (t.name == "list") {
+            std::string elem = "int64_t";
+            if (!t.typeArgs.empty()) {
+                elem = mapType(modId, t.typeArgs[0]);
+            }
+            return "std::vector<" + elem + ">";
+        }
+        if (t.name == "dict") {
+            std::string k = "std::string";
+            if (t.typeArgs.size() > 0) {
+                k = mapType(modId, t.typeArgs[0]);
+            }
+            std::string v = "int64_t";
+            if (t.typeArgs.size() > 1) {
+                v = mapType(modId, t.typeArgs[1]);
+            }
+            return "std::unordered_map<" + k + ", " + v + ">";
+        }
+
+        const std::string key = resolveSymbolKey(symbols, modId, t.name);
+        if (symbols.types.count(key)) {
+            return symbols.types.at(key).cppName;
+        }
+        if (symbols.enums.count(key)) {
+            return symbols.enums.at(key).cppName;
+        }
+        if (symbols.unions.count(key)) {
+            return symbols.unions.at(key).cppName;
+        }
+        if (symbols.aliases.count(key)) {
+            return symbols.aliases.at(key).cppName;
+        }
+        std::string sanitized = t.name;
+        for (char& c : sanitized) {
+            if (c == '.') c = '_';
+        }
+        return sanitized;
+    }
+
+    std::string mapTypeNode(std::string_view modId, const TypeNode& resolved, bool isByref = false) const {
+        std::string cpp = mapBaseType(modId, resolved);
+        if (isByref) {
+            cpp += "&";
+        }
+        return cpp;
+    }
+
+    std::string mapType(std::string_view modId, TypeId tid, bool isByref = false) const {
+        const TypeNode resolved = resolveAliasNode(arena, symbols, modId, tid);
+        return mapTypeNode(modId, resolved, isByref);
+    }
+
+    std::string defaultValueForType(std::string_view modId, TypeId tid) const {
+        const TypeNode resolved = resolveAliasNode(arena, symbols, modId, tid);
+        if (resolved.name == "int") return "0";
+        if (resolved.name == "float") return "0.0";
+        if (resolved.name == "bool") return "false";
+        if (resolved.name == "str") return "std::string("")";
+        if (resolved.name == "bytes") return "std::vector<uint8_t>{}";
+        if (isEnumType(symbols, tid, arena, modId)) {
+            return "static_cast<" + mapTypeNode(modId, resolved) + ">(0)";
+        }
+        return mapTypeNode(modId, resolved) + "{}";
+    }
+
+    std::string fnReturnCppType(std::string_view modId, const FnDecl& fn) const {
+        std::vector<std::string> retCpp;
+        if (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType)) {
+            retCpp.push_back(mapType(modId, fn.returnType));
+        }
+        if (fn.isFallible) {
+            retCpp.push_back("CbError");
+        }
+        if (retCpp.empty()) {
+            return "void";
+        }
+        if (retCpp.size() == 1) {
+            return retCpp[0];
+        }
+        return "std::tuple<" + joinStrings(retCpp) + ">";
+    }
+
+    bool isPassByConstRefType(std::string_view modId, const TypeNode& resolved) const {
+        const TypeNode actual = resolveAliasFromNode(arena, symbols, modId, resolved);
+        if (actual.name == "int" || actual.name == "float" ||
+            actual.name == "bool" || actual.name == "cptr" ||
+            actual.name == "void" || actual.name == "auto") {
+            return false;
+        }
+        if (symbols.enums.count(actual.name) > 0) {
+            return false;
+        }
+        return true;
+    }
+
+    std::string mapParamType(std::string_view modId, const Param& p) const {
+        const TypeNode resolved = resolveAliasNode(arena, symbols, modId, p.typeId);
+        const std::string baseCpp = mapBaseType(modId, resolved);
+        if (p.isByref) {
+            return baseCpp + "&";
+        }
+        if (isPassByConstRefType(modId, resolved)) {
+            return "const " + baseCpp + "&";
+        }
+        return baseCpp;
+    }
+
+    std::string fnSignature(std::string_view modId, const FnDecl& fn) const {
+        std::string retStr = fnReturnCppType(modId, fn);
+        if (fn.isFallible && !fn.isExtern) {
+            retStr = "[[nodiscard]] " + retStr;
+        }
+        std::vector<std::string> paramItems;
+        paramItems.reserve(fn.params.size());
+        for (const auto& p : fn.params) {
+            paramItems.push_back(mapParamType(modId, p) + " " + p.name);
+        }
+        const std::string key = resolveSymbolKey(symbols, modId, fn.name);
+        std::string cppName = makeCppFnName(modId, fn.name, fn.isExtern);
+        const auto it = symbols.functions.find(key);
+        if (it != symbols.functions.end()) {
+            cppName = it->second.cppName;
+        }
+        return retStr + " " + cppName + "(" + joinStrings(paramItems) + ")";
+    }
+
+    std::string emitAsStrExpr(
+        ExprId exprId,
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) {
     const TypeId tid = inferExprType(arena, exprId, symbols, scope, currentModuleId);
     std::string cpp = emitExpr(exprId, scope);
     if (tid < arena.types.size() && arena.types[tid].name == "str") {
@@ -21,7 +319,7 @@ inline std::string Emitter::emitAsStrExpr(
     return "cbToStr(" + cpp + ")";
 }
 
-inline std::vector<std::string> Emitter::emitExprList(
+    std::vector<std::string> emitExprList(
     const std::vector<ExprId>& exprIds,
     const std::unordered_map<std::string, VarSymbol>& scope
 ) {
@@ -33,7 +331,7 @@ inline std::vector<std::string> Emitter::emitExprList(
     return rendered;
 }
 
-inline std::vector<std::string> Emitter::orderStructFields(
+    std::vector<std::string> orderStructFields(
     std::string_view typeName,
     const std::vector<ExprId>& posArgs,
     const std::vector<NamedArg>& namedArgs,
@@ -89,7 +387,7 @@ inline std::vector<std::string> Emitter::orderStructFields(
     return ordered;
 }
 
-inline std::string Emitter::emitCallArgsJoined(
+    std::string emitCallArgsJoined(
     const FnSymbol& fnSym,
     const std::vector<ExprId>& posArgs,
     const std::vector<NamedArg>& namedArgs,
@@ -138,17 +436,28 @@ inline std::string Emitter::emitCallArgsJoined(
     return joinStrings(rendered);
 }
 
-inline std::string Emitter::emitExpr(
-    ExprId exprId,
-    const std::unordered_map<std::string, VarSymbol>& scope,
-    bool asLvalue
-) {
+    std::string emitExpr(
+        ExprId exprId,
+        const std::unordered_map<std::string, VarSymbol>& scope,
+        bool asLvalue = false
+    ) {
     if (exprId >= arena.exprs.size()) {
         return "";
     }
 
     if (const auto* num = arena.getExpr<NumberLiteral>(exprId)) {
-        return num->raw;
+        std::string cleaned;
+        cleaned.reserve(num->raw.size());
+        for (char c : num->raw) {
+            if (c != '_') {
+                cleaned.push_back(c);
+            }
+        }
+        if (!num->isFloat && cleaned.size() >= 2 && cleaned[0] == '0' &&
+            (cleaned[1] == 'x' || cleaned[1] == 'X' || cleaned[1] == 'b' || cleaned[1] == 'B')) {
+            return "static_cast<int64_t>(" + cleaned + "ULL)";
+        }
+        return cleaned;
     }
 
     if (const auto* str = arena.getExpr<StringLiteral>(exprId)) {
@@ -183,6 +492,10 @@ inline std::string Emitter::emitExpr(
         const auto cOpt = resolveConstSymbol(symbols, currentModuleId, scope, ident->name);
         if (cOpt.has_value()) {
             return cOpt->cppName;
+        }
+        const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
+        if (bareFnOpt.has_value()) {
+            return bareFnOpt->cppName;
         }
         return ident->name;
     }
@@ -220,6 +533,10 @@ inline std::string Emitter::emitExpr(
         const auto cOpt = resolveModuleConstAccess(arena, symbols, currentModuleId, scope, *faccess);
         if (cOpt.has_value()) {
             return cOpt->cppName;
+        }
+        const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
+        if (bareFnOpt.has_value()) {
+            return bareFnOpt->cppName;
         }
         return emitExpr(faccess->target, scope, asLvalue) + "." + faccess->fieldName;
     }
@@ -263,6 +580,12 @@ inline std::string Emitter::emitExpr(
     }
 
     if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
+        if (isAssertBuiltinCall(*call)) {
+            return buildAssertCallValue(*call, scope);
+        }
+        if (isErrorBuiltinCall(*call)) {
+            return buildErrorCallValue(*call, scope);
+        }
         if (call->callee >= arena.exprs.size()) {
             return "";
         }
@@ -272,15 +595,18 @@ inline std::string Emitter::emitExpr(
             return structOpt->cppName + "{" + joinStrings(ordered) + "}";
         }
 
+        const auto unionVarOpt = resolveUnionVariantConstructor(arena, *call, symbols, currentModuleId, scope);
+        if (unionVarOpt.has_value() && !call->args.empty()) {
+            const std::string argCpp = emitExpr(call->args[0], scope);
+            const std::string varDataCpp = unionDataVariantCppType(unionVarOpt->unionSym);
+            return unionVarOpt->unionSym.cppName + "{" + varDataCpp + "(std::in_place_index<" + std::to_string(unionVarOpt->variantIndex) + ">, " + argCpp + ")}";
+        }
+
         const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
         if (fnSym.has_value()) {
             if (fnSym->isBuiltinReceiver) {
                 const auto* access = arena.getExpr<FieldAccess>(call->callee);
-                bool recvMutated = false;
-                if (fnSym->name == "push" || fnSym->name == "pop" || fnSym->name == "clear" ||
-                    fnSym->name == "remove" || fnSym->name.rfind("writeU", 0) == 0) {
-                    recvMutated = true;
-                }
+                const bool recvMutated = (!fnSym->params.empty() && fnSym->params[0].isByref);
                 const std::string recvCpp = emitExpr(access->target, scope, recvMutated);
                 if (fnSym->name == "len") {
                     return "static_cast<int64_t>(" + recvCpp + ".size())";
@@ -313,9 +639,41 @@ inline std::string Emitter::emitExpr(
                 } else if (fnSym->name == "toFloat") {
                     return "static_cast<double>(" + recvCpp + ")";
                 } else if (fnSym->name == "slice") {
+                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
+                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
+                    if (recvNode.name == "list") {
+                        return "cbListSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                    }
                     return "cbBytesSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                 } else if (fnSym->name == "sliceFrom") {
+                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
+                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
+                    if (recvNode.name == "list") {
+                        return "cbListSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                    }
                     return "cbBytesSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "contains") {
+                    return "cbListContains(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "sort") {
+                    return "cbListSort(" + recvCpp + ")";
+                } else if (fnSym->name == "removeAt") {
+                    return "cbListRemoveAt(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "keys") {
+                    return "cbDictKeys(" + recvCpp + ")";
+                } else if (fnSym->name == "bitAnd") {
+                    return "((" + recvCpp + ") & (" + emitExpr(call->args[0], scope) + "))";
+                } else if (fnSym->name == "bitOr") {
+                    return "((" + recvCpp + ") | (" + emitExpr(call->args[0], scope) + "))";
+                } else if (fnSym->name == "bitXor") {
+                    return "((" + recvCpp + ") ^ (" + emitExpr(call->args[0], scope) + "))";
+                } else if (fnSym->name == "bitNot") {
+                    return "(~(" + recvCpp + "))";
+                } else if (fnSym->name == "shl") {
+                    return "cbBitShl(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "shr") {
+                    return "cbBitShr(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                } else if (fnSym->name == "kind") {
+                    return "cbUnionKind(" + recvCpp + ")";
                 } else if (fnSym->name == "toUtf8") {
                     return "cbBytesToUtf8(" + recvCpp + ")";
                 } else if (fnSym->name == "toBytes") {
@@ -355,27 +713,23 @@ inline std::string Emitter::emitExpr(
             }
 
             // Normal call or UFCS
-            if (const auto* access = arena.getExpr<FieldAccess>(call->callee)) {
-                std::string targetModId;
-                bool isModCall = false;
-                if (const auto* tgtIdent = arena.getExpr<Identifier>(access->target)) {
-                    if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent->name, scope, targetModId)) {
-                        isModCall = true;
-                    }
+            ExprId ufcsRecv = INVALID_ID;
+            if (isUfcsCallExpr(arena, *call, symbols, currentModuleId, scope, &ufcsRecv)) {
+                std::vector<ExprId> allPos;
+                allPos.reserve(1 + call->args.size());
+                allPos.push_back(ufcsRecv);
+                for (const ExprId a : call->args) {
+                    allPos.push_back(a);
                 }
-
-                if (!isModCall) {
-                    // UFCS
-                    std::vector<ExprId> allPos;
-                    allPos.reserve(1 + call->args.size());
-                    allPos.push_back(access->target);
-                    for (const ExprId a : call->args) {
-                        allPos.push_back(a);
-                    }
-                    return fnSym->cppName + "(" + emitCallArgsJoined(*fnSym, allPos, call->namedArgs, scope) + ")";
-                }
+                if (fnSym->isFnValueCall) {
+                return emitExpr(call->callee, scope) + "(" + emitCallArgsJoined(*fnSym, allPos, call->namedArgs, scope) + ")";
+            }
+            return fnSym->cppName + "(" + emitCallArgsJoined(*fnSym, allPos, call->namedArgs, scope) + ")";
             }
 
+            if (fnSym->isFnValueCall) {
+                return emitExpr(call->callee, scope) + "(" + emitCallArgsJoined(*fnSym, call->args, call->namedArgs, scope) + ")";
+            }
             return fnSym->cppName + "(" + emitCallArgsJoined(*fnSym, call->args, call->namedArgs, scope) + ")";
         }
 
@@ -386,32 +740,59 @@ inline std::string Emitter::emitExpr(
     return "";
 }
 
-inline std::string Emitter::buildErrorCallValue(
-    const FuncCall& call,
-    const std::unordered_map<std::string, VarSymbol>& scope
-) {
-    std::string msgCpp = R"(std::string(""))";
-    if (call.args.size() == 1) {
-        msgCpp = emitAsStrExpr(call.args[0], scope);
-    } else if (call.args.size() > 1) {
-        std::vector<std::string> parts;
-        parts.reserve(call.args.size());
-        for (const ExprId argId : call.args) {
-            parts.push_back(emitAsStrExpr(argId, scope));
+    std::string buildErrorCallValue(
+        const FuncCall& call,
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) {
+        std::string msgCpp = R"(std::string(""))";
+        if (call.args.size() == 1) {
+            msgCpp = emitAsStrExpr(call.args[0], scope);
+        } else if (call.args.size() > 1) {
+            std::vector<std::string> parts;
+            parts.reserve(call.args.size());
+            for (const ExprId argId : call.args) {
+                parts.push_back(emitAsStrExpr(argId, scope));
+            }
+            msgCpp = "(" + joinStrings(parts, " + ") + ")";
         }
-        msgCpp = "(" + joinStrings(parts, " + ") + ")";
+
+        std::string codeCpp = "1";
+        for (const auto& na : call.namedArgs) {
+            if (na.name == "code") {
+                codeCpp = emitExpr(na.value, scope);
+            }
+        }
+        const auto& calleeNode = arena.exprs[call.callee];
+        return "CbError{" + msgCpp + ", " + codeCpp + ", std::string(\"" + currentFileName + "\"), " + std::to_string(calleeNode.line) + "}";
     }
 
-    std::string codeCpp = "1";
-    for (const auto& na : call.namedArgs) {
-        if (na.name == "code") {
-            codeCpp = emitExpr(na.value, scope);
+    std::string buildAssertCallValue(
+        const FuncCall& call,
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) {
+        const auto& calleeNode = arena.exprs[call.callee];
+        const std::string lineStr = std::to_string(calleeNode.line);
+        const std::string q(1, '"');
+        if (call.args.size() == 1) {
+            if (const auto* bop = arena.getExpr<BinaryOp>(call.args[0])) {
+                if (bop->op == "==" || bop->op == "!=" || bop->op == "<" || bop->op == ">" || bop->op == "<=" || bop->op == ">=") {
+                    const std::string leftCpp = emitExpr(bop->left, scope);
+                    const std::string rightCpp = emitExpr(bop->right, scope);
+                    const std::string opLabel = "left " + bop->op + " right";
+                    return "[&]() -> CbError { const auto _lhs = " + leftCpp + "; const auto _rhs = " + rightCpp +
+                        "; return cbAssertCmp((_lhs " + bop->op + " _rhs), " + q + opLabel + q + ", _lhs, _rhs, " + q +
+                        currentFileName + q + ", " + lineStr + "); }()";
+                }
+            }
         }
+        const std::string condCpp = emitExpr(call.args[0], scope);
+        std::string msgCpp = "std::string(" + q + "Assertion failed" + q + ")";
+        if (call.args.size() > 1) {
+            msgCpp = emitAsStrExpr(call.args[1], scope);
+        }
+        return "cbAssertCond(" + condCpp + ", " + msgCpp + ", " + q + currentFileName + q + ", " + lineStr + ")";
     }
-    return "CbError{" + msgCpp + ", " + codeCpp + "}";
-}
-
-inline std::string Emitter::buildErrorBubbleReturn(
+    std::string buildErrorBubbleReturn(
     const FnDecl& fn,
     std::string_view errVar
 ) {
@@ -426,7 +807,7 @@ inline std::string Emitter::buildErrorBubbleReturn(
     return "return { " + elem + ", " + std::string(errVar) + " };";
 }
 
-inline void Emitter::emitStmtList(
+    void emitStmtList(
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
     std::unordered_map<std::string, VarSymbol>& scope,
@@ -439,51 +820,53 @@ inline void Emitter::emitStmtList(
     activeErrorBlock = savedErrorBlock;
 }
 
-inline void Emitter::emitActiveErrorHandlerOrBubble(
-    const FnDecl& fn,
-    const std::string& errTmp,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
-) {
-    if (activeErrorBlock.has_value()) {
-        const ErrorBlock activeEb = activeErrorBlock.value();
-        emitLine("if (cbHasError(" + errTmp + ")) {");
-        indentLevel += 1;
-        emitLine("CbError " + activeEb.errVar + " = " + errTmp + ";");
-        auto errScope = scope;
-        TypeId errTid = symbols.typeErr;
-        if (errTid == INVALID_ID) {
-            errTid = arena.findType("err");
+    void emitActiveErrorHandlerOrBubble(uint32_t line, 
+        const FnDecl& fn,
+        const std::string& errTmp,
+        std::unordered_map<std::string, VarSymbol>& scope,
+        std::unordered_set<std::string>& declaredVars
+    ) {
+        if (activeErrorBlock.has_value()) {
+            const ErrorBlock activeEb = activeErrorBlock.value();
+            emitLine("if (cbHasError(" + errTmp + ")) {");
+            indentLevel += 1;
+            emitLine("cbStampError(" + errTmp + ", \"" + currentFileName + "\", " + std::to_string(line) + ");");
+            emitLine("CbError " + activeEb.errVar + " = " + errTmp + ";");
+            auto errScope = scope;
+            TypeId errTid = symbols.typeErr;
+            if (errTid == INVALID_ID) {
+                errTid = arena.findType("err");
+            }
+            errScope[activeEb.errVar] = VarSymbol{activeEb.errVar, errTid, false, false};
+            auto errDecls = declaredVars;
+            errDecls.insert(activeEb.errVar);
+            const std::optional<ErrorBlock> prevEb = activeErrorBlock;
+            activeErrorBlock = std::nullopt;
+            emitStmtList(fn, activeEb.body, errScope, errDecls);
+            activeErrorBlock = prevEb;
+            indentLevel -= 1;
+            emitLine("}");
+        } else {
+            const std::string earlyRet = buildErrorBubbleReturn(fn, errTmp);
+            emitLine("if (cbHasError(" + errTmp + ")) {");
+            indentLevel += 1;
+            emitLine("cbStampError(" + errTmp + ", \"" + currentFileName + "\", " + std::to_string(line) + ");");
+            emitLine(earlyRet);
+            indentLevel -= 1;
+            emitLine("}");
         }
-        errScope[activeEb.errVar] = VarSymbol{activeEb.errVar, errTid, false, false};
-        auto errDecls = declaredVars;
-        errDecls.insert(activeEb.errVar);
-        const std::optional<ErrorBlock> prevEb = activeErrorBlock;
-        activeErrorBlock = std::nullopt;
-        emitStmtList(fn, activeEb.body, errScope, errDecls);
-        activeErrorBlock = prevEb;
-        indentLevel -= 1;
-        emitLine("}");
-    } else {
-        const std::string earlyRet = buildErrorBubbleReturn(fn, errTmp);
-        emitLine("if (cbHasError(" + errTmp + ")) " + earlyRet);
     }
-}
 
-inline void Emitter::emitFallibleAssignment(
-    const FnDecl& fn,
-    const VarAssignment& stmt,
-    const FnSymbol& fnSym,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
-) {
-    const std::string callCpp = emitExpr(stmt.value, scope);
-    valCounter += 1;
-    const uint32_t cid = valCounter;
-
-    const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
-    const std::string valTmp = "_val" + std::to_string(cid);
-    const std::string errVar = "_err" + std::to_string(cid);
+    void emitFallibleAssignment(uint32_t line, 
+        const FnDecl& fn,
+        const VarAssignment& stmt,
+        const FnSymbol& fnSym,
+        std::unordered_map<std::string, VarSymbol>& scope,
+        std::unordered_set<std::string>& declaredVars
+    ) {
+        const std::string callCpp = emitExpr(stmt.value, scope);
+        const auto [valTmp, errVar] = nextValErrTemps();
+        const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
 
     if (hasValue) {
         emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
@@ -491,7 +874,7 @@ inline void Emitter::emitFallibleAssignment(
         emitLine("auto " + errVar + " = " + callCpp + ";");
     }
 
-    emitActiveErrorHandlerOrBubble(fn, errVar, scope, declaredVars);
+    emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
 
     if (stmt.target != INVALID_ID) {
         const ExprId tid = stmt.target;
@@ -530,7 +913,7 @@ inline void Emitter::emitFallibleAssignment(
     }
 }
 
-inline void Emitter::emitVarAssignment(
+    void emitVarAssignment(uint32_t line, 
     const FnDecl& fn,
     const VarAssignment& stmt,
     std::unordered_map<std::string, VarSymbol>& scope,
@@ -539,7 +922,7 @@ inline void Emitter::emitVarAssignment(
     if (const auto* call = arena.getExpr<FuncCall>(stmt.value)) {
         const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
         if (fnSym.has_value() && fnSym->isFallible) {
-            emitFallibleAssignment(fn, stmt, *fnSym, scope, declaredVars);
+            emitFallibleAssignment(line, fn, stmt, *fnSym, scope, declaredVars);
             return;
         }
     }
@@ -600,32 +983,36 @@ inline void Emitter::emitVarAssignment(
     }
 }
 
-inline void Emitter::emitExprStmt(
-    const FnDecl& fn,
-    const ExprStmt& stmt,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
-) {
-    if (const auto* call = arena.getExpr<FuncCall>(stmt.expr)) {
-        if (isErrorBuiltinCall(arena, *call)) {
-            const std::string errVal = buildErrorCallValue(*call, scope);
-            emitLine(buildErrorBubbleReturn(fn, errVal));
-            return;
-        }
-        const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-        if (fnSym.has_value() && fnSym->isFallible) {
-            const std::string callCpp = emitExpr(stmt.expr, scope);
-            valCounter += 1;
-            const std::string errVar = "_err" + std::to_string(valCounter);
-
-            if (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType)) {
-                std::string discard = nextTemp("_discard");
-                emitLine("auto [" + discard + ", " + errVar + "] = " + callCpp + ";");
-            } else {
-                emitLine("auto " + errVar + " = " + callCpp + ";");
+    void emitExprStmt(uint32_t line, 
+        const FnDecl& fn,
+        const ExprStmt& stmt,
+        std::unordered_map<std::string, VarSymbol>& scope,
+        std::unordered_set<std::string>& declaredVars
+    ) {
+        if (const auto* call = arena.getExpr<FuncCall>(stmt.expr)) {
+            if (isAssertBuiltinCall(*call)) {
+                const auto [discardTmp, errVar] = nextValErrTemps();
+                emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
+                emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
+                return;
             }
+            if (isErrorBuiltinCall(*call)) {
+                const std::string errVal = buildErrorCallValue(*call, scope);
+                emitLine(buildErrorBubbleReturn(fn, errVal));
+                return;
+            }
+            const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+            if (fnSym.has_value() && fnSym->isFallible) {
+                const std::string callCpp = emitExpr(stmt.expr, scope);
+                const auto [discardTmp, errVar] = nextValErrTemps();
 
-            emitActiveErrorHandlerOrBubble(fn, errVar, scope, declaredVars);
+                if (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType)) {
+                    emitLine("auto [" + discardTmp + ", " + errVar + "] = " + callCpp + ";");
+                } else {
+                    emitLine("auto " + errVar + " = " + callCpp + ";");
+                }
+
+            emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
             return;
         }
     }
@@ -634,7 +1021,7 @@ inline void Emitter::emitExprStmt(
     emitLine(exprCpp + ";");
 }
 
-inline void Emitter::emitReturn(
+    void emitReturn(uint32_t line, 
     const FnDecl& fn,
     const ReturnStmt& stmt,
     std::unordered_map<std::string, VarSymbol>& scope,
@@ -651,7 +1038,13 @@ inline void Emitter::emitReturn(
 
     const ExprId firstId = stmt.value;
     if (const auto* call = arena.getExpr<FuncCall>(firstId)) {
-        if (isErrorBuiltinCall(arena, *call)) {
+        if (isAssertBuiltinCall(*call)) {
+            const auto [discardTmp, errVar] = nextValErrTemps();
+            emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
+            emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
+            return;
+        }
+            if (isErrorBuiltinCall(*call)) {
             const std::string errVal = buildErrorCallValue(*call, scope);
             emitLine(buildErrorBubbleReturn(fn, errVal));
             return;
@@ -661,7 +1054,7 @@ inline void Emitter::emitReturn(
             const std::string valTmp = nextTemp("_val");
             const std::string errTmp = nextTemp("_err");
             emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
-            emitActiveErrorHandlerOrBubble(fn, errTmp, scope, declaredVars);
+            emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
             if (fn.isFallible) {
                 emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
             } else {
@@ -686,7 +1079,7 @@ inline void Emitter::emitReturn(
     }
 }
 
-inline void Emitter::emitStmt(
+    void emitStmt(
     const FnDecl& fn,
     StmtId stmtId,
     std::unordered_map<std::string, VarSymbol>& scope,
@@ -695,14 +1088,15 @@ inline void Emitter::emitStmt(
     if (stmtId >= arena.stmts.size()) {
         return;
     }
+    const auto& stmtNode = arena.stmts[stmtId];
 
     if (const auto* vassign = arena.getStmt<VarAssignment>(stmtId)) {
-        emitVarAssignment(fn, *vassign, scope, declaredVars);
+        emitVarAssignment(stmtNode.line, fn, *vassign, scope, declaredVars);
         return;
     }
 
     if (const auto* estmt = arena.getStmt<ExprStmt>(stmtId)) {
-        emitExprStmt(fn, *estmt, scope, declaredVars);
+        emitExprStmt(stmtNode.line, fn, *estmt, scope, declaredVars);
         return;
     }
 
@@ -758,19 +1152,23 @@ inline void Emitter::emitStmt(
             }
             std::string condCpp;
             if (isKnownPositiveStep) {
-                std::string cmpOp = "<";
                 if (forS->rangeSpec.inclusive) {
-                    cmpOp = "<=";
+                    condCpp = loopVar + " <= " + endCpp;
+                } else {
+                    condCpp = loopVar + " < " + endCpp;
                 }
-                condCpp = loopVar + " " + cmpOp + " " + endCpp;
             } else if (isKnownNegativeStep) {
-                std::string cmpOp = ">";
                 if (forS->rangeSpec.inclusive) {
-                    cmpOp = ">=";
+                    condCpp = loopVar + " >= " + endCpp;
+                } else {
+                    condCpp = loopVar + " > " + endCpp;
                 }
-                condCpp = loopVar + " " + cmpOp + " " + endCpp;
             } else {
-                condCpp = "cbRangeCond(" + loopVar + ", " + endCpp + ", " + stepCpp + ")";
+                std::string inclStr = "true";
+                if (!forS->rangeSpec.inclusive) {
+                    inclStr = "false";
+                }
+                condCpp = "cbRangeCond(" + loopVar + ", " + endCpp + ", " + stepCpp + ", " + inclStr + ")";
             }
 
             auto loopScope = scope;
@@ -803,6 +1201,15 @@ inline void Emitter::emitStmt(
 
             if (forS->loopVars.size() == 1) {
                 const std::string& lv = forS->loopVars[0];
+                if (iterType.name == "str") {
+                    loopScope[lv] = VarSymbol{lv, symbols.typeStr, false};
+                    emitLine("for (auto& " + lv + " : cbStrUtf8Chars(" + iterCpp + ")) {");
+                    indentLevel += 1;
+                    emitStmtList(fn, forS->body, loopScope, loopDecls);
+                    indentLevel -= 1;
+                    emitLine("}");
+                    return;
+                }
                 TypeId elemT = symbols.typeAuto;
                 if (!iterType.typeArgs.empty()) {
                     elemT = iterType.typeArgs[0];
@@ -813,6 +1220,25 @@ inline void Emitter::emitStmt(
                 emitLine("for (auto& " + lv + " : " + iterCpp + ") {");
                 indentLevel += 1;
                 emitStmtList(fn, forS->body, loopScope, loopDecls);
+                indentLevel -= 1;
+                emitLine("}");
+                return;
+            }
+            if (forS->loopVars.size() == 2 && iterType.name == "str") {
+                const std::string& idxVar = forS->loopVars[0];
+                const std::string& elemVar = forS->loopVars[1];
+                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false};
+                loopScope[elemVar] = VarSymbol{elemVar, symbols.typeStr, false};
+                const std::string iterRef = nextTemp("_iter");
+                emitLine("{");
+                indentLevel += 1;
+                emitLine("const auto " + iterRef + " = cbStrUtf8Chars(" + iterCpp + ");");
+                emitLine("for (int64_t " + idxVar + " = 0; " + idxVar + " < static_cast<int64_t>(" + iterRef + ".size()); ++" + idxVar + ") {");
+                indentLevel += 1;
+                emitLine("auto " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
+                emitStmtList(fn, forS->body, loopScope, loopDecls);
+                indentLevel -= 1;
+                emitLine("}");
                 indentLevel -= 1;
                 emitLine("}");
                 return;
@@ -873,12 +1299,9 @@ inline void Emitter::emitStmt(
             emitLine("while (true) {");
             indentLevel += 1;
             const std::string callCpp = emitExpr(whileS->condition, whileScope);
-            valCounter += 1;
-            const uint32_t cid = valCounter;
-            const std::string valTmp = "_val" + std::to_string(cid);
-            const std::string errVar = "_err" + std::to_string(cid);
+            const auto [valTmp, errVar] = nextValErrTemps();
             emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
-            emitActiveErrorHandlerOrBubble(fn, errVar, whileScope, whileDecls);
+            emitActiveErrorHandlerOrBubble(stmtNode.line, fn, errVar, whileScope, whileDecls);
             emitLine("if (!" + valTmp + ") { break; }");
             emitStmtList(fn, whileS->body, whileScope, whileDecls);
             indentLevel -= 1;
@@ -897,6 +1320,68 @@ inline void Emitter::emitStmt(
     if (const auto* selS = arena.getStmt<SelectStmt>(stmtId)) {
         const TypeId targetTid = inferExprType(arena, selS->target, symbols, scope, currentModuleId);
         const std::string targetCpp = emitExpr(selS->target, scope);
+
+        const auto unionTargetOpt = resolveUnionSymbol(arena, symbols, currentModuleId, targetTid);
+        if (unionTargetOpt.has_value()) {
+            emitLine("{");
+            indentLevel += 1;
+            const std::string selVar = nextTemp("_sel");
+            emitLine("const auto " + selVar + " = " + targetCpp + ";");
+            emitLine("switch (static_cast<int64_t>(" + selVar + "._data.index())) {");
+            indentLevel += 1;
+            for (size_t idx = 0; idx < selS->cases.size(); ++idx) {
+                const auto& c = selS->cases[idx];
+                size_t lastVarIndex = 0;
+                TypeId lastPayloadTid = INVALID_ID;
+                for (size_t mIdx = 0; mIdx < c.matchExprs.size(); ++mIdx) {
+                    std::string varName;
+                    if (const auto* ident = arena.getExpr<Identifier>(c.matchExprs[mIdx])) {
+                        varName = ident->name;
+                    } else if (const auto* fa = arena.getExpr<FieldAccess>(c.matchExprs[mIdx])) {
+                        varName = fa->fieldName;
+                    }
+                    const auto vIdxIt = unionTargetOpt->variantIndices.find(varName);
+                    if (vIdxIt != unionTargetOpt->variantIndices.end()) {
+                        lastVarIndex = vIdxIt->second;
+                    }
+                    const auto vTypeIt = unionTargetOpt->variantTypes.find(varName);
+                    if (vTypeIt != unionTargetOpt->variantTypes.end()) {
+                        lastPayloadTid = vTypeIt->second;
+                    }
+                    if (mIdx + 1 == c.matchExprs.size()) {
+                        emitLine("case " + std::to_string(lastVarIndex) + ": {");
+                    } else {
+                        emitLine("case " + std::to_string(lastVarIndex) + ":");
+                    }
+                }
+                indentLevel += 1;
+                auto caseScope = scope;
+                auto cDecls = declaredVars;
+                if (!c.bindingName.empty()) {
+                    emitLine("auto " + c.bindingName + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
+                    caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, false};
+                    cDecls.insert(c.bindingName);
+                }
+                emitStmtList(fn, c.body, caseScope, cDecls);
+                emitLine("break;");
+                indentLevel -= 1;
+                emitLine("}");
+            }
+            if (selS->hasCaseElse) {
+                emitLine("default: {");
+                indentLevel += 1;
+                auto elseDecls = declaredVars;
+                emitStmtList(fn, selS->caseElse, scope, elseDecls);
+                emitLine("break;");
+                indentLevel -= 1;
+                emitLine("}");
+            }
+            indentLevel -= 1;
+            emitLine("}");
+            indentLevel -= 1;
+            emitLine("}");
+            return;
+        }
 
         if (targetTid == symbols.typeStr) {
             emitLine("{");
@@ -1010,7 +1495,7 @@ inline void Emitter::emitStmt(
     }
 
     if (const auto* retS = arena.getStmt<ReturnStmt>(stmtId)) {
-        emitReturn(fn, *retS, scope, declaredVars);
+        emitReturn(stmtNode.line, fn, *retS, scope, declaredVars);
         return;
     }
 
@@ -1025,12 +1510,8 @@ inline void Emitter::emitStmt(
     }
 }
 
-inline void Emitter::emitEnumDecl(const EnumDecl& ed) {
-    const std::string key = resolveSymbolKey(symbols, currentModuleId, ed.name);
-    std::string cppName = ed.name;
-    if (symbols.enums.count(key) > 0) {
-        cppName = symbols.enums.at(key).cppName;
-    }
+    void emitEnumDecl(const EnumDecl& ed) {
+        const std::string cppName = lookupEnumCppName(currentModuleId, ed.name);
     emitLine("enum class " + cppName + " : int64_t {");
     indentLevel += 1;
     for (size_t i = 0; i < ed.members.size(); ++i) {
@@ -1060,12 +1541,8 @@ inline void Emitter::emitEnumDecl(const EnumDecl& ed) {
     indentLevel -= 1;
     emitLine("}");
 }
-inline void Emitter::emitStructDecl(const TypeDecl& td) {
-    const std::string key = resolveSymbolKey(symbols, currentModuleId, td.name);
-    std::string cppName = td.name;
-    if (symbols.types.count(key) > 0) {
-        cppName = symbols.types.at(key).cppName;
-    }
+    void emitStructDecl(const TypeDecl& td) {
+        const std::string cppName = lookupTypeCppName(currentModuleId, td.name);
     emitLine("struct " + cppName + " {");
     indentLevel += 1;
     for (const auto& f : td.fields) {
@@ -1080,7 +1557,35 @@ inline void Emitter::emitStructDecl(const TypeDecl& td) {
     emitLine("};");
 }
 
-inline void Emitter::emitConstDecl(const ConstDecl& cd) {
+    void emitUnionDecl(const UnionDecl& ud) {
+        const std::string key = symbolKey(currentModuleId, ud.name);
+        if (symbols.unions.count(key) == 0) {
+            return;
+        }
+        const UnionSymbol& usym = symbols.unions.at(key);
+        const std::string cppName = usym.cppName;
+        const std::string varDataCpp = unionDataVariantCppType(usym);
+        emitLine("struct " + cppName + " {");
+        indentLevel += 1;
+        emitLine(varDataCpp + " _data{};");
+        indentLevel -= 1;
+        emitLine("};");
+        emitLine("inline std::string cbUnionKind(const " + cppName + "& val) {");
+        indentLevel += 1;
+        emitLine("switch (static_cast<int64_t>(val._data.index())) {");
+        indentLevel += 1;
+        const std::string q(1, '"');
+        for (size_t i = 0; i < usym.variants.size(); ++i) {
+            emitLine("case " + std::to_string(i) + ": return std::string(" + q + usym.variants[i].name + q + ");");
+        }
+        emitLine("default: return std::string();");
+        indentLevel -= 1;
+        emitLine("}");
+        indentLevel -= 1;
+        emitLine("}");
+    }
+
+    void emitConstDecl(const ConstDecl& cd) {
     const std::string key = symbolKey(currentModuleId, cd.name);
     std::string cppName = makeCppConstName(currentModuleId, cd.name);
     TypeId tid = symbols.typeAuto;
@@ -1099,52 +1604,51 @@ inline void Emitter::emitConstDecl(const ConstDecl& cd) {
     emitLine("inline const " + cppType + " " + cppName + " = " + valCpp + ";");
 }
 
-inline void Emitter::emitFnDecl(const FnDecl& fn) {
-    emitLine(fnSignature(currentModuleId, fn) + " {");
-    indentLevel += 1;
+    void emitFnDecl(const FnDecl& fn) {
+        emitLine(fnSignature(currentModuleId, fn) + " {");
+        indentLevel += 1;
 
-    std::unordered_map<std::string, VarSymbol> scope;
-    const auto fnScopeIt = symbols.fnScopes.find(symbolKey(currentModuleId, fn.name));
-    if (fnScopeIt != symbols.fnScopes.end()) {
-        scope = fnScopeIt->second;
-    }
-    std::unordered_set<std::string> declaredVars;
-    for (const auto& p : fn.params) {
-        if (scope.find(p.name) == scope.end()) {
-            const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);
-            scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
+        std::unordered_map<std::string, VarSymbol> scope;
+        const auto fnScopeIt = symbols.fnScopes.find(symbolKey(currentModuleId, fn.name));
+        if (fnScopeIt != symbols.fnScopes.end()) {
+            scope = fnScopeIt->second;
         }
-        declaredVars.insert(p.name);
-    }
+        std::unordered_set<std::string> declaredVars;
+        for (const auto& p : fn.params) {
+            if (scope.find(p.name) == scope.end()) {
+                const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);
+                scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
+            }
+            declaredVars.insert(p.name);
+        }
 
-    emitStmtList(fn, fn.body, scope, declaredVars);
+        emitStmtList(fn, fn.body, scope, declaredVars);
 
-    if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
-        bool endsWithReturn = false;
-        if (!fn.body.empty()) {
-            const StmtId lastSid = fn.body.back();
-            if (lastSid < arena.stmts.size()) {
-                if (arena.getStmt<ReturnStmt>(lastSid) != nullptr) {
-                    endsWithReturn = true;
-                } else if (const auto* es = arena.getStmt<ExprStmt>(lastSid)) {
-                    if (const auto* call = arena.getExpr<FuncCall>(es->expr)) {
-                        if (isErrorBuiltinCall(arena, *call)) {
-                            endsWithReturn = true;
+        if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
+            bool endsWithReturn = false;
+            if (!fn.body.empty()) {
+                const StmtId lastSid = fn.body.back();
+                if (lastSid < arena.stmts.size()) {
+                    if (arena.getStmt<ReturnStmt>(lastSid) != nullptr) {
+                        endsWithReturn = true;
+                    } else if (const auto* es = arena.getStmt<ExprStmt>(lastSid)) {
+                        if (const auto* call = arena.getExpr<FuncCall>(es->expr)) {
+                            if (isErrorBuiltinCall(*call)) {
+                                endsWithReturn = true;
+                            }
                         }
                     }
                 }
             }
+            if (!endsWithReturn) {
+                emitLine(R"(return CbError{"", 0};)");
+            }
         }
-        if (!endsWithReturn) {
-            emitLine(R"(return CbError{"", 0};)");
-        }
+
+        indentLevel -= 1;
+        emitLine("}");
     }
-
-    indentLevel -= 1;
-    emitLine("}");
-}
-
-inline std::string Emitter::emitProgram(const Program& program) {
+    std::string emitProgram(const Program& program) {
     if (!symbols.linkLibs.empty()) {
         std::string flags;
         for (size_t i = 0; i < symbols.linkLibs.size(); ++i) {
@@ -1173,17 +1677,30 @@ inline std::string Emitter::emitProgram(const Program& program) {
 
     std::vector<std::pair<std::string, EnumDecl>> enumDecls;
     std::vector<std::pair<std::string, TypeDecl>> structDecls;
+    std::vector<std::pair<std::string, UnionDecl>> unionDecls;
+    std::vector<std::pair<std::string, DeclId>> orderedCompositeDecls;
     std::vector<std::pair<std::string, AliasDecl>> aliasDecls;
     std::vector<std::pair<std::string, ConstDecl>> earlyConstDecls;
     std::vector<std::pair<std::string, ConstDecl>> structConstDecls;
-    std::vector<std::pair<std::string, FnDecl>> fnDecls;
+    struct EmittedFnEntry {
+        std::string moduleId;
+        std::string fileName;
+        FnDecl fn;
+    };
+    std::vector<EmittedFnEntry> fnDecls;
 
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
         const auto& declNode = arena.decls[did];
         if (!isModuleEmitted(symbols, declNode.moduleId)) continue;
         if (const auto* td = arena.getDecl<TypeDecl>(did)) {
-            if (!td->isExtern) structDecls.push_back({declNode.moduleId, *td});
+            if (!td->isExtern) {
+                structDecls.push_back({declNode.moduleId, *td});
+                orderedCompositeDecls.push_back({declNode.moduleId, did});
+            }
+        } else if (const auto* ud = arena.getDecl<UnionDecl>(did)) {
+            unionDecls.push_back({declNode.moduleId, *ud});
+            orderedCompositeDecls.push_back({declNode.moduleId, did});
         } else if (const auto* ed = arena.getDecl<EnumDecl>(did)) {
             enumDecls.push_back({declNode.moduleId, *ed});
         } else if (const auto* ad = arena.getDecl<AliasDecl>(did)) {
@@ -1193,7 +1710,7 @@ inline std::string Emitter::emitProgram(const Program& program) {
             bool isStructConst = false;
             if (symbols.constants.count(cKey) > 0) {
                 const TypeNode tnode = resolveAliasNode(arena, symbols, declNode.moduleId, symbols.constants.at(cKey).typeId);
-                if (symbols.types.count(tnode.name) > 0 && tnode.name != "err") {
+                if ((symbols.types.count(tnode.name) > 0 && tnode.name != "err") || symbols.unions.count(tnode.name) > 0) {
                     isStructConst = true;
                 }
             }
@@ -1203,7 +1720,7 @@ inline std::string Emitter::emitProgram(const Program& program) {
                 earlyConstDecls.push_back({declNode.moduleId, *cd});
             }
         } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
-            if (!fd->isExtern) fnDecls.push_back({declNode.moduleId, *fd});
+            if (!fd->isExtern) fnDecls.push_back(EmittedFnEntry{declNode.moduleId, declNode.fileName, *fd});
         }
     }
 
@@ -1211,16 +1728,8 @@ inline std::string Emitter::emitProgram(const Program& program) {
         emitLine();
         for (const auto& pair : enumDecls) {
             currentModuleId = pair.first;
-            const std::string key = resolveSymbolKey(symbols, currentModuleId, pair.second.name);
-            std::string cppName = pair.second.name;
-            if (symbols.enums.count(key) > 0) {
-                cppName = symbols.enums.at(key).cppName;
-            }
-            emitLine("enum class " + cppName + " : int64_t;");
+            emitLine("enum class " + lookupEnumCppName(currentModuleId, pair.second.name) + " : int64_t;");
         }
-    }
-
-    if (!enumDecls.empty()) {
         emitLine();
         for (const auto& pair : enumDecls) {
             currentModuleId = pair.first;
@@ -1229,25 +1738,19 @@ inline std::string Emitter::emitProgram(const Program& program) {
         }
     }
 
-    if (!structDecls.empty() || !aliasDecls.empty()) {
+    if (!structDecls.empty() || !unionDecls.empty() || !aliasDecls.empty()) {
         emitLine();
         for (const auto& pair : structDecls) {
             currentModuleId = pair.first;
-            const std::string key = resolveSymbolKey(symbols, currentModuleId, pair.second.name);
-            std::string cppName = pair.second.name;
-            if (symbols.types.count(key) > 0) {
-                cppName = symbols.types.at(key).cppName;
-            }
-            emitLine("struct " + cppName + ";");
+            emitLine("struct " + lookupTypeCppName(currentModuleId, pair.second.name) + ";");
+        }
+        for (const auto& pair : unionDecls) {
+            currentModuleId = pair.first;
+            emitLine("struct " + lookupUnionCppName(currentModuleId, pair.second.name) + ";");
         }
         for (const auto& pair : aliasDecls) {
             currentModuleId = pair.first;
-            const std::string key = resolveSymbolKey(symbols, currentModuleId, pair.second.name);
-            std::string cppName = pair.second.name;
-            if (symbols.aliases.count(key) > 0) {
-                cppName = symbols.aliases.at(key).cppName;
-            }
-            emitLine("using " + cppName + " = " + mapType(currentModuleId, pair.second.targetType) + ";");
+            emitLine("using " + lookupAliasCppName(currentModuleId, pair.second.name) + " = " + mapType(currentModuleId, pair.second.targetType) + ";");
         }
     }
 
@@ -1259,12 +1762,18 @@ inline std::string Emitter::emitProgram(const Program& program) {
         }
     }
 
-    if (!structDecls.empty()) {
+    if (!orderedCompositeDecls.empty()) {
         emitLine();
-        for (const auto& pair : structDecls) {
+        for (const auto& pair : orderedCompositeDecls) {
             currentModuleId = pair.first;
-            emitStructDecl(pair.second);
-            emitLine();
+            const DeclId did = pair.second;
+            if (const auto* td = arena.getDecl<TypeDecl>(did)) {
+                emitStructDecl(*td);
+                emitLine();
+            } else if (const auto* ud = arena.getDecl<UnionDecl>(did)) {
+                emitUnionDecl(*ud);
+                emitLine();
+            }
         }
     }
 
@@ -1278,16 +1787,26 @@ inline std::string Emitter::emitProgram(const Program& program) {
 
     if (!fnDecls.empty()) {
         emitLine("// Forward Declarations");
-        for (const auto& pair : fnDecls) {
-            currentModuleId = pair.first;
-            emitLine(fnSignature(currentModuleId, pair.second) + ";");
+        for (const auto& entry : fnDecls) {
+            currentModuleId = entry.moduleId;
+            if (entry.fileName.empty()) {
+                currentFileName = "main.cb";
+            } else {
+                currentFileName = entry.fileName;
+            }
+            emitLine(fnSignature(currentModuleId, entry.fn) + ";");
         }
         emitLine();
     }
 
-    for (const auto& pair : fnDecls) {
-        currentModuleId = pair.first;
-        emitFnDecl(pair.second);
+    for (const auto& entry : fnDecls) {
+        currentModuleId = entry.moduleId;
+        if (entry.fileName.empty()) {
+            currentFileName = "main.cb";
+        } else {
+            currentFileName = entry.fileName;
+        }
+        emitFnDecl(entry.fn);
         emitLine();
     }
 
@@ -1335,10 +1854,11 @@ inline std::string Emitter::emitProgram(const Program& program) {
     std::string out;
     for (const auto& line : lines) {
         out += line;
-        out.push_back('\n');
+        out.push_back(static_cast<char>(10));
     }
     return out;
-}
+    }
+};
 
 inline std::string emitProgram(
     const AstArena& arena,

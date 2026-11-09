@@ -320,16 +320,16 @@ inline void loadModuleDeclarationsRecursive(
         arena.decls[did].moduleId = std::string(currentModuleId);
         arena.decls[did].fileName = std::string(currentFilePath);
 
-        if (std::holds_alternative<ImportDecl>(arena.decls[did].payload)) {
-            auto imp = std::get<ImportDecl>(arena.decls[did].payload);
-            const bool isCbFile = imp.target.size() > 3 && imp.target.substr(imp.target.size() - 3) == ".cb";
-            const bool isStdMod = isStdImportTarget(imp.target);
-            if (imp.kind == "module" && (isCbFile || isStdMod)) {
-                std::string targetModuleId = resolveModuleId(currentModuleId, imp.target);
+        if (auto* imp = arena.getDeclMut<ImportDecl>(did)) {
+            const std::string impTarget = imp->target;
+            const bool isCbFile = impTarget.size() > 3 && impTarget.substr(impTarget.size() - 3) == ".cb";
+            const bool isStdMod = isStdImportTarget(impTarget);
+            if (imp->kind == "module" && (isCbFile || isStdMod)) {
+                std::string targetModuleId = resolveModuleId(currentModuleId, impTarget);
                 const std::vector<std::string> candidates = buildModuleCandidatePaths(
                     currentDir,
                     loader.rootBaseDir,
-                    imp.target
+                    impTarget
                 );
                 std::string candidatePath = candidates.front();
                 std::optional<std::string> memSource;
@@ -343,14 +343,13 @@ inline void loadModuleDeclarationsRecursive(
                     }
                     if (memSource.has_value() || modIn.is_open()) {
                         if (!isStdMod && cIdx > 0) {
-                            targetModuleId = resolveModuleId("", imp.target);
+                            targetModuleId = resolveModuleId("", impTarget);
                         }
                         break;
                     }
                 }
 
-                imp.resolvedModuleId = targetModuleId;
-                arena.decls[did].payload = imp;
+                imp->resolvedModuleId = targetModuleId;
 
                 const bool hasModuleSource = memSource.has_value() || modIn.is_open();
                 const std::string normCandidate = normalizeRelPath(candidatePath);
@@ -359,7 +358,7 @@ inline void loadModuleDeclarationsRecursive(
                     loader.hasError = true;
                     loader.error = makeError(
                         "ImportError",
-                        "Circular module import detected when importing '" + imp.target + "' (module '" + targetModuleId + "').",
+                        "Circular module import detected when importing '" + impTarget + "' (module '" + targetModuleId + "').",
                         std::string(currentFilePath),
                         arena.decls[did].line,
                         arena.decls[did].col

@@ -1,7 +1,7 @@
 ' CleanBasic Standard Library: std/os
 ' CLI arguments, standard streams, environment variables, working directory, platform, clock, sleep, subprocess, and exit
 
-import header "os_bridge.hpp"
+import header "os/os_bridge.hpp"
 
 ' CLI & Standard Streams
 extern fn cbOsArgs() as list[str]
