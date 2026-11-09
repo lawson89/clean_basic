@@ -198,6 +198,10 @@ public:
                                 setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '." + fnSym.name + "()' on const variable '" + root.name + "'.");
                             }
                         }
+                    } else if (fnSym.name == "get") {
+                        if (call->args.size() != 2) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'.get()' requires 2 arguments (key, defaultValue).");
+                        }
                     } else if (fnSym.name == "has") {
                         if (call->args.size() != 1) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'.has()' requires exactly 1 argument (key).");
@@ -225,8 +229,26 @@ public:
                             setAnalyzerError(exprNode.line, exprNode.col, "'.byteAt()' requires exactly 1 argument (idx).");
                         }
                     } else if (fnSym.name == "fromHex") {
-                        if (call->args.size() != 1) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "'fromHex()' requires exactly 1 argument (hex string).");
+                        bool isStaticBytesCtor = false;
+                        if (const auto* calleeFa = arena.getExpr<FieldAccess>(call->callee)) {
+                            if (const auto* tgtIdent = arena.getExpr<Identifier>(calleeFa->target)) {
+                                if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end()) {
+                                    isStaticBytesCtor = true;
+                                }
+                            }
+                        }
+                        if (isStaticBytesCtor) {
+                            if (call->args.size() != 1) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "'bytes.fromHex()' requires exactly 1 argument (hex string).");
+                            }
+                            const TypeId argTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, call->args[0], symbols, scope, moduleId));
+                            if (argTid != symbols.typeStr && argTid != symbols.typeAuto) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "'bytes.fromHex()' argument must be of type 'str'.");
+                            }
+                        } else {
+                            if (!call->args.empty()) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "'.fromHex()' on 'str' takes 0 arguments.");
+                            }
                         }
                     } else if (fnSym.name.size() > 5 && fnSym.name.substr(0, 5) == "readU") {
                         if (call->args.size() != 1) {
@@ -334,6 +356,10 @@ public:
 
                 }
 
+                if (!fnSym.moduleId.empty() && fnSym.moduleId != moduleId) {
+                    symbols.referencedModules.insert(fnSym.moduleId);
+                }
+
                 if (fnSym.isFallible && !allowTopLevelFallible) {
                     std::string msg = "Fallible call to '" + fnSym.name +
                         "' must be assigned to a variable, returned directly, or called as a standalone statement.";
@@ -355,6 +381,9 @@ public:
             } else {
                 const auto structOpt = resolveStructConstructor(arena, *call, symbols, moduleId, scope);
                 if (structOpt.has_value()) {
+                    if (!structOpt->moduleId.empty() && structOpt->moduleId != moduleId) {
+                        symbols.referencedModules.insert(structOpt->moduleId);
+                    }
                     if (!structOpt->isPub && structOpt->moduleId != moduleId) {
                         std::string msg = "Type '" + structOpt->name + "' is private to module '" + structOpt->moduleId + "' (missing 'pub').";
                         setAnalyzerError(exprNode.line, exprNode.col, msg);
@@ -372,13 +401,22 @@ public:
                     }
                 }
 
-                // Check for removed .append()
+                // Check for removed .append() and invalid bytes.fromHex instance calls
                 if (const auto* fa = arena.getExpr<FieldAccess>(call->callee)) {
                     if (fa->fieldName == "append") {
                         const TypeId recvTid = inferExprType(arena, fa->target, symbols, scope, moduleId);
                         const TypeNode recvT = resolveAliasFromNode(arena, symbols, moduleId, arena.types[recvTid]);
                         if (recvT.name == "list") {
                             setAnalyzerError(exprNode.line, exprNode.col, "'.append()' is removed; use '.push()'.");
+                        }
+                    }
+                    if (fa->fieldName == "fromHex") {
+                        const TypeId recvTid = inferExprType(arena, fa->target, symbols, scope, moduleId);
+                        if (recvTid < arena.types.size()) {
+                            const TypeNode recvT = resolveAliasFromNode(arena, symbols, moduleId, arena.types[recvTid]);
+                            if (recvT.name == "bytes") {
+                                setAnalyzerError(exprNode.line, exprNode.col, "'.fromHex()' cannot be called on a 'bytes' instance; use 'bytes.fromHex(hex)' or 'hex.fromHex()'.");
+                            }
                         }
                     }
                 }
@@ -430,6 +468,9 @@ public:
         if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
             const auto enumOpt = resolveEnumMemberAccess(arena, symbols, moduleId, scope, *faccess);
             if (enumOpt.has_value()) {
+                if (!enumOpt->moduleId.empty() && enumOpt->moduleId != moduleId) {
+                    symbols.referencedModules.insert(enumOpt->moduleId);
+                }
                 if (enumOpt->moduleId != moduleId && !enumOpt->isPub) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'pub').");
                 }
@@ -440,6 +481,9 @@ public:
             }
             const auto cOpt = resolveModuleConstAccess(arena, symbols, moduleId, scope, *faccess);
             if (cOpt.has_value()) {
+                if (!cOpt->moduleId.empty() && cOpt->moduleId != moduleId) {
+                    symbols.referencedModules.insert(cOpt->moduleId);
+                }
                 if (cOpt->moduleId != moduleId && !cOpt->isPub) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Constant '" + cOpt->name + "' is private to module '" + cOpt->moduleId + "' (missing 'pub').");
                 }
@@ -795,10 +839,17 @@ public:
     void analyzeProgram(const Program& program) {
         fileName = program.fileName;
 
+        std::unordered_set<std::string> knownModules;
+        knownModules.insert("");
+
         // Pass 1a: Register module imports, aliases, and type declarations
         for (const DeclId did : program.declarations) {
             if (did >= arena.decls.size()) continue;
             const auto& declNode = arena.decls[did];
+            knownModules.insert(declNode.moduleId);
+            if (declNode.moduleId == "std/str") {
+                symbols.hasStdStr = true;
+            }
 
             if (const auto* imp = arena.getDecl<ImportDecl>(did)) {
                 if (imp->kind == "header") {
@@ -820,6 +871,9 @@ public:
                     }
                     if (!found) {
                         symbols.headers.push_back(headerPath);
+                        symbols.headerModules[headerPath] = declNode.moduleId;
+                    } else if (declNode.moduleId != "std/str") {
+                        symbols.headerModules[headerPath] = declNode.moduleId;
                     }
                 } else if (imp->kind == "link") {
                     bool found = false;
@@ -842,6 +896,7 @@ public:
                         resolvedMod = resolveModuleId(declNode.moduleId, imp->target);
                     }
                     symbols.modules[declNode.moduleId][alias] = resolvedMod;
+                    symbols.explicitlyImportedModules.insert(resolvedMod);
                 }
             } else if (const auto* adecl = arena.getDecl<AliasDecl>(did)) {
                 AliasSymbol asym{};
@@ -896,6 +951,28 @@ public:
                 const std::string keyCopy = esym.key;
                 symbols.enums[keyCopy] = std::move(esym);
                 arena.findOrAddType(keyCopy, {});
+            }
+        }
+
+        if (symbols.hasStdStr) {
+            for (const auto& modId : knownModules) {
+                if (modId == "std/str") {
+                    continue;
+                }
+                auto& modMap = symbols.modules[modId];
+                if (modMap.count("str") > 0) {
+                    continue;
+                }
+                bool alreadyImportedStdStr = false;
+                for (const auto& kv : modMap) {
+                    if (kv.second == "std/str") {
+                        alreadyImportedStdStr = true;
+                        break;
+                    }
+                }
+                if (!alreadyImportedStdStr) {
+                    modMap["str"] = "std/str";
+                }
             }
         }
 
@@ -1038,6 +1115,17 @@ public:
                 }
             }
         }
+
+        std::vector<std::string> activeHeaders;
+        activeHeaders.reserve(symbols.headers.size());
+        for (const auto& hdr : symbols.headers) {
+            const auto hmIt = symbols.headerModules.find(hdr);
+            if (hmIt != symbols.headerModules.end() && !isModuleEmitted(symbols, hmIt->second)) {
+                continue;
+            }
+            activeHeaders.push_back(hdr);
+        }
+        symbols.headers = std::move(activeHeaders);
     }
 };
 

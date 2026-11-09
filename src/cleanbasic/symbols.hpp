@@ -108,6 +108,10 @@ struct GlobalSymbolTable {
     std::vector<std::string> linkLibs;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> modules;
     std::unordered_map<std::string, std::unordered_map<std::string, VarSymbol>> fnScopes;
+    std::unordered_set<std::string> explicitlyImportedModules;
+    std::unordered_set<std::string> referencedModules;
+    std::unordered_map<std::string, std::string> headerModules;
+    bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
     TypeId typeStr = INVALID_ID;
@@ -341,13 +345,29 @@ inline std::optional<TypeSymbol> resolveTypeSymbol(
     return std::nullopt;
 }
 
+inline bool isModuleEmitted(
+    const GlobalSymbolTable& symbols,
+    std::string_view modId
+) {
+    if (modId != "std/str") {
+        return true;
+    }
+    if (symbols.explicitlyImportedModules.count("std/str") > 0) {
+        return true;
+    }
+    if (symbols.referencedModules.count("std/str") > 0) {
+        return true;
+    }
+    return false;
+}
+
 inline std::string resolveUfcsDefiningModule(
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
     std::string_view recvTypeKey
 ) {
     if (recvTypeKey == "str") {
-        if (currentModuleId == "std/str") {
+        if (currentModuleId == "std/str" || symbols.hasStdStr) {
             return "std/str";
         }
         const auto modIt = symbols.modules.find(std::string(currentModuleId));
@@ -447,6 +467,18 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             fs.isBuiltinReceiver = true;
             return fs;
         }
+    } else if (methodName == "get") {
+        if (recvTypeKey == "dict") {
+            TypeId valType = symbols.typeInt;
+            if (resolvedRecvNode.typeArgs.size() >= 2) {
+                valType = resolvedRecvNode.typeArgs[1];
+            }
+            FnSymbol fs{};
+            fs.name = "get";
+            fs.returnType = valType;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
     } else if (methodName == "has") {
         if (recvTypeKey == "dict") {
             FnSymbol fs{};
@@ -537,7 +569,7 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             return fs;
         }
     } else if (methodName == "fromHex") {
-        if (recvTypeKey == "bytes") {
+        if (recvTypeKey == "str") {
             FnSymbol fs{};
             fs.name = "fromHex";
             fs.returnType = symbols.typeBytes;
@@ -788,7 +820,7 @@ inline std::optional<FnSymbol> resolveFuncCall(
                 }
                 return std::nullopt;
             }
-            if (tgtIdent->name == "bytes" && access->fieldName == "fromHex") {
+            if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end() && access->fieldName == "fromHex") {
                 FnSymbol fs{};
                 fs.name = "fromHex";
                 fs.returnType = symbols.typeBytes;

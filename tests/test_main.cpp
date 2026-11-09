@@ -3637,3 +3637,183 @@ end fn
         CHECK(resUtf8.error.message.find("Fallible call to 'toUtf8' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 }
+
+TEST_CASE("Auto-included std/str prelude, bytes.fromHex vs str.fromHex cleanup, and safe container/buffer indexing", "[prelude][fromHex][containers]") {
+    SECTION("std/str methods and str.* calls work without import 'std/str' and compile E2E") {
+        const std::string src = R"CB(
+fn main() as int can error
+    dim raw = "  alpha,beta,42  "
+    dim trimmed = raw.trim()
+    dim parts = trimmed.split(",")
+    dim num = parts[2].toInt()
+    dim joined = str.join([parts[0], parts[1]], "-")
+    if trimmed.contains("beta") and joined == "alpha-beta" and num == 42
+        return 0
+    end if
+    return 1
+end fn
+)CB";
+        const auto res = cb::transpileSource(src, "zeroImportStr.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("str_bridge.hpp") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__trim(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__split(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__toInt(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__join(") != std::string::npos);
+    }
+
+    SECTION("Programs that do not reference std/str omit str_bridge.hpp and cb_std_str__* definitions") {
+        const std::string src = R"CB(
+fn main() as int
+    dim x = 20 + 22
+    print("answer=" & x.toStr())
+    return 0
+end fn
+)CB";
+        const auto res = cb::transpileSource(src, "unusedPrelude.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("str_bridge.hpp") == std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__") == std::string::npos);
+        CHECK(res.symbols.headers.empty());
+    }
+
+    SECTION("Explicit import 'std/str' remains idempotent without duplicate alias errors") {
+        const std::string src = R"CB(
+import "std/str"
+
+fn main() as int
+    dim s = "  ok  ".trim()
+    print(s)
+    return 0
+end fn
+)CB";
+        const auto res = cb::transpileSource(src, "explicitStdStr.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("str_bridge.hpp") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__trim(") != std::string::npos);
+    }
+
+    SECTION("bytes.fromHex(hex) and hex.fromHex() succeed while bytes instance b.fromHex(...) is rejected") {
+        const std::string validHex = R"CB(
+fn main() as int can error
+    dim b1 = bytes.fromHex("deadbeef")
+    dim hexStr = "cafebabe"
+    dim b2 = hexStr.fromHex()
+    dim b3 = "0102".fromHex()
+    print(b1.toHex() & ":" & b2.toHex() & ":" & b3.toHex())
+    return 0
+end fn
+)CB";
+        const auto okRes = cb::transpileSource(validHex, "validHex.cb");
+        REQUIRE(okRes.ok);
+        CHECK(okRes.cppCode.find(R"CPP(cbBytesFromHex(std::string("deadbeef")))CPP") != std::string::npos);
+        CHECK(okRes.cppCode.find("cbBytesFromHex(hexStr)") != std::string::npos);
+        CHECK(okRes.cppCode.find(R"CPP(cbBytesFromHex(std::string("0102")))CPP") != std::string::npos);
+
+        const std::string badInstanceHex = R"CB(
+fn main() as int can error
+    dim b = b""
+    dim out = b.fromHex("deadbeef")
+    return out.len()
+end fn
+)CB";
+        const auto badRes = cb::transpileSource(badInstanceHex, "badInstanceHex.cb");
+        CHECK_FALSE(badRes.ok);
+        CHECK(badRes.error.kind == "AnalyzerError");
+        CHECK(badRes.error.message.find("'.fromHex()' cannot be called on a 'bytes' instance") != std::string::npos);
+    }
+
+    SECTION("dict.get(key, defaultVal), read-only dict parameter indexing, and bounds-safe list/bytes indexing") {
+        const std::string src = R"CB(
+fn sumReadOnly(nums as list[int], raw as bytes, d as dict[str, int]) as int
+    return nums[0] + nums[99] + raw[0] + raw[99] + d["present"] + d.get("missing", 10)
+end fn
+
+fn mutateContainers(byref nums as list[int], byref d as dict[str, int])
+    nums[0] = 50
+    d["present"] = 100
+end fn
+
+fn main() as int
+    dim nums as list[int] = [1, 2]
+    dim raw = b"\x05"
+    dim d as dict[str, int] = {"present": 7}
+    mutateContainers(nums, d)
+    return sumReadOnly(nums, raw, d)
+end fn
+)CB";
+        const auto res = cb::transpileSource(src, "safeContainers.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("cbListGet(nums, 0)") != std::string::npos);
+        CHECK(res.cppCode.find("cbBytesGet(raw, 0)") != std::string::npos);
+        CHECK(res.cppCode.find(R"CPP(cbDictAt(d, std::string("present")))CPP") != std::string::npos);
+        CHECK(res.cppCode.find(R"CPP(cbDictGet(d, std::string("missing"), 10))CPP") != std::string::npos);
+        CHECK(res.cppCode.find("nums[0] = 50;") != std::string::npos);
+        CHECK(res.cppCode.find(R"CPP(d[std::string("present")] = 100;)CPP") != std::string::npos);
+    }
+
+    SECTION("LSP zero-import str completions/hover, dict.get, str.fromHex, and aligned infallible bytes endian signatures") {
+        cb::LspServerState state;
+        const std::string uri = "file:///workspace/lspPrelude.cb";
+        const std::string src = R"CB(fn main()
+    dim s = "hello"
+    dim d as dict[str, int] = {"a": 1}
+    dim b = b"\x01\x02"
+    dim x = s.trim()
+end fn
+)CB";
+        state.openDocuments[uri] = src;
+        const auto snap = cb::getOrBuildSnapshot(state, uri);
+        REQUIRE(snap.valid);
+        const std::optional<std::string> fnKey = std::string("main");
+
+        std::vector<cb::CompletionItemEntry> strItems;
+        std::unordered_map<std::string, bool> seenStr;
+        cb::collectDotCompletions(snap, "", fnKey, "s", "", strItems, seenStr);
+        bool foundTrim = false;
+        bool foundFromHex = false;
+        for (const auto& item : strItems) {
+            if (item.label == "trim") foundTrim = true;
+            if (item.label == "fromHex" && item.detail == "fn() as bytes can error") foundFromHex = true;
+        }
+        CHECK(foundTrim);
+        CHECK(foundFromHex);
+
+        std::vector<cb::CompletionItemEntry> litItems;
+        std::unordered_map<std::string, bool> seenLit;
+        cb::collectDotCompletions(snap, "", fnKey, R"CPP("")CPP", "sp", litItems, seenLit);
+        bool foundSplitOnLit = false;
+        for (const auto& item : litItems) {
+            if (item.label == "split") foundSplitOnLit = true;
+        }
+        CHECK(foundSplitOnLit);
+        std::vector<cb::CompletionItemEntry> dictItems;
+        std::unordered_map<std::string, bool> seenDict;
+        cb::collectDotCompletions(snap, "", fnKey, "d", "g", dictItems, seenDict);
+        REQUIRE(!dictItems.empty());
+        CHECK(dictItems[0].label == "get");
+        CHECK(dictItems[0].detail == "fn(key as str, defaultValue as int) as int");
+
+        std::vector<cb::CompletionItemEntry> bytesItems;
+        std::unordered_map<std::string, bool> seenBytes;
+        cb::collectDotCompletions(snap, "", fnKey, "b", "", bytesItems, seenBytes);
+        bool foundReadU16Le = false;
+        bool foundWriteU16Le = false;
+        bool foundBytesFromHex = false;
+        for (const auto& item : bytesItems) {
+            if (item.label == "readU16Le" && item.detail == "fn(offset as int) as int") foundReadU16Le = true;
+            if (item.label == "writeU16Le" && item.detail == "fn(value as int, offset as int)") foundWriteU16Le = true;
+            if (item.label == "fromHex") foundBytesFromHex = true;
+        }
+        CHECK(foundReadU16Le);
+        CHECK(foundWriteU16Le);
+        CHECK_FALSE(foundBytesFromHex);
+
+        const auto cursorCtx = cb::resolveCursorToken(src, "/workspace/lspPrelude.cb", 5, 16);
+        const auto symInfo = cb::resolveCursorSymbolInfo(snap, "/workspace/lspPrelude.cb", cursorCtx);
+        REQUIRE(symInfo.hoverMarkdown.has_value());
+        CHECK(symInfo.hoverMarkdown.value().find("pub fn trim(s as str) as str") != std::string::npos);
+        REQUIRE(symInfo.definition.has_value());
+        CHECK(symInfo.definition.value().fileName.find("stdlib/str/str.cb") != std::string::npos);
+    }
+}

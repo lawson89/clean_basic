@@ -76,12 +76,14 @@ CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 * **`.push(item as T)`**: Supported on `list[T]` and `bytes` (octet). Appends an item to the end of the list.
 * **`.pop() as T`**: Supported on `list[T]` and `bytes` (returns `int`). Removes and returns the last element.
 * **`.clear()`**: Supported on `list[T]`, `dict[K, V]`, and `bytes`. Removes all elements in place.
+* **`dict.get(key as K, defaultValue as V) as V`**: Returns the value associated with `key` if present, or `defaultValue` without mutating the dictionary.
 * **`dict.has(key as K) as bool`**: Returns `true` if `key` exists in the dictionary without mutating it.
 * **`dict.remove(key as K) as bool`**: Removes `key` from the dictionary and returns `true` if an entry was removed.
 * **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
 * **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
-* **`bytes` Methods**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, etc.
+* **`bytes` Methods & Static Constructor**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, and static constructor `bytes.fromHex(hex as str) as bytes can error`.
 * **`str.toBytes() as bytes`**: Encodes a string into UTF-8 bytes.
+* **`str.fromHex() as bytes can error`**: Decodes an even-length hexadecimal string into a `bytes` buffer.
 * **`str.byteAt(idx as int) as int`**: Returns the unsigned byte value (`0..255`) at byte index `idx`, or `-1` if out of bounds.
 * **`.toFloat() as float`**: Supported on `int` and `float`. Performs an infallible floating-point conversion.
 
@@ -197,7 +199,7 @@ partition "UFCS Resolution (target is a value expression)" {
 
   :UFCS Step 2 (Receiver's Defining Module):
   Extract defining module recvModId from recvTypeKey
-  (or map "str" -> "std/str" when std/str is imported);
+  (or map "str" -> "std/str" via the auto-included std/str prelude);
   if (recvModId != "" AND symbolKey(recvModId, name) exists?) then (yes)
     if (Function isPub AND first param matches recvTypeKey?) then (yes)
       :Return FnSymbol;

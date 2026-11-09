@@ -353,6 +353,9 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     if (name == "clear") {
         return wrapVbCodeBlock("fn .clear()") + "\nRemoves all elements from a list, dict, or bytes buffer.";
     }
+    if (name == "get") {
+        return wrapVbCodeBlock("fn .get(key as K, defaultValue as V) as V") + "\nReturns the value associated with key in a dict, or defaultValue if the key is not present (without mutating the dict).";
+    }
     if (name == "has") {
         return wrapVbCodeBlock("fn .has(key as K) as bool") + "\nReturns true if the dict contains the specified key.";
     }
@@ -361,6 +364,18 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     }
     if (name == "byteAt") {
         return wrapVbCodeBlock("fn .byteAt(idx as int) as int") + "\nReturns the unsigned byte value (0..255) at byte index idx in a str, or -1 if out of bounds.";
+    }
+    if (name == "fromHex") {
+        return wrapVbCodeBlock("fn .fromHex() as bytes can error") + "\nDecodes an even-length hexadecimal string into a bytes buffer.";
+    }
+    if (name == "toBytes") {
+        return wrapVbCodeBlock("fn .toBytes() as bytes") + "\nEncodes a str into a UTF-8 bytes buffer.";
+    }
+    if (name == "toHex") {
+        return wrapVbCodeBlock("fn .toHex() as str") + "\nEncodes a bytes buffer as a lowercase hexadecimal string.";
+    }
+    if (name == "toUtf8") {
+        return wrapVbCodeBlock("fn .toUtf8() as str can error") + "\nValidates and decodes a bytes buffer into a UTF-8 str.";
     }
     return std::nullopt;
 }

@@ -233,7 +233,7 @@ end fn
 
 ### 4. Control Flow, Ranges, and Built-in Containers
 
-CleanBasic provides built-in generic containers (`list[T]`, `dict[K, V]`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` loops alongside `while` loops, `break` and `continue` control statements, and `select case` blocks on `int`, `bool`, and `str` (lowered to native C++ `switch` jump tables with stacked cases for integral/boolean types, and single-evaluation `if / else if / else` chains for strings, supporting comma-separated multi-value `case expr1, expr2` clauses).
+CleanBasic provides an auto-included `std/str` prelude (so `str` UFCS methods like `s.trim()`, `s.split(",")`, `s.toInt()`, and `str.join(...)` work out of the box with zero imports and zero dead-code emission when unused), built-in generic containers (`list[T]`, `dict[K, V]` with bounds-safe indexing and `dict.get(key, defaultVal)`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` loops alongside `while` loops, `break` and `continue` control statements, and `select case` blocks on `int`, `bool`, and `str` (lowered to native C++ `switch` jump tables with stacked cases for integral/boolean types, and single-evaluation `if / else if / else` chains for strings, supporting comma-separated multi-value `case expr1, expr2` clauses).
 
 ```vb
 fn demoContainers() as int

@@ -43,7 +43,6 @@ extern fn cbStrLeft(s as str, n as int) as str
 extern fn cbStrRight(s as str, n as int) as str
 extern fn cbStrMid(s as str, start as int, count as int) as str
 extern fn cbStrCharAt(s as str, idx as int) as str
-extern fn cbStrByteAt(s as str, idx as int) as int
 extern fn cbStrFromChar(code as int) as str
 
 ' Transformations
@@ -198,10 +197,6 @@ end fn
 
 pub fn charAt(s as str, idx as int) as str
     return cbStrCharAt(s, idx)
-end fn
-
-pub fn byteAt(s as str, idx as int) as int
-    return cbStrByteAt(s, idx)
 end fn
 
 pub fn fromChar(code as int) as str

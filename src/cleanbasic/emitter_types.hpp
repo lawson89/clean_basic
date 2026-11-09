@@ -245,6 +245,39 @@ inline void cbBytesWriteU64Be(std::vector<uint8_t>& b, int64_t val, int64_t offs
 }
 
 template <typename T>
+inline T cbListGet(const std::vector<T>& v, int64_t idx) {
+    if (idx < 0 || static_cast<size_t>(idx) >= v.size()) {
+        return T{};
+    }
+    return v[static_cast<size_t>(idx)];
+}
+
+inline int64_t cbBytesGet(const std::vector<uint8_t>& b, int64_t idx) {
+    if (idx < 0 || static_cast<size_t>(idx) >= b.size()) {
+        return 0;
+    }
+    return static_cast<int64_t>(b[static_cast<size_t>(idx)]);
+}
+
+template <typename K, typename V, typename KArg>
+inline V cbDictAt(const std::unordered_map<K, V>& d, const KArg& k) {
+    const auto it = d.find(static_cast<K>(k));
+    if (it != d.end()) {
+        return it->second;
+    }
+    return V{};
+}
+
+template <typename K, typename V, typename KArg, typename VArg>
+inline V cbDictGet(const std::unordered_map<K, V>& d, const KArg& k, const VArg& defVal) {
+    const auto it = d.find(static_cast<K>(k));
+    if (it != d.end()) {
+        return it->second;
+    }
+    return static_cast<V>(defVal);
+}
+
+template <typename T>
 inline T cbListPop(std::vector<T>& v) {
     if (v.empty()) {
         return T{};
@@ -495,7 +528,7 @@ public:
     }
 
     // Forward declarations of emitter methods
-    std::string emitExpr(ExprId exprId, const std::unordered_map<std::string, VarSymbol>& scope);
+    std::string emitExpr(ExprId exprId, const std::unordered_map<std::string, VarSymbol>& scope, bool asLvalue = false);
     std::string emitAsStrExpr(ExprId exprId, const std::unordered_map<std::string, VarSymbol>& scope);
     std::vector<std::string> emitExprList(const std::vector<ExprId>& exprIds, const std::unordered_map<std::string, VarSymbol>& scope);
     std::vector<std::string> orderStructFields(std::string_view typeName, const std::vector<ExprId>& posArgs, const std::vector<NamedArg>& namedArgs, const std::unordered_map<std::string, VarSymbol>& scope);

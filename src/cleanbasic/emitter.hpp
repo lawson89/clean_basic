@@ -96,8 +96,15 @@ inline std::string Emitter::emitCallArgsJoined(
     const std::unordered_map<std::string, VarSymbol>& scope
 ) {
     if (fnSym.params.empty() || (namedArgs.empty() && posArgs.size() >= fnSym.params.size())) {
-        std::vector<std::string> rendered = emitExprList(posArgs, scope);
+        std::vector<std::string> rendered;
         rendered.reserve(posArgs.size() + namedArgs.size());
+        for (size_t i = 0; i < posArgs.size(); ++i) {
+            bool isByrefParam = false;
+            if (i < fnSym.params.size() && fnSym.params[i].isByref) {
+                isByrefParam = true;
+            }
+            rendered.push_back(emitExpr(posArgs[i], scope, isByrefParam));
+        }
         for (const auto& na : namedArgs) {
             rendered.push_back(emitExpr(na.value, scope));
         }
@@ -114,11 +121,11 @@ inline std::string Emitter::emitCallArgsJoined(
     for (size_t i = 0; i < fnSym.params.size(); ++i) {
         const auto& p = fnSym.params[i];
         if (i < posArgs.size()) {
-            rendered.push_back(emitExpr(posArgs[i], scope));
+            rendered.push_back(emitExpr(posArgs[i], scope, p.isByref));
         } else {
             const auto nit = namedMap.find(p.name);
             if (nit != namedMap.end()) {
-                rendered.push_back(emitExpr(nit->second, scope));
+                rendered.push_back(emitExpr(nit->second, scope, p.isByref));
             } else if (p.hasDefault && p.defaultValue != INVALID_ID) {
                 const std::string savedMod = currentModuleId;
                 currentModuleId = fnSym.moduleId;
@@ -133,7 +140,8 @@ inline std::string Emitter::emitCallArgsJoined(
 
 inline std::string Emitter::emitExpr(
     ExprId exprId,
-    const std::unordered_map<std::string, VarSymbol>& scope
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    bool asLvalue
 ) {
     if (exprId >= arena.exprs.size()) {
         return "";
@@ -213,34 +221,28 @@ inline std::string Emitter::emitExpr(
         if (cOpt.has_value()) {
             return cOpt->cppName;
         }
-        return emitExpr(faccess->target, scope) + "." + faccess->fieldName;
+        return emitExpr(faccess->target, scope, asLvalue) + "." + faccess->fieldName;
     }
 
     if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
         const TypeId tgtTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId);
         const TypeNode resolvedTgt = resolveAliasNode(arena, symbols, currentModuleId, tgtTid);
-        const std::string tgtCpp = emitExpr(iaccess->target, scope);
-        const std::string idxCpp = emitExpr(iaccess->index, scope);
+        const std::string tgtCpp = emitExpr(iaccess->target, scope, asLvalue);
+        const std::string idxCpp = emitExpr(iaccess->index, scope, false);
+        if (asLvalue) {
+            return tgtCpp + "[" + idxCpp + "]";
+        }
         if (resolvedTgt.name == "str") {
             return "cbStrIndex(" + tgtCpp + ", " + idxCpp + ")";
         }
+        if (resolvedTgt.name == "list") {
+            return "cbListGet(" + tgtCpp + ", " + idxCpp + ")";
+        }
+        if (resolvedTgt.name == "bytes") {
+            return "cbBytesGet(" + tgtCpp + ", " + idxCpp + ")";
+        }
         if (resolvedTgt.name == "dict") {
-            bool isConstDict = false;
-            if (const auto* ident = arena.getExpr<Identifier>(iaccess->target)) {
-                const auto it = scope.find(ident->name);
-                if (it != scope.end() && it->second.isConst) {
-                    isConstDict = true;
-                } else if (resolveConstSymbol(symbols, currentModuleId, scope, ident->name).has_value()) {
-                    isConstDict = true;
-                }
-            } else if (const auto* fa = arena.getExpr<FieldAccess>(iaccess->target)) {
-                if (resolveModuleConstAccess(arena, symbols, currentModuleId, scope, *fa).has_value()) {
-                    isConstDict = true;
-                }
-            }
-            if (isConstDict) {
-                return tgtCpp + ".at(" + idxCpp + ")";
-            }
+            return "cbDictAt(" + tgtCpp + ", " + idxCpp + ")";
         }
         return tgtCpp + "[" + idxCpp + "]";
     }
@@ -274,7 +276,12 @@ inline std::string Emitter::emitExpr(
         if (fnSym.has_value()) {
             if (fnSym->isBuiltinReceiver) {
                 const auto* access = arena.getExpr<FieldAccess>(call->callee);
-                const std::string recvCpp = emitExpr(access->target, scope);
+                bool recvMutated = false;
+                if (fnSym->name == "push" || fnSym->name == "pop" || fnSym->name == "clear" ||
+                    fnSym->name == "remove" || fnSym->name.rfind("writeU", 0) == 0) {
+                    recvMutated = true;
+                }
+                const std::string recvCpp = emitExpr(access->target, scope, recvMutated);
                 if (fnSym->name == "len") {
                     return "static_cast<int64_t>(" + recvCpp + ".size())";
                 } else if (fnSym->name == "push") {
@@ -293,6 +300,8 @@ inline std::string Emitter::emitExpr(
                     return "cbListPop(" + recvCpp + ")";
                 } else if (fnSym->name == "clear") {
                     return recvCpp + ".clear()";
+                } else if (fnSym->name == "get") {
+                    return "cbDictGet(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                 } else if (fnSym->name == "has") {
                     return "(" + recvCpp + ".count(" + emitExpr(call->args[0], scope) + ") > 0)";
                 } else if (fnSym->name == "remove") {
@@ -316,6 +325,9 @@ inline std::string Emitter::emitExpr(
                 } else if (fnSym->name == "toHex") {
                     return "cbBytesToHex(" + recvCpp + ")";
                 } else if (fnSym->name == "fromHex") {
+                    if (call->args.empty()) {
+                        return "cbBytesFromHex(" + recvCpp + ")";
+                    }
                     return "cbBytesFromHex(" + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name.rfind("readU", 0) == 0) {
                     return "cbBytesR" + fnSym->name.substr(1) + "(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
@@ -508,7 +520,7 @@ inline void Emitter::emitFallibleAssignment(
                 emitLine(name + " = " + rhs + ";");
             }
         } else {
-            const std::string lhsCpp = emitExpr(tid, scope);
+            const std::string lhsCpp = emitExpr(tid, scope, true);
             std::string rhs = "0";
             if (hasValue) {
                 rhs = valTmp;
@@ -541,7 +553,7 @@ inline void Emitter::emitVarAssignment(
             const std::string& name = ident->name;
             const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, stmt.declaredType);
             const TypeNode resNode = resolveAliasNode(arena, symbols, currentModuleId, stmt.declaredType);
-            scope[name] = VarSymbol{name, resolvedT, false};
+            scope[name] = VarSymbol{name, resolvedT, false, stmt.isConst};
             declaredVars.insert(name);
             const std::string cppType = mapTypeNode(currentModuleId, resNode);
             std::string prefix;
@@ -582,7 +594,7 @@ inline void Emitter::emitVarAssignment(
                 emitLine(name + " = " + valCpp + ";");
             }
         } else {
-            const std::string lhsCpp = emitExpr(targetId, scope);
+            const std::string lhsCpp = emitExpr(targetId, scope, true);
             emitLine(lhsCpp + " = " + valCpp + ";");
         }
     }
@@ -1144,9 +1156,17 @@ inline std::string Emitter::emitProgram(const Program& program) {
 
     lines.push_back(std::string(CPP_RUNTIME_PREAMBLE));
 
-    if (!symbols.headers.empty()) {
+    std::vector<std::string> emittedHeaders;
+    for (const auto& hdr : symbols.headers) {
+        const auto hmIt = symbols.headerModules.find(hdr);
+        if (hmIt != symbols.headerModules.end() && !isModuleEmitted(symbols, hmIt->second)) {
+            continue;
+        }
+        emittedHeaders.push_back(hdr);
+    }
+    if (!emittedHeaders.empty()) {
         emitLine();
-        for (const auto& hdr : symbols.headers) {
+        for (const auto& hdr : emittedHeaders) {
             emitLine(R"(#include ")" + hdr + R"(")");
         }
     }
@@ -1161,6 +1181,7 @@ inline std::string Emitter::emitProgram(const Program& program) {
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
         const auto& declNode = arena.decls[did];
+        if (!isModuleEmitted(symbols, declNode.moduleId)) continue;
         if (const auto* td = arena.getDecl<TypeDecl>(did)) {
             if (!td->isExtern) structDecls.push_back({declNode.moduleId, *td});
         } else if (const auto* ed = arena.getDecl<EnumDecl>(did)) {

@@ -96,6 +96,9 @@ inline CursorTokenContext resolveCursorToken(std::string_view sourceText, std::s
                 if (prevTok.kind == "IDENT" || prevTok.kind == "TYPE_KW") {
                     ctx.hasDotReceiver = true;
                     ctx.receiverName = prevTok.value;
+                } else if (prevTok.kind == "STRING") {
+                    ctx.hasDotReceiver = true;
+                    ctx.receiverName = """";
                 }
             }
             if (i >= 1 && lexRes.tokens[i - 1].kind == "KEYWORD" && lexRes.tokens[i - 1].value == "import" && tok.kind == "STRING") ctx.isImportTarget = true;
@@ -176,9 +179,22 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
                 }
             }
         }
-        const auto varIt = activeScope.find(recv);
-        if (varIt != activeScope.end()) {
-            const TypeId recvTid = varIt->second.typeId;
+        std::optional<TypeId> recvTidOpt;
+        if (!recv.empty() && recv.front() == '"') {
+            recvTidOpt = snap.symbols.typeStr;
+        } else {
+            const auto varIt = activeScope.find(recv);
+            if (varIt != activeScope.end()) {
+                recvTidOpt = varIt->second.typeId;
+            } else {
+                const auto cIt = snap.symbols.constants.find(symbolKey(currentModId, recv));
+                if (cIt != snap.symbols.constants.end()) {
+                    recvTidOpt = cIt->second.typeId;
+                }
+            }
+        }
+        if (recvTidOpt.has_value()) {
+            const TypeId recvTid = recvTidOpt.value();
             const auto tsOpt = resolveTypeSymbol(snap.arena, snap.symbols, currentModId, recvTid);
             if (tsOpt.has_value()) {
                 const TypeSymbol& ts = tsOpt.value();
@@ -194,7 +210,17 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
                 }
             }
             const auto ufcsFn = resolveUfcsFn(snap.arena, snap.symbols, currentModId, recvTid, member);
-            if (ufcsFn.has_value()) { bindFn(ufcsFn.value()); return res; }
+            if (ufcsFn.has_value()) {
+                if (ufcsFn->isBuiltinReceiver) {
+                    const auto bMd = formatBuiltinHoverMarkdown(ufcsFn->name);
+                    if (bMd.has_value()) {
+                        res.hoverMarkdown = bMd;
+                        return res;
+                    }
+                }
+                bindFn(ufcsFn.value());
+                return res;
+            }
         }
     }
     const auto localIt = activeScope.find(tok.value);

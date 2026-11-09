@@ -115,7 +115,13 @@ inline CallSiteContext parseEnclosingCallSite(std::string_view linePrefix) {
     ctx.calleeName = calleeTok.value;
     if (openParenIdx >= 3 && toks[openParenIdx - 2].kind == "DOT") {
         const Token& recvTok = toks[openParenIdx - 3];
-        if (recvTok.kind == "IDENT" || recvTok.kind == "TYPE_KW") { ctx.hasReceiver = true; ctx.receiverName = recvTok.value; }
+        if (recvTok.kind == "IDENT" || recvTok.kind == "TYPE_KW") {
+            ctx.hasReceiver = true;
+            ctx.receiverName = recvTok.value;
+        } else if (recvTok.kind == "STRING") {
+            ctx.hasReceiver = true;
+            ctx.receiverName = """";
+        }
     }
     int innerParen = 0, innerBracket = 0, innerBrace = 0;
     uint32_t commaCount = 0;
@@ -159,9 +165,14 @@ inline CompletionCursorAnalysis analyzeCompletionCursor(std::string_view linePre
     if (wordStart > 0 && linePrefix[wordStart - 1] == '.') {
         size_t recvEnd = wordStart - 1;
         while (recvEnd > 0 && (linePrefix[recvEnd - 1] == ' ' || linePrefix[recvEnd - 1] == '\t')) recvEnd--;
-        size_t recvStart = recvEnd;
-        while (recvStart > 0 && isIdentChar(linePrefix[recvStart - 1])) recvStart--;
-        if (recvEnd > recvStart) { res.isDot = true; res.dotReceiver = std::string(linePrefix.substr(recvStart, recvEnd - recvStart)); }
+        if (recvEnd > 0 && linePrefix[recvEnd - 1] == '"') {
+            res.isDot = true;
+            res.dotReceiver = """";
+        } else {
+            size_t recvStart = recvEnd;
+            while (recvStart > 0 && isIdentChar(linePrefix[recvStart - 1])) recvStart--;
+            if (recvEnd > recvStart) { res.isDot = true; res.dotReceiver = std::string(linePrefix.substr(recvStart, recvEnd - recvStart)); }
+        }
     } else if (beforeWord >= 2) {
         size_t kwEnd = beforeWord;
         size_t kwStart = kwEnd;
@@ -225,6 +236,7 @@ inline void collectModuleSymbolCompletions(const LspDocumentSnapshot& snap, std:
 }
 
 inline std::optional<TypeId> resolveVariableTypeInFn(const LspDocumentSnapshot& snap, const std::optional<std::string>& enclosingFnKey, std::string_view varName) {
+    if (!varName.empty() && varName.front() == '"') return snap.symbols.typeStr;
     if (!enclosingFnKey.has_value()) return std::nullopt;
     const auto scopeIt = snap.symbols.fnScopes.find(enclosingFnKey.value());
     if (scopeIt == snap.symbols.fnScopes.end()) return std::nullopt;
@@ -306,7 +318,10 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
     }
     if (recvNode.name == "dict") {
         std::string keyType = "K";
+        std::string valType = "V";
         if (!recvNode.typeArgs.empty()) keyType = formatCleanbasicType(snap.arena, recvNode.typeArgs[0]);
+        if (recvNode.typeArgs.size() >= 2) valType = formatCleanbasicType(snap.arena, recvNode.typeArgs[1]);
+        if (matchesCompletionPrefix("get", prefix)) addCompletionEntry(items, seen, "get", 2, "fn(key as " + keyType + ", defaultValue as " + valType + ") as " + valType);
         if (matchesCompletionPrefix("has", prefix)) addCompletionEntry(items, seen, "has", 2, "fn(key as " + keyType + ") as bool");
         if (matchesCompletionPrefix("remove", prefix)) addCompletionEntry(items, seen, "remove", 2, "fn(key as " + keyType + ") as bool");
         if (matchesCompletionPrefix("clear", prefix)) addCompletionEntry(items, seen, "clear", 2, "fn()");
@@ -321,15 +336,16 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
         if (matchesCompletionPrefix("toHex", prefix)) addCompletionEntry(items, seen, "toHex", 2, "fn() as str");
         const std::vector<std::string> readMethods = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
         for (const auto& rm : readMethods) {
-            if (matchesCompletionPrefix(rm, prefix)) addCompletionEntry(items, seen, rm, 2, "fn(offset as int) as int can error");
+            if (matchesCompletionPrefix(rm, prefix)) addCompletionEntry(items, seen, rm, 2, "fn(offset as int) as int");
         }
         const std::vector<std::string> writeMethods = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
         for (const auto& wm : writeMethods) {
-            if (matchesCompletionPrefix(wm, prefix)) addCompletionEntry(items, seen, wm, 2, "fn(offset as int, value as int) can error");
+            if (matchesCompletionPrefix(wm, prefix)) addCompletionEntry(items, seen, wm, 2, "fn(value as int, offset as int)");
         }
     }
     if (recvNode.name == "str") {
         if (matchesCompletionPrefix("toBytes", prefix)) addCompletionEntry(items, seen, "toBytes", 2, "fn() as bytes");
+        if (matchesCompletionPrefix("fromHex", prefix)) addCompletionEntry(items, seen, "fromHex", 2, "fn() as bytes can error");
         if (matchesCompletionPrefix("byteAt", prefix)) addCompletionEntry(items, seen, "byteAt", 2, "fn(idx as int) as int");
     }
     if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvNode.name == "str" || recvNode.name == "err" || recvIsEnum) {
@@ -512,9 +528,32 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
         // Built-in receiver methods
         if (callCtx.calleeName == "len") return SignatureHelpData{"fn .len() as int", "", {}, 0};
         if (callCtx.calleeName == "toStr") return SignatureHelpData{"fn .toStr() as str", "", {}, 0};
-        if (callCtx.calleeName == "toInt") return SignatureHelpData{"fn .toInt() as int", "", {}, 0};
-        if (callCtx.calleeName == "toFloat") return SignatureHelpData{"fn .toFloat() as float", "", {}, 0};
+        if (callCtx.calleeName == "toInt" && (callCtx.receiverName.empty() || callCtx.receiverName.front() != '"')) {
+            const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
+            if (!vOpt.has_value() || vOpt.value() != snap.symbols.typeStr) {
+                return SignatureHelpData{"fn .toInt() as int", "", {}, 0};
+            }
+        }
+        if (callCtx.calleeName == "toFloat" && (callCtx.receiverName.empty() || callCtx.receiverName.front() != '"')) {
+            const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
+            if (!vOpt.has_value() || vOpt.value() != snap.symbols.typeStr) {
+                return SignatureHelpData{"fn .toFloat() as float", "", {}, 0};
+            }
+        }
         if (callCtx.calleeName == "push") return SignatureHelpData{"fn .push(item as T)", "", {"item as T"}, 0};
+        if (callCtx.calleeName == "get") {
+            uint32_t activeIdx = callCtx.activeParam;
+            if (activeIdx > 1) {
+                activeIdx = 1;
+            }
+            return SignatureHelpData{"fn .get(key as K, defaultValue as V) as V", "", {"key as K", "defaultValue as V"}, activeIdx};
+        }
+        if (callCtx.calleeName == "fromHex") {
+            if (callCtx.receiverName == "bytes") {
+                return SignatureHelpData{"fn bytes.fromHex(hex as str) as bytes can error", "", {"hex as str"}, 0};
+            }
+            return SignatureHelpData{"fn .fromHex() as bytes can error", "", {}, 0};
+        }
     }
     if (!snap.valid) return std::nullopt;
     const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);

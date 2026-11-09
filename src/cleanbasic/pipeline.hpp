@@ -429,6 +429,89 @@ inline void loadModuleDeclarationsRecursive(
     }
 }
 
+inline void preloadStdStrPrelude(
+    AstArena& arena,
+    std::string_view rootFileName,
+    ModuleLoaderState& loader
+) {
+    const std::string normRoot = normalizeRelPath(rootFileName);
+    if (normRoot == "stdlib/str/str.cb" ||
+        (normRoot.size() >= 18 && normRoot.substr(normRoot.size() - 18) == "/stdlib/str/str.cb")) {
+        return;
+    }
+    const std::string targetModuleId = "std/str";
+    if (loader.loadedModules.find(targetModuleId) != loader.loadedModules.end()) {
+        return;
+    }
+    const std::vector<std::string> candidates = buildModuleCandidatePaths(
+        loader.rootBaseDir,
+        loader.rootBaseDir,
+        targetModuleId
+    );
+    std::string candidatePath = candidates.front();
+    std::optional<std::string> memSource;
+    std::ifstream modIn;
+    for (size_t cIdx = 0; cIdx < candidates.size(); ++cIdx) {
+        candidatePath = candidates[cIdx];
+        memSource = findInMemorySource(loader.openBuffers, candidatePath);
+        if (!memSource.has_value()) {
+            modIn.open(candidatePath);
+        }
+        if (memSource.has_value() || modIn.is_open()) {
+            break;
+        }
+    }
+    const bool hasModuleSource = memSource.has_value() || modIn.is_open();
+    if (!hasModuleSource) {
+        return;
+    }
+    std::string modSource;
+    if (memSource.has_value()) {
+        modSource = memSource.value();
+        if (modIn.is_open()) {
+            modIn.close();
+        }
+    } else {
+        std::ostringstream modSs;
+        modSs << modIn.rdbuf();
+        modIn.close();
+        modSource = modSs.str();
+    }
+    const auto modLex = tokenize(modSource, candidatePath);
+    if (!modLex.ok) {
+        loader.hasError = true;
+        loader.error = modLex.error;
+        return;
+    }
+    auto modParse = parseTokensWithArena(
+        modLex.tokens,
+        std::move(arena),
+        candidatePath
+    );
+    if (!modParse.ok) {
+        arena = std::move(modParse.arena);
+        loader.hasError = true;
+        loader.error = modParse.error;
+        return;
+    }
+    arena = std::move(modParse.arena);
+    const std::string normCandidate = normalizeRelPath(candidatePath);
+    loader.loadingStack.push_back(targetModuleId);
+    loader.loadingPathStack.push_back(normCandidate);
+    loadModuleDeclarationsRecursive(
+        arena,
+        modParse.program.declarations,
+        targetModuleId,
+        candidatePath,
+        loader
+    );
+    loader.loadingPathStack.pop_back();
+    loader.loadingStack.pop_back();
+    if (!loader.hasError) {
+        loader.loadedModules.insert(targetModuleId);
+    }
+}
+
 inline CheckSourceResult checkSource(
     std::string_view source,
     std::string_view fileName = "main.cb",
@@ -450,6 +533,11 @@ inline CheckSourceResult checkSource(
     const std::string normRoot = normalizeRelPath(fileName);
     if (!normRoot.empty()) {
         loader.loadingPathStack.push_back(normRoot);
+    }
+
+    preloadStdStrPrelude(parseRes.arena, fileName, loader);
+    if (loader.hasError) {
+        return CheckSourceResult{false, {}, {}, {}, loader.error};
     }
 
     loadModuleDeclarationsRecursive(

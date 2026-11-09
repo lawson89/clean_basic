@@ -32,7 +32,7 @@ enum FileAccess as int
 end enum
 
 fn lookupK(d as dict[str, int]) as int
-    return d["k"]
+    return d["k"] + d.get("missing", 0)
 end fn
 
 fn describeMethod(m as HttpMethod) as str
@@ -69,7 +69,10 @@ fn testBytesBuffers() can error
     print("GIF slice: " & s1 & ", sliceFrom: " & s2)
 
     dim parsed = bytes.fromHex("deadbeef")
-    print("fromHex: " & parsed.toHex() & ", len: " & parsed.len().toStr())
+    dim parsedViaStr = "deadbeef".fromHex()
+    if parsedViaStr.toHex() == parsed.toHex()
+        print("fromHex: " & parsed.toHex() & ", len: " & parsed.len().toStr())
+    end if
 
     dim originalStr = "CleanBasic"
     dim encoded = originalStr.toBytes()

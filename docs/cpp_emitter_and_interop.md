@@ -100,8 +100,8 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 | `bytes` | `std::vector<uint8_t>` | `std::vector<uint8_t>{}` | Raw binary buffer; byte literals emit initializer lists. |
 | `cptr` | `void*` | `void*{}` (`nullptr`) | Opaque C pointer for C/C++ FFI interop. |
 | `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`); marked `[[nodiscard]]`. |
-| `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; `.push(x)` lowers to `.push_back(x)`. |
-| `dict[K, V]` | `std::unordered_map<MappedK, MappedV>` | `std::unordered_map<...>{}` | Hash table; supports `for k, v in d` structured binding loops. |
+| `list[T]` | `std::vector<MappedT>` | `std::vector<MappedT>{}` | Contiguous dynamic array; rvalue reads lower to bounds-safe `cbListGet(v, i)`; `.push(x)` lowers to `.push_back(x)`. |
+| `dict[K, V]` | `std::unordered_map<MappedK, MappedV>` | `std::unordered_map<...>{}` | Hash table; rvalue reads lower to const-safe `cbDictAt(d, k)` and `.get(k, def)` lowers to `cbDictGet(d, k, def)`. |
 | User `enum Foo` | `Foo` / `cb_m_a__Foo` | `static_cast<Foo>(0)` | Emitted as C++17 `enum class : int64_t`. |
 | User `type Foo` (root) | `struct Foo` | `Foo{}` | Pure value semantics (stack allocated, passed by const ref or `byref`). |
 | User `type Foo` (module `m/a`) | `struct cb_m_a__Foo` | `cb_m_a__Foo{}` | Mangled module-scoped POD struct. |
