@@ -2541,6 +2541,17 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
         const std::string countOut = cb::testE2E::readFileText(stdoutFile);
         CHECK(countOut.find("2") != std::string::npos);
 
+        const int rcInvert = std::system(("./" + outBin + " -iv cleanbasic " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcInvert == 0);
+        const std::string invertOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(invertOut.find("Second line") != std::string::npos);
+        CHECK(invertOut.find("CleanBasic Alpha") == std::string::npos);
+
+        const int rcBadFlag = std::system(("./" + outBin + " -z cleanbasic " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcBadFlag != 0);
+        const std::string badFlagOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(badFlagOut.find("cbgrep: invalid option -- 'z'") != std::string::npos);
+
         const int rcNoMatch = std::system(("./" + outBin + " nonexistentPatternXYZ " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
         CHECK(rcNoMatch != 0);
     }

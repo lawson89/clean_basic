@@ -23,6 +23,7 @@ extern fn cbOsPlatform() as str
 extern fn cbOsClock() as int
 extern fn cbOsSleep(ms as int)
 extern fn cbOsRun(cmd as str) as int
+extern fn cbOsExec(cmd as str) as str can error
 extern fn cbOsExit(code as int)
 
 ' --- Public API: CLI & Standard Streams ---
@@ -66,8 +67,7 @@ pub fn hasEnv(name as str) as bool
 end fn
 
 pub fn cwd() as str can error
-    dim dir = cbOsCwd()
-    return dir
+    return cbOsCwd()
 end fn
 
 pub fn chdir(path as str) can error
@@ -90,6 +90,10 @@ end fn
 
 pub fn run(cmd as str) as int
     return cbOsRun(cmd)
+end fn
+
+pub fn exec(cmd as str) as str can error
+    return cbOsExec(cmd)
 end fn
 
 pub fn exit(code as int)

@@ -3,17 +3,21 @@
 ' EXPECT_CPP: cb_std_os__args(
 ' EXPECT_CPP: cb_std_os__cwd(
 ' EXPECT_CPP: cb_std_os__clock(
+' EXPECT_CPP: cb_std_os__exec(
 ' EXPECT_CPP: int main(int argc, char** argv)
 ' EXPECT_OUT: Args count=1
 ' EXPECT_OUT: Platform valid=true, unsetEnvExists=false, unsetEnvVal=[]
 ' EXPECT_OUT: Working dir changed=stdlibOsSandbox, restored=true
 ' EXPECT_OUT: Clock monotonic=true
 ' EXPECT_OUT: Subprocess exit codes: zero=0, seven=7
+' EXPECT_OUT: Exec captured=CleanBasicExecOk
+' EXPECT_OUT: Caught exec failure (code=9)
 ' EXPECT_OUT: Raw framing: Content-Length: 4 | readExact0=[]
 ' EXPECT_OUT: Stderr message via eprint
 
 import "std/os"
 import "std/fs"
+import "std/str"
 
 fn testChdirRoundtrip(sandboxDir as str) can error
     dim origCwd = os.cwd()
@@ -23,6 +27,16 @@ fn testChdirRoundtrip(sandboxDir as str) can error
     end defer
     dim insideCwd = os.cwd()
     print("Working dir changed=" & fs.fileName(insideCwd) & ", restored=" & (origCwd != insideCwd))
+end fn
+
+fn testExecFailure()
+    on error e
+        print($"Caught exec failure (code={e.code})")
+        return
+    end error
+
+    dim badOut = os.exec("exit 9")
+    print(badOut)
 end fn
 
 fn main() as int
@@ -55,6 +69,10 @@ fn main() as int
     dim rc0 = os.run("exit 0")
     dim rc7 = os.run("exit 7")
     print("Subprocess exit codes: zero=" & rc0 & ", seven=" & rc7)
+
+    dim execOut = os.exec("echo CleanBasicExecOk")
+    print("Exec captured=" & execOut.trim())
+    testExecFailure()
 
     os.printRaw("Raw framing: ")
     os.printRaw("Content-Length: 4")

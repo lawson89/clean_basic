@@ -21,8 +21,8 @@ fn printUsage()
 end fn
 
 fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
-    dim flags = arg.sliceFrom(1).chars()
-    for ch in flags
+    for i = 1 to arg.len() - 1
+        dim ch = arg[i]
         select case ch
             case "i"
                 opts.ignoreCase = true
@@ -33,7 +33,7 @@ fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
             case "v"
                 opts.invertMatch = true
             case else
-                os.eprint("cbgrep: invalid option -- '" & ch & "'")
+                os.eprint($"cbgrep: invalid option -- '{ch}'")
                 printUsage()
                 return false
         end select
@@ -42,28 +42,41 @@ fn parseFlagGroup(arg as str, byref opts as GrepOptions) as bool
 end fn
 
 fn lineMatches(line as str, pattern as str, opts as GrepOptions) as bool
+    dim matched = false
     if opts.ignoreCase
-        return line.asciiContainsIgnoreCase(pattern) != opts.invertMatch
+        matched = line.asciiContainsIgnoreCase(pattern)
+    else
+        matched = line.contains(pattern)
     end if
-    return line.contains(pattern) != opts.invertMatch
+    if opts.invertMatch
+        return not matched
+    end if
+    return matched
 end fn
 
 fn formatMatchLine(path as str, showPath as bool, lineNum as int, line as str, opts as GrepOptions) as str
     if showPath and opts.lineNumbers
-        return path & ":" & lineNum & ":" & line
+        return $"{path}:{lineNum}:{line}"
     else if showPath
-        return path & ":" & line
+        return $"{path}:{line}"
     else if opts.lineNumbers
-        return lineNum.toStr() & ":" & line
+        return $"{lineNum}:{line}"
     end if
     return line
 end fn
 
 fn printCountResult(path as str, showPath as bool, matchedCount as int)
     if showPath
-        print(path & ":" & matchedCount)
+        print($"{path}:{matchedCount}")
     else
         print(matchedCount)
+    end if
+end fn
+
+fn handleMatchedLine(path as str, showPath as bool, lineNum as int, line as str, opts as GrepOptions, byref matchedCount as int)
+    matchedCount += 1
+    if not opts.countOnly
+        print(formatMatchLine(path, showPath, lineNum, line, opts))
     end if
 end fn
 
@@ -74,10 +87,7 @@ fn searchStdin(pattern as str, opts as GrepOptions, showPath as bool) as int
     while os.readLine(line)
         lineNum += 1
         if lineMatches(line, pattern, opts)
-            matchedCount += 1
-            if not opts.countOnly
-                print(formatMatchLine("(standard input)", showPath, lineNum, line, opts))
-            end if
+            handleMatchedLine("(standard input)", showPath, lineNum, line, opts, matchedCount)
         end if
     end while
     if opts.countOnly
@@ -98,10 +108,7 @@ fn searchFile(path as str, pattern as str, opts as GrepOptions, showPath as bool
     while f.readLine(line)
         lineNum += 1
         if lineMatches(line, pattern, opts)
-            matchedCount += 1
-            if not opts.countOnly
-                print(formatMatchLine(path, showPath, lineNum, line, opts))
-            end if
+            handleMatchedLine(path, showPath, lineNum, line, opts, matchedCount)
         end if
     end while
 
@@ -113,18 +120,17 @@ end fn
 
 fn searchFileSafe(path as str, pattern as str, opts as GrepOptions, showPath as bool, byref hadError as bool) as int
     on error e
-        os.eprint("cbgrep: " & path & ": " & e.msg)
+        os.eprint($"cbgrep: {path}: {e.msg}")
         hadError = true
         return 0
     end error
 
-    dim count = searchFile(path, pattern, opts, showPath)
-    return count
+    return searchFile(path, pattern, opts, showPath)
 end fn
 
 fn searchDir(dirPath as str, pattern as str, opts as GrepOptions, byref hadError as bool) as int
     on error e
-        os.eprint("cbgrep: " & dirPath & ": " & e.msg)
+        os.eprint($"cbgrep: {dirPath}: {e.msg}")
         hadError = true
         return 0
     end error
@@ -188,7 +194,7 @@ fn main() as int
             if target == "-"
                 totalMatches += searchStdin(pattern, opts, showPath)
             else if not fs.exists(target)
-                os.eprint("cbgrep: " & target & ": No such file or directory")
+                os.eprint($"cbgrep: {target}: No such file or directory")
                 hadError = true
             else if fs.isDir(target)
                 totalMatches += searchDir(target, pattern, opts, hadError)

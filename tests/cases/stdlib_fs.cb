@@ -3,29 +3,37 @@
 ' EXPECT_CPP: cb_std_fs__write(
 ' EXPECT_CPP: cb_std_fs__open(
 ' EXPECT_CPP: cb_std_fs__close(
+' EXPECT_CPP: cb_std_fs__rename(
+' EXPECT_CPP: cb_std_fs__removeAll(
+' EXPECT_CPP: cb_std_fs__absPath(
+' EXPECT_CPP: cb_std_fs__tempDir(
 ' EXPECT_OUT: Path helpers: dir=build/testArtifacts/stdlibFsSandbox, file=notes.txt, ext=.txt
-' EXPECT_OUT: Whole-file lines=3, first=alpha, copiedSize=18
+' EXPECT_OUT: Whole-file lines=3, first=alpha, copiedSize=18, renamedExists=true
 ' EXPECT_OUT: Streamed lines=3: [L1] [L2] [L3], eofAfter=true
-' EXPECT_OUT: Directory entries=2: copy.txt, stream.log
+' EXPECT_OUT: Directory entries=2: renamed.txt, stream.log
+' EXPECT_OUT: AbsPath leaf=stdlibFsSandbox, tempDirValid=true
 ' EXPECT_OUT: Caught missing file (code=404)
-' EXPECT_OUT: Cleanup complete: exists=false
+' EXPECT_OUT: Cleanup complete: removedAll=true, exists=false
 
 import "std/fs"
 
 fn testWholeFileAndCopy(baseDir as str) can error
     dim notesPath = fs.joinPath(baseDir, "notes.txt")
     dim copyPath = fs.joinPath(baseDir, "copy.txt")
+    dim renamedPath = fs.joinPath(baseDir, "renamed.txt")
 
     print("Path helpers: dir=" & fs.parentDir(notesPath) & ", file=" & fs.fileName(notesPath) & ", ext=" & fs.ext(notesPath))
 
     fs.write(notesPath, "alpha\r\nbeta\n")
     fs.append(notesPath, "gamma\n")
     fs.copy(notesPath, copyPath)
+    fs.rename(copyPath, renamedPath)
 
     dim allLines = fs.lines(notesPath)
-    dim copiedSz = fs.size(copyPath)
-    if fs.exists(notesPath) and fs.isFile(copyPath)
-        print("Whole-file lines=" & allLines.len() & ", first=" & allLines[0] & ", copiedSize=" & copiedSz)
+    dim copiedSz = fs.size(renamedPath)
+    dim renamedOk = (not fs.exists(copyPath)) and fs.isFile(renamedPath)
+    if fs.exists(notesPath) and renamedOk
+        print("Whole-file lines=" & allLines.len() & ", first=" & allLines[0] & ", copiedSize=" & copiedSz & ", renamedExists=" & renamedOk)
     end if
 
     fs.remove(notesPath)
@@ -98,9 +106,13 @@ fn main() as int
         print("Directory entries=" & entries.len() & ": " & entries[0] & ", " & entries[1])
     end if
 
+    dim absBase = fs.absPath(baseDir)
+    dim tmpDir = fs.tempDir()
+    print("AbsPath leaf=" & fs.fileName(absBase) & ", tempDirValid=" & (tmpDir.len() > 0 and fs.isDir(tmpDir)))
+
     testMissingFile(baseDir)
 
-    fs.remove(baseDir)
-    print("Cleanup complete: exists=" & fs.exists(baseDir))
+    dim removedCount = fs.removeAll(baseDir)
+    print("Cleanup complete: removedAll=" & (removedCount >= 3) & ", exists=" & fs.exists(baseDir))
     return 0
 end fn

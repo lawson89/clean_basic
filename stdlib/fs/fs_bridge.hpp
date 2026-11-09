@@ -466,6 +466,21 @@ inline CbError cbFsMkdir(const std::string& path) {
     return CbError{"", 0};
 }
 
+inline CbError cbFsRename(const std::string& src, const std::string& dst) {
+    if (src.empty() || dst.empty()) {
+        return CbError{"Cannot rename with empty source or destination path", 400};
+    }
+    std::error_code ec;
+    if (!std::filesystem::exists(src, ec)) {
+        return CbError{"Source path not found: " + src, 404};
+    }
+    std::filesystem::rename(src, dst, ec);
+    if (ec) {
+        return CbError{"Failed to rename '" + src + "' to '" + dst + "': " + ec.message(), 500};
+    }
+    return CbError{"", 0};
+}
+
 inline CbError cbFsRemove(const std::string& path) {
     if (path.empty()) {
         return CbError{"Cannot remove empty path", 400};
@@ -476,6 +491,39 @@ inline CbError cbFsRemove(const std::string& path) {
         return CbError{"Failed to remove path '" + path + "': " + ec.message(), 500};
     }
     return CbError{"", 0};
+}
+
+inline std::tuple<int64_t, CbError> cbFsRemoveAll(const std::string& path) {
+    if (path.empty()) {
+        return {0, CbError{"Cannot remove empty path", 400}};
+    }
+    std::error_code ec;
+    const std::uintmax_t removedCount = std::filesystem::remove_all(path, ec);
+    if (ec) {
+        return {0, CbError{"Failed to remove path '" + path + "': " + ec.message(), 500}};
+    }
+    return {static_cast<int64_t>(removedCount), CbError{"", 0}};
+}
+
+inline std::tuple<std::string, CbError> cbFsAbsPath(const std::string& path) {
+    if (path.empty()) {
+        return {std::string(""), CbError{"Cannot resolve absolute path for empty path", 400}};
+    }
+    std::error_code ec;
+    const std::filesystem::path absP = std::filesystem::absolute(path, ec);
+    if (ec) {
+        return {std::string(""), CbError{"Failed to resolve absolute path for '" + path + "': " + ec.message(), 500}};
+    }
+    return {absP.lexically_normal().generic_string(), CbError{"", 0}};
+}
+
+inline std::tuple<std::string, CbError> cbFsTempDir() {
+    std::error_code ec;
+    const std::filesystem::path tmpP = std::filesystem::temp_directory_path(ec);
+    if (ec) {
+        return {std::string(""), CbError{"Failed to get temporary directory path: " + ec.message(), 500}};
+    }
+    return {tmpP.generic_string(), CbError{"", 0}};
 }
 
 inline std::string cbFsJoinPath(const std::string& a, const std::string& b) {

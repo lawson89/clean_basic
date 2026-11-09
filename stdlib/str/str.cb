@@ -239,25 +239,21 @@ pub fn escapeCpp(s as str) as str
 end fn
 
 pub fn unescape(s as str) as str can error
-    dim val = cbStrUnescape(s)
-    return val
+    return cbStrUnescape(s)
 end fn
 
 ' --- Public API: Parsing & ASCII Character Classification ---
 
 pub fn toInt(s as str) as int can error
-    dim val = cbStrToInt(s)
-    return val
+    return cbStrToInt(s)
 end fn
 
 pub fn toFloat(s as str) as float can error
-    dim val = cbStrToFloat(s)
-    return val
+    return cbStrToFloat(s)
 end fn
 
 pub fn toBool(s as str) as bool can error
-    dim val = cbStrToBool(s)
-    return val
+    return cbStrToBool(s)
 end fn
 
 pub fn asciiIsDigit(s as str) as bool

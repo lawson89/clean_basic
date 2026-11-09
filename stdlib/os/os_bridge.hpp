@@ -2,6 +2,7 @@
 #define CLEANBASIC_STDLIB_OS_BRIDGE_HPP
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -132,6 +133,57 @@ inline int64_t cbOsRun(const std::string& cmd) {
     }
 #endif
     return status;
+}
+
+inline std::tuple<std::string, CbError> cbOsExec(const std::string& cmd) {
+    if (cmd.empty()) {
+        return {std::string(""), CbError{"Cannot execute empty command", 400}};
+    }
+#if defined(_WIN32)
+    FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+    FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+    if (pipe == nullptr) {
+        return {std::string(""), CbError{"Failed to start subprocess for command: " + cmd, 1}};
+    }
+    std::string output;
+    char buffer[4096];
+    while (true) {
+        const size_t bytesRead = std::fread(buffer, 1, sizeof(buffer), pipe);
+        if (bytesRead > 0) {
+            output.append(buffer, bytesRead);
+        }
+        if (bytesRead < sizeof(buffer)) {
+            break;
+        }
+    }
+#if defined(_WIN32)
+    const int rawStatus = _pclose(pipe);
+#else
+    const int rawStatus = pclose(pipe);
+#endif
+    if (rawStatus < 0) {
+        return {std::string(""), CbError{"Subprocess wait failed for command: " + cmd, 1}};
+    }
+    int exitCode = rawStatus;
+#if !defined(_WIN32)
+    if ((rawStatus & 0x7f) == 0) {
+        exitCode = (rawStatus >> 8) & 0xff;
+    } else {
+        exitCode = 128 + (rawStatus & 0x7f);
+    }
+#endif
+    if (exitCode != 0) {
+        return {
+            std::string(""),
+            CbError{
+                "Command exited with status " + std::to_string(exitCode) + ": " + cmd,
+                static_cast<int64_t>(exitCode)
+            }
+        };
+    }
+    return {std::move(output), CbError{"", 0}};
 }
 
 inline void cbOsExit(int64_t code) {
