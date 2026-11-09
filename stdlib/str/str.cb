@@ -53,6 +53,8 @@ extern fn cbStrAsciiLower(s as str) as str
 extern fn cbStrAsciiUpper(s as str) as str
 extern fn cbStrRepeat(s as str, n as int) as str
 extern fn cbStrReverse(s as str) as str
+extern fn cbStrEscapeCpp(s as str) as str
+extern fn cbStrUnescape(s as str) as str can error
 
 ' Parsing & ASCII Character Classification
 extern fn cbStrToInt(s as str) as int can error
@@ -61,6 +63,8 @@ extern fn cbStrToBool(s as str) as bool can error
 extern fn cbStrAsciiIsDigit(s as str) as bool
 extern fn cbStrAsciiIsAlpha(s as str) as bool
 extern fn cbStrAsciiIsSpace(s as str) as bool
+extern fn cbStrAsciiIsAlnum(s as str) as bool
+extern fn cbStrAsciiIsHexDigit(s as str) as bool
 
 ' --- Public API: UTF-8 Inspection & Codepoints ---
 
@@ -230,6 +234,15 @@ pub fn reverse(s as str) as str
     return cbStrReverse(s)
 end fn
 
+pub fn escapeCpp(s as str) as str
+    return cbStrEscapeCpp(s)
+end fn
+
+pub fn unescape(s as str) as str can error
+    dim val = cbStrUnescape(s)
+    return val
+end fn
+
 ' --- Public API: Parsing & ASCII Character Classification ---
 
 pub fn toInt(s as str) as int can error
@@ -257,4 +270,12 @@ end fn
 
 pub fn asciiIsSpace(s as str) as bool
     return cbStrAsciiIsSpace(s)
+end fn
+
+pub fn asciiIsAlnum(s as str) as bool
+    return cbStrAsciiIsAlnum(s)
+end fn
+
+pub fn asciiIsHexDigit(s as str) as bool
+    return cbStrAsciiIsHexDigit(s)
 end fn

@@ -134,7 +134,8 @@ Inside a `fn connect(ip as str) as Connection can error`:
   return CbError{"", 0};
   ```
 
-### 4.2 Implicit Error Bubbling (`emitFallibleAssignment` & `emitExprStmt`)
+### 4.2 Implicit Error Bubbling (`emitFallibleAssignment`, `emitExprStmt` & `emitReturn`)
+Fallible calls at the root of a variable assignment (`dim x = f()`), standalone call (`f()`), or direct return (`return f()`) are unpacked into temporary `auto [_val, _err]` bindings and checked via `emitActiveErrorHandlerOrBubble()`.
 When a `can error` function calls another fallible function with no active `on error` block in scope:
 
 **CleanBasic Source:**

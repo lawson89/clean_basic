@@ -852,4 +852,140 @@ inline bool cbStrAsciiIsSpace(const std::string& s) {
     return true;
 }
 
+inline bool cbStrAsciiIsAlnum(const std::string& s) {
+    if (s.empty()) {
+        return false;
+    }
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (!cbStrIsAsciiAlphaByte(s[i]) && !cbStrIsAsciiDigitByte(s[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool cbStrIsAsciiHexDigitByte(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+inline bool cbStrAsciiIsHexDigit(const std::string& s) {
+    if (s.empty()) {
+        return false;
+    }
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (!cbStrIsAsciiHexDigitByte(s[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline std::string cbStrEscapeCpp(const std::string& s) {
+    static const char hexChars[] = "0123456789abcdef";
+    const char bs = static_cast<char>(92);
+    const char dq = static_cast<char>(34);
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        const unsigned char b = static_cast<unsigned char>(s[i]);
+        if (b == 92) {
+            out.push_back(bs);
+            out.push_back(bs);
+        } else if (b == 34) {
+            out.push_back(bs);
+            out.push_back(dq);
+        } else if (b == 10) {
+            out.push_back(bs);
+            out.push_back('n');
+        } else if (b == 13) {
+            out.push_back(bs);
+            out.push_back('r');
+        } else if (b == 9) {
+            out.push_back(bs);
+            out.push_back('t');
+        } else if (b == 0) {
+            out.push_back(bs);
+            out.push_back('0');
+        } else if (b < 0x20 || b == 0x7F) {
+            out.push_back(bs);
+            out.push_back('x');
+            out.push_back(hexChars[(b >> 4) & 0x0F]);
+            out.push_back(hexChars[b & 0x0F]);
+        } else {
+            out.push_back(static_cast<char>(b));
+        }
+    }
+    return out;
+}
+
+inline int cbStrHexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
+inline std::tuple<std::string, CbError> cbStrUnescape(const std::string& s) {
+    const char bs = static_cast<char>(92);
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] != bs) {
+            out.push_back(s[i]);
+            i += 1;
+            continue;
+        }
+        if (i + 1 >= s.size()) {
+            return {std::string(""), CbError{"Invalid escape sequence: trailing backslash", 400}};
+        }
+        const char esc = s[i + 1];
+        if (esc == bs) {
+            out.push_back(bs);
+            i += 2;
+        } else if (esc == '"') {
+            out.push_back('"');
+            i += 2;
+        } else if (esc == static_cast<char>(39)) {
+            out.push_back(static_cast<char>(39));
+            i += 2;
+        } else if (esc == 'n') {
+            out.push_back(static_cast<char>(10));
+            i += 2;
+        } else if (esc == 'r') {
+            out.push_back(static_cast<char>(13));
+            i += 2;
+        } else if (esc == 't') {
+            out.push_back(static_cast<char>(9));
+            i += 2;
+        } else if (esc == '0') {
+            out.push_back(static_cast<char>(0));
+            i += 2;
+        } else if (esc == 'x') {
+            if (i + 3 >= s.size()) {
+                return {std::string(""), CbError{"Invalid hex escape sequence: expected two hex digits", 400}};
+            }
+            const int hi = cbStrHexDigitValue(s[i + 2]);
+            const int lo = cbStrHexDigitValue(s[i + 3]);
+            if (hi < 0 || lo < 0) {
+                return {std::string(""), CbError{"Invalid hex escape sequence: non-hex digit", 400}};
+            }
+            out.push_back(static_cast<char>((hi << 4) | lo));
+            i += 4;
+        } else {
+            std::string errMsg = "Unknown escape sequence: ";
+            errMsg.push_back(bs);
+            errMsg.push_back(esc);
+            return {std::string(""), CbError{errMsg, 400}};
+        }
+    }
+    return {out, CbError{"", 0}};
+}
+
 #endif // CLEANBASIC_STDLIB_STR_BRIDGE_HPP

@@ -16,8 +16,16 @@ inline std::vector<std::string> cbOsArgs() {
     return cbRuntimeArgs();
 }
 
+inline void cbOsPrintRaw(const std::string& text) {
+    std::cout << text << std::flush;
+}
+
 inline void cbOsEprint(const std::string& msg) {
     std::cerr << msg << std::endl;
+}
+
+inline void cbOsEprintRaw(const std::string& text) {
+    std::cerr << text << std::flush;
 }
 
 inline bool cbOsReadLine(std::string& outLine) {
@@ -25,10 +33,24 @@ inline bool cbOsReadLine(std::string& outLine) {
     if (!std::getline(std::cin, outLine)) {
         return false;
     }
-    if (!outLine.empty() && outLine.back() == '\r') {
+    if (!outLine.empty() && outLine.back() == static_cast<char>(13)) {
         outLine.pop_back();
     }
     return true;
+}
+
+inline std::string cbOsReadExact(int64_t count) {
+    if (count <= 0) {
+        return "";
+    }
+    std::string buf(static_cast<size_t>(count), static_cast<char>(0));
+    std::cin.read(&buf[0], static_cast<std::streamsize>(count));
+    const std::streamsize got = std::cin.gcount();
+    if (got <= 0) {
+        return "";
+    }
+    buf.resize(static_cast<size_t>(got));
+    return buf;
 }
 
 inline std::string cbOsReadAll() {

@@ -81,7 +81,8 @@ CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 * **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
 * **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
 * **`bytes` Methods**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, etc.
-* **`str.toBytes() as bytes`**: Encodes a string into UTF-8 bytes. Performs an infallible integer conversion.
+* **`str.toBytes() as bytes`**: Encodes a string into UTF-8 bytes.
+* **`str.byteAt(idx as int) as int`**: Returns the unsigned byte value (`0..255`) at byte index `idx`, or `-1` if out of bounds.
 * **`.toFloat() as float`**: Supported on `int` and `float`. Performs an infallible floating-point conversion.
 
 ---
@@ -271,10 +272,13 @@ When function `caller` invokes a fallible function `callee` (`callee.isFallible 
 * **Case 1: Active `on error` Handler in Scope (`hasActiveOnError == true`)**
   The call is valid even if `caller` is infallible. Errors from `callee` will be routed to the active `on error` block in the current scope.
 * **Case 2: No `on error` Handler, and `caller` Declares `can error` (`caller.isFallible == true`)**
-  The call is valid. `checkFallibleUsage()` sets `stmt.implicitBubble = true` on the enclosing `VarAssignment` or `ExprStmt`, instructing the emitter to automatically unpack the error and bubble it upward if `cbHasError(_err)` is true.
+  The call is valid. `checkFallibleUsage()` sets `stmt.implicitBubble = true` on the enclosing `VarAssignment`, `ExprStmt`, or `ReturnStmt`, instructing the emitter to automatically unpack the error and bubble it upward if `cbHasError(_err)` is true.
 * **Case 3: No `on error` Handler, and `caller` is Infallible (`caller.isFallible == false`)**
   Compilation fails immediately with an `AnalyzerError`:
   `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function '<caller>' calls fallible function '<callee>').`
+* **Top-Level Statement Rule for Fallible Calls:**
+  Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, or a standalone expression statement (`fallible()`). Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if`/`while` conditions) is rejected with:
+  `AnalyzerError: Fallible call to '<name>' must be assigned to a variable, returned directly, or called as a standalone statement.`
 
 ### 7.3 `on error` Scope Activation & Mandatory Control-Flow Exit (`stmtListHasExit`)
 When `analyzeStmt()` encounters an `ErrorBlock` (`on error e ... end error`):

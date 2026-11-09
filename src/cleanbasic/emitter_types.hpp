@@ -82,6 +82,20 @@ inline std::vector<uint8_t> cbStrToBytes(const std::string& s) {
     return std::vector<uint8_t>(s.begin(), s.end());
 }
 
+inline std::string cbStrIndex(const std::string& s, int64_t idx) {
+    if (idx < 0 || static_cast<size_t>(idx) >= s.size()) {
+        return "";
+    }
+    return std::string(1, s[static_cast<size_t>(idx)]);
+}
+
+inline int64_t cbStrByteAtFast(const std::string& s, int64_t idx) {
+    if (idx < 0 || static_cast<size_t>(idx) >= s.size()) {
+        return -1;
+    }
+    return static_cast<int64_t>(static_cast<unsigned char>(s[static_cast<size_t>(idx)]));
+}
+
 inline std::string cbBytesToHex(const std::vector<uint8_t>& b) {
     static const char hexChars[] = "0123456789abcdef";
     std::string out;
@@ -494,7 +508,7 @@ public:
     void emitFallibleAssignment(const FnDecl& fn, const VarAssignment& stmt, const FnSymbol& fnSym, std::unordered_map<std::string, VarSymbol>& scope, std::unordered_set<std::string>& declaredVars);
     void emitVarAssignment(const FnDecl& fn, const VarAssignment& stmt, std::unordered_map<std::string, VarSymbol>& scope, std::unordered_set<std::string>& declaredVars);
     void emitExprStmt(const FnDecl& fn, const ExprStmt& stmt, std::unordered_map<std::string, VarSymbol>& scope, std::unordered_set<std::string>& declaredVars);
-    void emitReturn(const FnDecl& fn, const ReturnStmt& stmt, const std::unordered_map<std::string, VarSymbol>& scope);
+    void emitReturn(const FnDecl& fn, const ReturnStmt& stmt, std::unordered_map<std::string, VarSymbol>& scope, std::unordered_set<std::string>& declaredVars);
     void emitStructDecl(const TypeDecl& td);
     void emitEnumDecl(const EnumDecl& ed);
     void emitConstDecl(const ConstDecl& cd);

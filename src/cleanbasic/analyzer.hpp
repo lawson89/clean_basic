@@ -220,6 +220,10 @@ public:
                         if (call->args.size() != 1) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'.sliceFrom()' requires exactly 1 argument (start).");
                         }
+                    } else if (fnSym.name == "byteAt") {
+                        if (call->args.size() != 1) {
+                            setAnalyzerError(exprNode.line, exprNode.col, "'.byteAt()' requires exactly 1 argument (idx).");
+                        }
                     } else if (fnSym.name == "fromHex") {
                         if (call->args.size() != 1) {
                             setAnalyzerError(exprNode.line, exprNode.col, "'fromHex()' requires exactly 1 argument (hex string).");
@@ -328,13 +332,12 @@ public:
                         }
                     }
 
-                    if (fnSym.isFallible && !allowTopLevelFallible) {
-                        if (!fn.isFallible) {
-                            std::string msg = "Function '" + fn.name + "' calls fallible function '" + fnSym.name +
-                                "' without an 'on error' block, but '" + fn.name + "' does not declare 'can error' in its signature.";
-                            setAnalyzerError(exprNode.line, exprNode.col, msg);
-                        }
-                    }
+                }
+
+                if (fnSym.isFallible && !allowTopLevelFallible) {
+                    std::string msg = "Fallible call to '" + fnSym.name +
+                        "' must be assigned to a variable, returned directly, or called as a standalone statement.";
+                    setAnalyzerError(exprNode.line, exprNode.col, msg);
                 }
 
                 // Visibility check for module-qualified calls
@@ -557,6 +560,15 @@ public:
                 }
             } else {
                 const auto& tgtNode = arena.exprs[vassign->target];
+                if (const auto* iaccess = arena.getExpr<IndexAccess>(vassign->target)) {
+                    const TypeId idxTgtTid = inferExprType(arena, iaccess->target, symbols, scope, moduleId);
+                    if (idxTgtTid < arena.types.size()) {
+                        const TypeNode idxTgtNode = resolveAliasNode(arena, symbols, moduleId, idxTgtTid);
+                        if (idxTgtNode.name == "str") {
+                            setAnalyzerError(tgtNode.line, tgtNode.col, "Cannot mutate string index in place; strings are immutable by index in CleanBasic.");
+                        }
+                    }
+                }
                 const auto root = findRootVar(vassign->target, scope);
                 if (root.found && root.isConst) {
                     std::string msg = "Cannot mutate const variable '" + root.name + "'.";
@@ -712,9 +724,6 @@ public:
         }
 
         if (const auto* retStmt = arena.getStmt<ReturnStmt>(stmtId)) {
-            if (retStmt->hasValue) {
-                validateExprCalls(fn, retStmt->value, scope, false);
-            }
             bool isReturnErrorCall = false;
             if (retStmt->hasValue) {
                 if (const auto* call = arena.getExpr<FuncCall>(retStmt->value)) {
@@ -722,6 +731,11 @@ public:
                         isReturnErrorCall = true;
                     }
                 }
+                if (!isReturnErrorCall) {
+                    bool implicitBubble = false;
+                    checkFallibleUsage(fn, retStmt->value, scope, hasActiveOnError, implicitBubble);
+                }
+                validateExprCalls(fn, retStmt->value, scope, true);
             }
             if (!isReturnErrorCall) {
                 const bool expectedHasValue = (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType));

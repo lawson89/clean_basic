@@ -359,6 +359,9 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     if (name == "remove") {
         return wrapVbCodeBlock("fn .remove(key as K) as bool") + "\nRemoves the entry for key from a dict and returns true if it existed.";
     }
+    if (name == "byteAt") {
+        return wrapVbCodeBlock("fn .byteAt(idx as int) as int") + "\nReturns the unsigned byte value (0..255) at byte index idx in a str, or -1 if out of bounds.";
+    }
     return std::nullopt;
 }
 

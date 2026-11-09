@@ -330,6 +330,7 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
     }
     if (recvNode.name == "str") {
         if (matchesCompletionPrefix("toBytes", prefix)) addCompletionEntry(items, seen, "toBytes", 2, "fn() as bytes");
+        if (matchesCompletionPrefix("byteAt", prefix)) addCompletionEntry(items, seen, "byteAt", 2, "fn(idx as int) as int");
     }
     if (recvNode.name == "int" || recvNode.name == "float" || recvNode.name == "bool" || recvNode.name == "str" || recvNode.name == "err" || recvIsEnum) {
         if (matchesCompletionPrefix("toStr", prefix)) addCompletionEntry(items, seen, "toStr", 2, "fn() as str");

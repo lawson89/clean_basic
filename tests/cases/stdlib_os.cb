@@ -9,6 +9,7 @@
 ' EXPECT_OUT: Working dir changed=stdlibOsSandbox, restored=true
 ' EXPECT_OUT: Clock monotonic=true
 ' EXPECT_OUT: Subprocess exit codes: zero=0, seven=7
+' EXPECT_OUT: Raw framing: Content-Length: 4 | readExact0=[]
 ' EXPECT_OUT: Stderr message via eprint
 
 import "std/os"
@@ -55,6 +56,11 @@ fn main() as int
     dim rc7 = os.run("exit 7")
     print("Subprocess exit codes: zero=" & rc0 & ", seven=" & rc7)
 
-    os.eprint("Stderr message via eprint")
+    os.printRaw("Raw framing: ")
+    os.printRaw("Content-Length: 4")
+    dim emptyExact = os.readExact(0)
+    print(" | readExact0=[" & emptyExact & "]")
+    os.eprintRaw("Stderr message ")
+    os.eprint("via eprint")
     return 0
 end fn

@@ -5,8 +5,11 @@ import header "os_bridge.hpp"
 
 ' CLI & Standard Streams
 extern fn cbOsArgs() as list[str]
+extern fn cbOsPrintRaw(text as str)
 extern fn cbOsEprint(msg as str)
+extern fn cbOsEprintRaw(text as str)
 extern fn cbOsReadLine(byref outLine as str) as bool
+extern fn cbOsReadExact(count as int) as str
 extern fn cbOsReadAll() as str
 
 ' Environment, Working Directory & Platform
@@ -28,12 +31,24 @@ pub fn args() as list[str]
     return cbOsArgs()
 end fn
 
+pub fn printRaw(text as str)
+    cbOsPrintRaw(text)
+end fn
+
 pub fn eprint(msg as str)
     cbOsEprint(msg)
 end fn
 
+pub fn eprintRaw(text as str)
+    cbOsEprintRaw(text)
+end fn
+
 pub fn readLine(byref outLine as str) as bool
     return cbOsReadLine(outLine)
+end fn
+
+pub fn readExact(count as int) as str
+    return cbOsReadExact(count)
 end fn
 
 pub fn readAll() as str

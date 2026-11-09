@@ -520,6 +520,14 @@ inline std::optional<FnSymbol> resolveUfcsFn(
             fs.isBuiltinReceiver = true;
             return fs;
         }
+    } else if (methodName == "byteAt") {
+        if (recvTypeKey == "str") {
+            FnSymbol fs{};
+            fs.name = "byteAt";
+            fs.returnType = symbols.typeInt;
+            fs.isBuiltinReceiver = true;
+            return fs;
+        }
     } else if (methodName == "toHex") {
         if (recvTypeKey == "bytes") {
             FnSymbol fs{};

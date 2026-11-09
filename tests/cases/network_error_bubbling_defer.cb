@@ -22,6 +22,8 @@
 ' EXPECT_OUT: Multi-call caught (code=408): IP cannot be empty
 ' EXPECT_OUT: Defer B before error return
 ' EXPECT_OUT: Defer A before error return
+' EXPECT_OUT: Forwarded connection id: 1
+' EXPECT_OUT: Fallback connection id: -1
 
 pub type Connection
     id as int
@@ -111,9 +113,32 @@ fn testMultiCallAndDeferLifo()
     print("Unreachable: " & c1.id & ", " & c2.id)
 end fn
 
+pub fn forwardConnect(ip as str) as Connection can error
+    return connect(ip)
+end fn
+
+fn connectWithFallback(ip as str) as Connection
+    on error e
+        return Connection(id=-1)
+    end error
+    return forwardConnect(ip)
+end fn
+
+fn testDirectReturnFallible()
+    on error e
+        print("Unexpected error: " & e.msg)
+        return
+    end error
+    dim c = forwardConnect("10.0.0.2")
+    print("Forwarded connection id: " & c.id)
+    dim fallbackConn = connectWithFallback("")
+    print("Fallback connection id: " & fallbackConn.id)
+end fn
+
 fn main()
     startServer()
     testFailedConnect()
     testFailedPort()
     testMultiCallAndDeferLifo()
+    testDirectReturnFallible()
 end fn

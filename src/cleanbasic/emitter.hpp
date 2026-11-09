@@ -221,6 +221,9 @@ inline std::string Emitter::emitExpr(
         const TypeNode resolvedTgt = resolveAliasNode(arena, symbols, currentModuleId, tgtTid);
         const std::string tgtCpp = emitExpr(iaccess->target, scope);
         const std::string idxCpp = emitExpr(iaccess->index, scope);
+        if (resolvedTgt.name == "str") {
+            return "cbStrIndex(" + tgtCpp + ", " + idxCpp + ")";
+        }
         if (resolvedTgt.name == "dict") {
             bool isConstDict = false;
             if (const auto* ident = arena.getExpr<Identifier>(iaccess->target)) {
@@ -308,6 +311,8 @@ inline std::string Emitter::emitExpr(
                     return "cbBytesToUtf8(" + recvCpp + ")";
                 } else if (fnSym->name == "toBytes") {
                     return "cbStrToBytes(" + recvCpp + ")";
+                } else if (fnSym->name == "byteAt") {
+                    return "cbStrByteAtFast(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "toHex") {
                     return "cbBytesToHex(" + recvCpp + ")";
                 } else if (fnSym->name == "fromHex") {
@@ -620,7 +625,8 @@ inline void Emitter::emitExprStmt(
 inline void Emitter::emitReturn(
     const FnDecl& fn,
     const ReturnStmt& stmt,
-    const std::unordered_map<std::string, VarSymbol>& scope
+    std::unordered_map<std::string, VarSymbol>& scope,
+    std::unordered_set<std::string>& declaredVars
 ) {
     if (!stmt.hasValue) {
         if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
@@ -636,6 +642,19 @@ inline void Emitter::emitReturn(
         if (isErrorBuiltinCall(arena, *call)) {
             const std::string errVal = buildErrorCallValue(*call, scope);
             emitLine(buildErrorBubbleReturn(fn, errVal));
+            return;
+        }
+        const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+        if (fnSym.has_value() && fnSym->isFallible) {
+            const std::string valTmp = nextTemp("_val");
+            const std::string errTmp = nextTemp("_err");
+            emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
+            emitActiveErrorHandlerOrBubble(fn, errTmp, scope, declaredVars);
+            if (fn.isFallible) {
+                emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
+            } else {
+                emitLine("return " + valTmp + ";");
+            }
             return;
         }
     }
@@ -979,7 +998,7 @@ inline void Emitter::emitStmt(
     }
 
     if (const auto* retS = arena.getStmt<ReturnStmt>(stmtId)) {
-        emitReturn(fn, *retS, scope);
+        emitReturn(fn, *retS, scope, declaredVars);
         return;
     }
 

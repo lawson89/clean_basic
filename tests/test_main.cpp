@@ -3417,3 +3417,212 @@ end fn
         CHECK(foundClear);
     }
 }
+
+TEST_CASE("String indexing s[i], built-in s.byteAt(i), std/str compiler helpers, and std/os raw stdio", "[str_index][byteAt][stdlib]") {
+    SECTION("s[i] emits cbStrIndex and built-in s.byteAt(i) works without importing std/str") {
+        const std::string code = R"CB(
+fn main() as int
+    dim s = "CleanBasic"
+    dim ch = s[0]
+    if s[1] == "l" and s[-1] == "" and s[999] == ""
+        print(ch & ":" & s.byteAt(0) & ":" & s.byteAt(-1))
+    end if
+    return 0
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "strIndexAndByteAt.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("cbStrIndex(s, 0)") != std::string::npos);
+        CHECK(res.cppCode.find("cbStrByteAtFast(s, 0)") != std::string::npos);
+    }
+
+    SECTION("Analyzer rejects mutating string index s[i] = val in place and validates .byteAt(idx) arity") {
+        const std::string badMutCode = R"CB(
+fn main()
+    dim s = "hello"
+    s[0] = "H"
+end fn
+)CB";
+        const auto mutRes = cb::transpileSource(badMutCode, "badStrIndexMut.cb");
+        CHECK_FALSE(mutRes.ok);
+        CHECK(mutRes.error.kind == "AnalyzerError");
+        CHECK(mutRes.error.message.find("Cannot mutate string index in place; strings are immutable by index in CleanBasic.") != std::string::npos);
+
+        const std::string badByteAtArity = R"CB(
+fn main()
+    dim s = "hello"
+    dim b = s.byteAt()
+end fn
+)CB";
+        const auto arityRes = cb::transpileSource(badByteAtArity, "badByteAtArity.cb");
+        CHECK_FALSE(arityRes.ok);
+        CHECK(arityRes.error.message.find("'.byteAt()' requires exactly 1 argument (idx).") != std::string::npos);
+    }
+
+    SECTION("std/str escapeCpp, unescape, asciiIsAlnum, and asciiIsHexDigit") {
+        const std::string unescapeCode = R"CB(
+import "std/str"
+fn main() can error
+    dim raw = str.fromChar(92) & "x41"
+    dim decoded = str.unescape(raw)
+    dim esc = decoded.escapeCpp()
+    dim alnum = decoded.asciiIsAlnum()
+    dim hex = decoded.asciiIsHexDigit()
+end fn
+)CB";
+        const auto res = cb::transpileSource(unescapeCode, "unescapeCheck.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("cb_std_str__unescape(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__escapeCpp(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__asciiIsAlnum(") != std::string::npos);
+        CHECK(res.cppCode.find("cb_std_str__asciiIsHexDigit(") != std::string::npos);
+    }
+
+    SECTION("LSP completes and hovers built-in .byteAt on str") {
+        cb::LspServerState state{};
+        const std::string uri = "file:///ws/str_byteat.cb";
+        const std::string text = R"CB(fn demo()
+    dim tokenText = "ident"
+    dim b = tokenText.byteAt(0)
+end fn
+)CB";
+        state.openDocuments[uri] = text;
+        std::ostringstream dummyOut;
+        cb::publishDocumentDiagnostics(state, uri, text, dummyOut);
+        const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(state, uri);
+        REQUIRE(snap.valid);
+
+        std::vector<cb::CompletionItemEntry> strDotItems;
+        std::unordered_map<std::string, bool> seenStr;
+        cb::collectDotCompletions(snap, "", std::string("demo"), "tokenText", "", strDotItems, seenStr);
+        bool foundByteAt = false;
+        for (const auto& item : strDotItems) {
+            if (item.label == "byteAt") {
+                foundByteAt = true;
+            }
+        }
+        CHECK(foundByteAt);
+
+        const auto hoverOpt = cb::formatBuiltinHoverMarkdown("byteAt");
+        REQUIRE(hoverOpt.has_value());
+        CHECK(hoverOpt.value().find("fn .byteAt(idx as int) as int") != std::string::npos);
+    }
+}
+
+TEST_CASE("Direct return fallibleCall() and top-level fallible statement guardrail", "[analyzer][emitter][fallible]") {
+    SECTION("Supports return fallibleCall() in can error functions, on error blocks, and bytes.toUtf8()") {
+        const std::string code = R"CB(
+fn parseNum(s as str) as int can error
+    if s == ""
+        error("empty input", code=400)
+    end if
+    return 42
+end fn
+
+fn delegateParse(s as str) as int can error
+    return parseNum(s)
+end fn
+
+fn decodeBytes(raw as bytes) as str can error
+    return raw.toUtf8()
+end fn
+
+fn safeParse(s as str) as int
+    on error e
+        return -1
+    end error
+    return delegateParse(s)
+end fn
+
+fn main()
+    print(safeParse("ok"))
+    print(safeParse(""))
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "returnFallible.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("auto [_val_1, _err_2] = parseNum(s);") != std::string::npos);
+        CHECK(res.cppCode.find("if (cbHasError(_err_2)) return { {}, _err_2 };") != std::string::npos);
+        CHECK(res.cppCode.find(R"CB(return { _val_1, CbError{"", 0} };)CB") != std::string::npos);
+        CHECK(res.cppCode.find("auto [_val_3, _err_4] = cbBytesToUtf8(raw);") != std::string::npos);
+        CHECK(res.cppCode.find("auto [_val_5, _err_6] = delegateParse(s);") != std::string::npos);
+        CHECK(res.cppCode.find("return _val_5;") != std::string::npos);
+    }
+
+    SECTION("Rejects unhandled return fallibleCall() inside infallible function without on error") {
+        const std::string badReturn = R"CB(
+fn risky() as int can error
+    return 1
+end fn
+
+fn caller() as int
+    return risky()
+end fn
+)CB";
+        const auto res = cb::transpileSource(badReturn, "badReturnFallible.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.kind == "AnalyzerError");
+        CHECK(res.error.message.find("Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block") != std::string::npos);
+    }
+
+    SECTION("Rejects nested fallible calls inside sub-expressions even in can error functions") {
+        const std::string nestedInArg = R"CB(
+fn stepOne() as int can error
+    return 10
+end fn
+
+fn caller() can error
+    dim items as list[int] = [1]
+    items.push(stepOne())
+end fn
+)CB";
+        const auto resArg = cb::transpileSource(nestedInArg, "nestedInArg.cb");
+        CHECK_FALSE(resArg.ok);
+        CHECK(resArg.error.kind == "AnalyzerError");
+        CHECK(resArg.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+
+        const std::string nestedInBinOp = R"CB(
+fn stepOne() as int can error
+    return 10
+end fn
+
+fn caller() as int can error
+    return 1 + stepOne()
+end fn
+)CB";
+        const auto resBin = cb::transpileSource(nestedInBinOp, "nestedInBinOp.cb");
+        CHECK_FALSE(resBin.ok);
+        CHECK(resBin.error.kind == "AnalyzerError");
+        CHECK(resBin.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+
+        const std::string nestedInCompound = R"CB(
+fn stepOne() as int can error
+    return 10
+end fn
+
+fn caller() can error
+    dim total = 0
+    total += stepOne()
+end fn
+)CB";
+        const auto resComp = cb::transpileSource(nestedInCompound, "nestedInCompound.cb");
+        CHECK_FALSE(resComp.ok);
+        CHECK(resComp.error.kind == "AnalyzerError");
+        CHECK(resComp.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+
+        const std::string nestedToUtf8 = R"CB(
+fn caller(raw as bytes) can error
+    if raw.toUtf8() == "ok"
+        print("ok")
+    end if
+end fn
+)CB";
+        const auto resUtf8 = cb::transpileSource(nestedToUtf8, "nestedToUtf8.cb");
+        CHECK_FALSE(resUtf8.ok);
+        CHECK(resUtf8.error.kind == "AnalyzerError");
+        CHECK(resUtf8.error.message.find("Fallible call to 'toUtf8' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+    }
+}
