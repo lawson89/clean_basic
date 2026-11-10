@@ -4295,6 +4295,100 @@ end fn
         CHECK(varHover.definition->line == 2);
     }
 
+    SECTION("Overloaded functions with shared parameter names, UFCS arity overloads, and cross-module UFCS Step 3") {
+        // 1. Overloaded functions sharing parameter name 'target' with different types (str vs list[int]) and UFCS arity overloads
+        const std::string overloadCode = R"CB(
+type TypeRegistry
+    items as list[str]
+end type
+
+fn findType(reg as TypeRegistry, target as str) as int
+    return target.len() + reg.items.len()
+end fn
+
+fn findType(byref reg as TypeRegistry, target as list[int], tag as str) as int
+    reg.items.push(tag)
+    return target.len() + reg.items.len()
+end fn
+
+fn main() as int
+    dim reg = TypeRegistry(items=["int", "str"])
+    dim a = reg.findType("float")
+    dim b = reg.findType([10, 20], "list")
+    return a + b
+end fn
+)CB";
+        const auto ovRes = cb::transpileSource(overloadCode, "overload_ufcs.cb");
+        INFO("Overload UFCS diagnostic: " << cb::formatDiagnostic(ovRes.error));
+        REQUIRE(ovRes.ok);
+        CHECK(ovRes.cppCode.find(R"CB(findType(reg, std::string("float")))CB") != std::string::npos);
+        CHECK(ovRes.cppCode.find(R"CB(findType(reg, {10, 20}, std::string("list")))CB") != std::string::npos);
+
+        // Reject invalid argument count on overloaded function
+        const std::string badOvSuffix = R"CB(
+fn bad(r as TypeRegistry) as int
+    return r.findType("a", "b", "c")
+end fn
+)CB";
+        const auto badOv = cb::checkSource(overloadCode + badOvSuffix, "bad_ov.cb");
+        CHECK_FALSE(badOv.ok);
+        CHECK(badOv.error.message.find("Too many arguments in call to 'findType'") != std::string::npos);
+
+        // 2. Cross-module UFCS Step 3 across imported modules (ast.cb defines AstArena, symbols.cb defines pub fn resolveAlias(arena as ast.AstArena, ...))
+        std::unordered_map<std::string, std::string> virtualFiles;
+        virtualFiles["/ws/ast.cb"] = R"CB(pub type AstArena
+    types as list[str]
+end type
+)CB";
+        virtualFiles["/ws/symbols.cb"] = R"CB(import "ast.cb"
+
+pub fn resolveAlias(arena as ast.AstArena, tid as int) as str
+    return arena.types[tid]
+end fn
+
+pub fn resolveAlias(arena as ast.AstArena, tid as int, fallback as str) as str
+    if tid < 0 or tid >= arena.types.len()
+        return fallback
+    end if
+    return arena.types[tid]
+end fn
+)CB";
+        const std::string analyzerSrc = R"CB(import "ast.cb"
+import "symbols.cb"
+
+fn main() as int
+    dim arena = ast.AstArena(types=["int", "str"])
+    dim t0 = arena.resolveAlias(0)
+    dim tFallback = arena.resolveAlias(99, "void")
+    return t0.len() + tFallback.len()
+end fn
+)CB";
+        virtualFiles["/ws/analyzer.cb"] = analyzerSrc;
+
+        const auto crossUfcsCheck = cb::checkSource(analyzerSrc, "/ws/analyzer.cb", virtualFiles);
+        INFO("Cross-module UFCS diagnostic: " << cb::formatDiagnostic(crossUfcsCheck.error));
+        REQUIRE(crossUfcsCheck.ok);
+
+        // Verify LSP dot-completion on 'arena' in analyzer.cb discovers 'resolveAlias' from imported symbols.cb
+        cb::LspServerState lspState{};
+        lspState.openDocuments["file:///ws/ast.cb"] = virtualFiles["/ws/ast.cb"];
+        lspState.openDocuments["file:///ws/symbols.cb"] = virtualFiles["/ws/symbols.cb"];
+        lspState.openDocuments["file:///ws/analyzer.cb"] = analyzerSrc;
+        const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(lspState, "file:///ws/analyzer.cb");
+        REQUIRE(snap.valid);
+
+        std::vector<cb::CompletionItemEntry> dotItems;
+        std::unordered_map<std::string, bool> seenDot;
+        cb::collectDotCompletions(snap, "", std::string("main"), "arena", "resolve", dotItems, seenDot);
+        bool foundResolveAlias = false;
+        for (const auto& item : dotItems) {
+            if (item.label == "resolveAlias") {
+                foundResolveAlias = true;
+            }
+        }
+        CHECK(foundResolveAlias);
+    }
+
     SECTION("Self-hosting compiler construct conformance E2E fixture (tests/cases/selfhost_constructs.cb)") {
         cb::testE2E::runE2EFixture("selfhost_constructs", "tests/cases/selfhost_constructs.cb");
     }

@@ -6,7 +6,7 @@
 ' FORBID_CPP: throw
 ' EXPECT_OUT: eval_expr: 35
 ' EXPECT_OUT: exec_stmts: x=35, y=42, module_hero=entities/hero, sym_x_const=false
-' EXPECT_OUT: overloads: id=7, tag=custom:7, stamped_line=99
+' EXPECT_OUT: overloads: id=7(exprs=8), tag=custom:7, stamped_line=99
 ' EXPECT_OUT: error_caught: code=422, has_file=true, line_positive=true, msg=Unresolved identifier: missingVar
 
 type IntLit
@@ -83,12 +83,12 @@ fn stampExprLine(byref node as ExprNode, newLine as int)
     node.line = newLine
 end fn
 
-fn formatNodeTag(id as int) as str
-    return "id=" & id.toStr()
+fn formatNodeTag(arena as MiniArena, target as int) as str
+    return "id=" & target.toStr() & "(exprs=" & arena.exprs.len().toStr() & ")"
 end fn
 
-fn formatNodeTag(id as int, prefix as str) as str
-    return "tag=" & prefix & ":" & id.toStr()
+fn formatNodeTag(arena as MiniArena, target as str, id as int) as str
+    return "tag=" & target & ":" & id.toStr()
 end fn
 
 fn evalExpr(arena as MiniArena, fnKey as str, exprId as int) as int can error
@@ -159,7 +159,7 @@ fn runCompilerSim() can error
     print($"exec_stmts: x={vx}, y={vy}, module_hero={mHero}, sym_x_const={xConst}")
 
     arena.exprs[0].stampExprLine(99)
-    print("overloads: " & formatNodeTag(7) & ", " & formatNodeTag(7, "custom") & ", stamped_line=" & arena.exprs[0].line.toStr())
+    print("overloads: " & arena.formatNodeTag(7) & ", " & arena.formatNodeTag("custom", 7) & ", stamped_line=" & arena.exprs[0].line.toStr())
 
     ' Trigger an unresolved identifier error and recover via on error
     dim eBad = arena.addExpr(25, ExprPayload.ident(IdentExpr(name="missingVar")))

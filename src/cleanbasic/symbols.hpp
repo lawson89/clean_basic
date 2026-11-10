@@ -771,12 +771,70 @@ inline std::vector<FnSymbol> getBuiltinReceiverMethods(
     return methods;
 }
 
+inline bool fnMatchesArgCount(const FnSymbol& fn, size_t totalArgs, bool isUfcs = false) {
+    size_t startIdx = 0;
+    if (isUfcs) {
+        startIdx = 1;
+    }
+    if (startIdx > fn.params.size()) {
+        return false;
+    }
+    const size_t maxArgs = fn.params.size() - startIdx;
+    if (totalArgs > maxArgs) {
+        return false;
+    }
+    size_t minArgs = 0;
+    for (size_t i = startIdx; i < fn.params.size(); ++i) {
+        if (!fn.params[i].hasDefault) {
+            minArgs += 1;
+        }
+    }
+    return totalArgs >= minArgs;
+}
+
+inline std::optional<FnSymbol> selectMatchingUfcsOverload(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    const FnSymbol& primary,
+    std::string_view recvTypeKey,
+    bool requirePub,
+    std::optional<size_t> ufcsArgCount
+) {
+    std::vector<const FnSymbol*> candidates;
+    if ((!requirePub || primary.isPub) && ufcsParamMatchesReceiver(arena, symbols, primary, recvTypeKey)) {
+        candidates.push_back(&primary);
+    }
+    for (const auto& ov : primary.overloads) {
+        if ((!requirePub || ov.isPub) && ufcsParamMatchesReceiver(arena, symbols, ov, recvTypeKey)) {
+            candidates.push_back(&ov);
+        }
+    }
+    if (candidates.empty()) {
+        return std::nullopt;
+    }
+    if (ufcsArgCount.has_value()) {
+        const size_t wantedTotalParams = ufcsArgCount.value() + 1;
+        for (const FnSymbol* cand : candidates) {
+            if (cand->params.size() == wantedTotalParams) {
+                return *cand;
+            }
+        }
+        for (const FnSymbol* cand : candidates) {
+            if (fnMatchesArgCount(*cand, ufcsArgCount.value(), true)) {
+                return *cand;
+            }
+        }
+    }
+    return *candidates.front();
+}
+
 inline std::optional<FnSymbol> resolveUfcsFn(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
     TypeId recvTid,
-    std::string_view methodName
+    std::string_view methodName,
+    std::optional<size_t> ufcsArgCount = std::nullopt
 ) {
     const auto builtinMethods = getBuiltinReceiverMethods(arena, symbols, currentModuleId, recvTid);
     for (const auto& bm : builtinMethods) {
@@ -795,13 +853,9 @@ inline std::optional<FnSymbol> resolveUfcsFn(
     const std::string localKey = symbolKey(currentModuleId, methodName);
     const auto localIt = symbols.functions.find(localKey);
     if (localIt != symbols.functions.end()) {
-        if (ufcsParamMatchesReceiver(arena, symbols, localIt->second, recvTypeKey)) {
-            return localIt->second;
-        }
-        for (const auto& ov : localIt->second.overloads) {
-            if (ufcsParamMatchesReceiver(arena, symbols, ov, recvTypeKey)) {
-                return ov;
-            }
+        const auto matched = selectMatchingUfcsOverload(arena, symbols, localIt->second, recvTypeKey, false, ufcsArgCount);
+        if (matched.has_value()) {
+            return matched;
         }
     }
 
@@ -811,17 +865,30 @@ inline std::optional<FnSymbol> resolveUfcsFn(
         const std::string recvFnKey = symbolKey(recvModId, methodName);
         const auto recvFnIt = symbols.functions.find(recvFnKey);
         if (recvFnIt != symbols.functions.end()) {
-            if ((recvModId == currentModuleId || recvFnIt->second.isPub) &&
-                ufcsParamMatchesReceiver(arena, symbols, recvFnIt->second, recvTypeKey)) {
-                return recvFnIt->second;
+            const bool requirePub = (recvModId != currentModuleId);
+            const auto matched = selectMatchingUfcsOverload(arena, symbols, recvFnIt->second, recvTypeKey, requirePub, ufcsArgCount);
+            if (matched.has_value()) {
+                return matched;
             }
-            for (const auto& ov : recvFnIt->second.overloads) {
-                if ((recvModId == currentModuleId || ov.isPub) &&
-                    ufcsParamMatchesReceiver(arena, symbols, ov, recvTypeKey)) {
-                    return ov;
+        }
+    }
+
+    // UFCS Step 3: Directly imported modules in currentModuleId
+    const auto modMapIt = symbols.modules.find(std::string(currentModuleId));
+    if (modMapIt != symbols.modules.end()) {
+        for (const auto& aliasEntry : modMapIt->second) {
+            const std::string& importedModId = aliasEntry.second;
+            if (importedModId.empty() || importedModId == currentModuleId || importedModId == recvModId) {
+                continue;
+            }
+            const std::string impFnKey = symbolKey(importedModId, methodName);
+            const auto impFnIt = symbols.functions.find(impFnKey);
+            if (impFnIt != symbols.functions.end()) {
+                const auto matched = selectMatchingUfcsOverload(arena, symbols, impFnIt->second, recvTypeKey, true, ufcsArgCount);
+                if (matched.has_value()) {
+                    return matched;
                 }
             }
-            return std::nullopt;
         }
     }
 
@@ -1019,27 +1086,6 @@ inline std::optional<ConstSymbol> resolveModuleConstAccess(
         }
     }
     return std::nullopt;
-}
-
-inline bool fnMatchesArgCount(const FnSymbol& fn, size_t totalArgs, bool isUfcs = false) {
-    size_t startIdx = 0;
-    if (isUfcs) {
-        startIdx = 1;
-    }
-    if (startIdx > fn.params.size()) {
-        return false;
-    }
-    const size_t maxArgs = fn.params.size() - startIdx;
-    if (totalArgs > maxArgs) {
-        return false;
-    }
-    size_t minArgs = 0;
-    for (size_t i = startIdx; i < fn.params.size(); ++i) {
-        if (!fn.params[i].hasDefault) {
-            minArgs += 1;
-        }
-    }
-    return totalArgs >= minArgs;
 }
 
 inline const FnSymbol& selectBestFnOverload(const FnSymbol& primary, size_t totalArgs) {
@@ -1469,7 +1515,7 @@ inline std::optional<FnSymbol> resolveFuncCall(
                 }
             }
         }
-        return resolveUfcsFn(arena, symbols, currentModuleId, recvTid, access->fieldName);
+        return resolveUfcsFn(arena, symbols, currentModuleId, recvTid, access->fieldName, totalArgs);
     }
 
     const TypeId calleeTid = inferExprType(arena, call.callee, symbols, scope, currentModuleId);

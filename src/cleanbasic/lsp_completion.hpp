@@ -266,11 +266,30 @@ inline void collectUfcsCompletionsForType(const LspDocumentSnapshot& snap, std::
     std::string recvTypeKey = resolvedRecvNode.name;
     if (!recvTypeKey.empty() && !isBuiltinTypeName(recvTypeKey)) recvTypeKey = resolveSymbolKey(snap.symbols, currentModuleId, recvTypeKey);
     const std::string recvModId = resolveUfcsDefiningModule(snap.symbols, currentModuleId, recvTypeKey);
+    std::unordered_set<std::string> importedMods;
+    const auto modMapIt = snap.symbols.modules.find(std::string(currentModuleId));
+    if (modMapIt != snap.symbols.modules.end()) {
+        for (const auto& entry : modMapIt->second) {
+            if (!entry.second.empty()) {
+                importedMods.insert(entry.second);
+            }
+        }
+    }
+    auto checkAndAddCandidate = [&](const FnSymbol& fn) {
+        if (fn.params.empty() || !matchesCompletionPrefix(fn.name, prefix)) return;
+        const bool inCurrentMod = (fn.moduleId == currentModuleId);
+        const bool inRecvMod = (!recvModId.empty() && fn.moduleId == recvModId && fn.isPub);
+        const bool inImportedMod = (importedMods.find(fn.moduleId) != importedMods.end() && fn.isPub);
+        if (!inCurrentMod && !inRecvMod && !inImportedMod) return;
+        if (ufcsParamMatchesReceiver(snap.arena, snap.symbols, fn, recvTypeKey)) {
+            addCompletionEntry(items, seen, fn.name, 2, formatUfcsMethodDetail(snap.arena, fn), fn.name, formatFnHoverMarkdown(snap.arena, fn));
+        }
+    };
     for (const auto& kv : snap.symbols.functions) {
-        const FnSymbol& fn = kv.second;
-        if (fn.params.empty() || !matchesCompletionPrefix(fn.name, prefix)) continue;
-        if (fn.moduleId != currentModuleId && (recvModId.empty() || fn.moduleId != recvModId || !fn.isPub)) continue;
-        if (ufcsParamMatchesReceiver(snap.arena, snap.symbols, fn, recvTypeKey)) addCompletionEntry(items, seen, fn.name, 2, formatUfcsMethodDetail(snap.arena, fn), fn.name, formatFnHoverMarkdown(snap.arena, fn));
+        checkAndAddCandidate(kv.second);
+        for (const auto& ov : kv.second.overloads) {
+            checkAndAddCandidate(ov);
+        }
     }
 }
 

@@ -295,7 +295,7 @@ public:
                     }
                 }
 
-                if (!isBuiltinPrint && fnSym.overloads.empty()) {
+                if (!isBuiltinPrint) {
                     const size_t totalProvided = paramOffset + call->args.size() + call->namedArgs.size();
                     if (totalProvided > fnSym.params.size()) {
                         setAnalyzerError(exprNode.line, exprNode.col, "Too many arguments in call to '" + fnSym.name + "'.");
@@ -953,7 +953,10 @@ public:
         }
 
         analyzeBlock(fn, fn.body, scope, false);
-        symbols.fnScopes[symbolKey(moduleId, fn.name)] = std::move(scope);
+        auto& savedScope = symbols.fnScopes[symbolKey(moduleId, fn.name)];
+        for (auto& kv : scope) {
+            savedScope[kv.first] = std::move(kv.second);
+        }
     }
 
     void analyzeProgram(const Program& program) {

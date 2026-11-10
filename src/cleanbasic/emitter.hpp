@@ -1618,10 +1618,8 @@ public:
         }
         std::unordered_set<std::string> declaredVars;
         for (const auto& p : fn.params) {
-            if (scope.find(p.name) == scope.end()) {
-                const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);
-                scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
-            }
+            const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);
+            scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
             declaredVars.insert(p.name);
         }
 
