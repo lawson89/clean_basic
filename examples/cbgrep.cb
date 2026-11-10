@@ -15,7 +15,7 @@ fn search(path as str, args as cli.Args) as int can error
     const invert = args.has("invert-match")
 
     dim f = fs.stdin()
-    dim source = "{stdout}"
+    dim source = "{stdin}"
     if path != "-"
         f = fs.open(path)
         source = path
@@ -53,11 +53,7 @@ fn search(path as str, args as cli.Args) as int can error
     end while
 
     if countOnly
-        if path != "-"
-            print($"{path}:{matchCount}")
-        else
-            print(matchCount)
-        end if
+        print($"{path}:{matchCount}")
     end if
 
     return matchCount

@@ -1,0 +1,529 @@
+' CleanBasic Tool: cbfmt
+'' Source code formatter for CleanBasic (.cb) files and directories
+'' Supports stdin/stdout formatting, in-place formatting (-w/--write), and check mode (-c/--check)
+'
+'' Usage:
+''   cbfmt [-w|--write] [-c|--check] [-i|--indent <n>] [targets...]
+
+import "std/cli"
+import "std/fs"
+import "std/os"
+import "std/str"
+
+'' Result of splitting and normalizing a single source line into code, comment, and bracket deltas.
+type LineScan
+    codePart as str
+    normalizedLine as str
+    leadingClose as int
+    trailingDelta as int
+end type
+
+'' Normalizes spacing after a single-quote comment marker while preserving '' doc-comments and divider comments.
+fn normalizeComment(rawComment as str) as str
+    if rawComment.startsWith("''")
+        if rawComment.len() == 2
+            return "''"
+        end if
+        const afterDoc = rawComment.byteAt(2)
+        if afterDoc != 32 and afterDoc != 9 and afterDoc != 39
+            return "'' " & rawComment.sliceFrom(2)
+        end if
+        return rawComment
+    end if
+
+    if rawComment.startsWith("'")
+        if rawComment.len() == 1
+            return "'"
+        end if
+        const afterTick = rawComment.byteAt(1)
+        ' Preserve space, tab, quote, '=', and '-' (e.g., ' --- or ' ===)
+        if afterTick != 32 and afterTick != 9 and afterTick != 39 and afterTick != 61 and afterTick != 45
+            return "' " & rawComment.sliceFrom(1)
+        end if
+    end if
+
+    return rawComment
+end fn
+
+'' Scans a trimmed line outside string literals to find comments and compute bracket deltas.
+fn scanTrimmedLine(trimmed as str) as LineScan
+    dim inString = false
+    dim commentIdx = -1
+    dim i = 0
+    const n = trimmed.len()
+
+    while i < n
+        const b = trimmed.byteAt(i)
+        if inString
+            if b == 92
+                i += 2
+                continue
+            end if
+            if b == 34
+                inString = false
+            end if
+        else
+            if b == 34
+                inString = true
+            else if b == 39 or b == 35
+                commentIdx = i
+                break
+            end if
+        end if
+        i += 1
+    end while
+
+    dim codePart = trimmed
+    dim normalizedLine = trimmed
+    if commentIdx == 0
+        codePart = ""
+        normalizedLine = normalizeComment(trimmed)
+    else if commentIdx > 0
+        codePart = trimmed.slice(0, commentIdx).rtrim()
+        const normComment = normalizeComment(trimmed.sliceFrom(commentIdx))
+        normalizedLine = codePart & " " & normComment
+    end if
+
+    dim leadingClose = 0
+    dim k = 0
+    const codeLen = codePart.len()
+    while k < codeLen
+        const cb = codePart.byteAt(k)
+        if cb == 41 or cb == 93 or cb == 125
+            leadingClose += 1
+            k += 1
+        else
+            break
+        end if
+    end while
+
+    dim trailingDelta = 0
+    inString = false
+    while k < codeLen
+        const b = codePart.byteAt(k)
+        if inString
+            if b == 92
+                k += 2
+                continue
+            end if
+            if b == 34
+                inString = false
+            end if
+        else
+            if b == 34
+                inString = true
+            else if b == 40 or b == 91 or b == 123
+                trailingDelta += 1
+            else if b == 41 or b == 93 or b == 125
+                trailingDelta -= 1
+            end if
+        end if
+        k += 1
+    end while
+
+    return LineScan(
+        codePart=codePart,
+        normalizedLine=normalizedLine,
+        leadingClose=leadingClose,
+        trailingDelta=trailingDelta
+    )
+end fn
+
+'' Strips leading "pub " and "extern " modifiers from a code line for declaration inspection.
+fn stripModifiers(codePart as str) as str
+    dim work = codePart
+    while true
+        if work.startsWith("pub ")
+            work = work.sliceFrom(4).ltrim()
+        else if work.startsWith("extern ")
+            work = work.sliceFrom(7).ltrim()
+        else
+            break
+        end if
+    end while
+    return work
+end fn
+
+'' Returns true if codePart is a top-level starter that terminates a single-line extern type declaration.
+fn isTopLevelStarter(codePart as str) as bool
+    if codePart.startsWith("pub ") or codePart.startsWith("extern ")
+        return true
+    end if
+    if codePart.startsWith("fn ") or codePart.startsWith("type ") or codePart.startsWith("enum ") or codePart.startsWith("union ")
+        return true
+    end if
+    if codePart.startsWith("alias ") or codePart.startsWith("const ") or codePart.startsWith("import ")
+        return true
+    end if
+    return false
+end fn
+
+'' Determines whether an extern type declaration on lineIdx has a multi-line body ending in "end type".
+fn externTypeHasBody(lines as list[str], lineIdx as int) as bool
+    dim j = lineIdx + 1
+    while j < lines.len()
+        const t = lines[j].trim()
+        if t == "" or t.startsWith("'") or t.startsWith("#")
+            j += 1
+            continue
+        end if
+        if isTopLevelStarter(t)
+            return false
+        end if
+        return true
+    end while
+    return false
+end fn
+
+'' Returns true if codePart is a standard block-closing statement (excluding "end select").
+fn isStandardBlockCloser(codePart as str) as bool
+    if codePart == "end fn" or codePart == "end type" or codePart == "end enum" or codePart == "end union"
+        return true
+    end if
+    if codePart == "end if" or codePart == "end for" or codePart == "end while"
+        return true
+    end if
+    if codePart == "end error" or codePart == "end defer"
+        return true
+    end if
+    return false
+end fn
+
+'' Returns true if codePart is an "else" or "else if" branch header.
+fn isElseBranch(codePart as str) as bool
+    if codePart == "else" or codePart.startsWith("else if ") or codePart.startsWith("else if(")
+        return true
+    end if
+    return false
+end fn
+
+'' Returns true if codePart is a "case ..." or "case else" branch header.
+fn isCaseBranch(codePart as str) as bool
+    if codePart == "case else" or codePart.startsWith("case ")
+        return true
+    end if
+    return false
+end fn
+
+'' Returns true if codePart is a "select case ..." block opener.
+fn isSelectCaseOpener(codePart as str) as bool
+    if codePart.startsWith("select case ") or codePart.startsWith("select case(")
+        return true
+    end if
+    return false
+end fn
+
+'' Returns true if codePart opens a standard indented block (excluding "select case" and "case").
+fn isStandardBlockOpener(codePart as str, lines as list[str], lineIdx as int) as bool
+    if codePart.startsWith("if ") or codePart.startsWith("if(")
+        return true
+    end if
+    if codePart.startsWith("for ")
+        return true
+    end if
+    if codePart.startsWith("while ") or codePart.startsWith("while(")
+        return true
+    end if
+    if codePart.startsWith("on error ")
+        return true
+    end if
+    if codePart == "defer"
+        return true
+    end if
+
+    const core = stripModifiers(codePart)
+    const hasExtern = codePart.startsWith("extern ") or codePart.contains(" extern ")
+
+    if core.startsWith("fn ")
+        if hasExtern
+            return false
+        end if
+        return true
+    end if
+    if core.startsWith("type ")
+        if hasExtern
+            return externTypeHasBody(lines, lineIdx)
+        end if
+        return true
+    end if
+    if core.startsWith("enum ") or core.startsWith("union ")
+        return true
+    end if
+
+    return false
+end fn
+
+'' Applies a negative bracket count to the active multiline bracket stack.
+fn consumeBrackets(byref bracketStack as list[int], count as int)
+    dim rem = count
+    while rem > 0 and bracketStack.len() > 0
+        const topIdx = bracketStack.len() - 1
+        const topVal = bracketStack[topIdx]
+        if topVal <= rem
+            rem -= topVal
+            bracketStack.pop()
+        else
+            bracketStack[topIdx] = topVal - rem
+            rem = 0
+        end if
+    end while
+end fn
+
+'' Formats a CleanBasic source string using the specified indentation width in spaces.
+pub fn formatSource(source as str, indentWidth as int = 4) as str
+    const lines = source.lines()
+    const indentUnit = " ".repeat(indentWidth)
+
+    dim outLines as list[str] = []
+    dim blockIndent = 0
+    dim pendingBlockIndent = 0
+    dim selectStack as list[bool] = []
+    dim bracketStack as list[int] = []
+    dim prevBlank = true
+
+    for i = 0 to lines.len() - 1
+        const trimmed = lines[i].trim()
+        if trimmed == ""
+            if not prevBlank
+                outLines.push("")
+                prevBlank = true
+            end if
+            continue
+        end if
+
+        prevBlank = false
+        const scan = scanTrimmedLine(trimmed)
+        const codePart = scan.codePart
+
+        if scan.leadingClose > 0
+            consumeBrackets(bracketStack, scan.leadingClose)
+        end if
+
+        const atTopBracketLevel = bracketStack.len() == 0
+        dim lineBlockIndent = blockIndent
+        dim afterBlockDelta = 0
+
+        if atTopBracketLevel and codePart != ""
+            if codePart == "end select"
+                if selectStack.len() > 0
+                    const hadCase = selectStack.pop()
+                    if hadCase
+                        blockIndent -= 2
+                    else
+                        blockIndent -= 1
+                    end if
+                else
+                    blockIndent -= 1
+                end if
+                if blockIndent < 0
+                    blockIndent = 0
+                end if
+                lineBlockIndent = blockIndent
+            else if isStandardBlockCloser(codePart)
+                blockIndent -= 1
+                if blockIndent < 0
+                    blockIndent = 0
+                end if
+                lineBlockIndent = blockIndent
+            else if isElseBranch(codePart)
+                lineBlockIndent = blockIndent - 1
+                if lineBlockIndent < 0
+                    lineBlockIndent = 0
+                end if
+            else if isCaseBranch(codePart)
+                if selectStack.len() > 0
+                    const topIdx = selectStack.len() - 1
+                    if selectStack[topIdx]
+                        blockIndent -= 1
+                        if blockIndent < 0
+                            blockIndent = 0
+                        end if
+                    else
+                        selectStack[topIdx] = true
+                    end if
+                end if
+                lineBlockIndent = blockIndent
+                afterBlockDelta = 1
+            else if isSelectCaseOpener(codePart)
+                lineBlockIndent = blockIndent
+                selectStack.push(false)
+                afterBlockDelta = 1
+            else if isStandardBlockOpener(codePart, lines, i)
+                lineBlockIndent = blockIndent
+                afterBlockDelta = 1
+            end if
+        end if
+
+        const totalIndent = lineBlockIndent + bracketStack.len()
+        dim prefix = ""
+        if totalIndent > 0
+            prefix = indentUnit.repeat(totalIndent)
+        end if
+        outLines.push(prefix & scan.normalizedLine)
+
+        if scan.trailingDelta > 0
+            bracketStack.push(scan.trailingDelta)
+        else if scan.trailingDelta < 0
+            consumeBrackets(bracketStack, -scan.trailingDelta)
+        end if
+
+        if afterBlockDelta > 0
+            if bracketStack.len() == 0
+                blockIndent += afterBlockDelta
+            else
+                pendingBlockIndent += afterBlockDelta
+            end if
+        else if bracketStack.len() == 0 and pendingBlockIndent > 0
+            blockIndent += pendingBlockIndent
+            pendingBlockIndent = 0
+        end if
+    end for
+
+    while outLines.len() > 0 and outLines[outLines.len() - 1] == ""
+        outLines.pop()
+    end while
+
+    if outLines.len() == 0
+        return ""
+    end if
+    return str.join(outLines, "\n") & "\n"
+end fn
+
+'' Collects all .cb files from a file or directory path.
+fn collectCbFiles(targetPath as str) as list[str] can error
+    if fs.isFile(targetPath)
+        return [targetPath]
+    end if
+
+    dim outFiles as list[str] = []
+    for path in fs.walkFiles(targetPath)
+        if fs.ext(path) == ".cb"
+            outFiles.push(path)
+        end if
+    end for
+    return outFiles
+end fn
+
+'' Reads all text from standard input using fs.stdin().
+fn readStdinAll() as str can error
+    dim f = fs.stdin()
+    defer
+        f.close()
+    end defer
+
+    dim lines as list[str] = []
+    dim line = ""
+    while f.readLine(line)
+        lines.push(line)
+    end while
+    if lines.len() == 0
+        return ""
+    end if
+    return str.join(lines, "\n") & "\n"
+end fn
+
+'' Configures the CLI parser for cbfmt.
+fn buildParser() as cli.Parser
+    dim p = cli.newParser(
+        name="cbfmt",
+        version="1.0",
+        description="Format CleanBasic (.cb) source files"
+    )
+    p.addFlag("write", "w", "Write formatted output back to source files in place")
+    p.addFlag("check", "c", "Check if files are formatted (exits with 1 if any file differs)")
+    p.addOption("indent", "i", "Indentation width in spaces", defaultVal="4")
+    return p
+end fn
+
+'' Entry point for cbfmt.
+fn main() as int
+    dim p = buildParser()
+
+    on error e
+        os.eprint($"cbfmt: {e.msg}")
+        os.eprint(p.usage())
+        return 2
+    end error
+
+    const args = p.parse()
+    if args.helpRequested
+        p.printUsage()
+        return 0
+    end if
+    if args.versionRequested
+        print("cbfmt 1.0")
+        return 0
+    end if
+
+    const writeInPlace = args.has("write")
+    const checkOnly = args.has("check")
+    const indentWidth = args.getInt("indent", 4)
+    if indentWidth < 0 or indentWidth > 16
+        os.eprint("cbfmt: --indent must be between 0 and 16")
+        return 2
+    end if
+
+    dim targets = args.rest
+    if targets.len() == 0 or (targets.len() == 1 and targets[0] == "-")
+        if writeInPlace
+            os.eprint("cbfmt: cannot use --write with standard input")
+            return 2
+        end if
+        const input = readStdinAll()
+        const formatted = formatSource(input, indentWidth)
+        if checkOnly
+            if input != formatted
+                os.eprint("cbfmt: <stdin> is not formatted")
+                return 1
+            end if
+            return 0
+        end if
+        os.printRaw(formatted)
+        return 0
+    end if
+
+    dim unformattedCount = 0
+    dim hadError = false
+
+    for target in targets
+        if not fs.exists(target)
+            os.eprint($"cbfmt: {target}: No such file or directory")
+            hadError = true
+            continue
+        end if
+
+        on error e
+            os.eprint($"cbfmt: {target}: {e.msg}")
+            hadError = true
+            continue
+        end error
+
+        for filePath in collectCbFiles(target)
+            on error e2
+                os.eprint($"cbfmt: {filePath}: {e2.msg}")
+                hadError = true
+                continue
+            end error
+
+            const original = fs.read(filePath)
+            const formatted = formatSource(original, indentWidth)
+            if checkOnly
+                if original != formatted
+                    os.eprint($"cbfmt: {filePath}: needs formatting")
+                    unformattedCount += 1
+                end if
+            else if writeInPlace
+                if original != formatted
+                    fs.write(filePath, formatted)
+                end if
+            else
+                os.printRaw(formatted)
+            end if
+        end for
+    end for
+
+    if hadError or unformattedCount > 0
+        return 1
+    end if
+    return 0
+end fn

@@ -269,7 +269,7 @@ end fn
 
 CleanBasic includes a pure-CleanBasic declarative command-line parser (`import "std/cli"`) supporting boolean flags (`addFlag`), bundled short flags (`-icnv`), key-value options (`addOption` with `--opt val`, `--opt=val`, `-o val`, and default values), positional arguments (`addArg`), trailing `rest` arguments, and formatted `usage()` / `printUsage()` output.
 
-Declarations preceded by contiguous `''` (double-single-quote) doc-comment lines automatically surface their documentation in the CleanBasic Language Server (**Hover**, **Completion documentation**, and **Signature Help**) and can be extracted into Markdown API reference docs using `examples/cbdoc.cb`.
+Declarations preceded by contiguous `''` (double-single-quote) doc-comment lines automatically surface their documentation in the CleanBasic Language Server (**Hover**, **Completion documentation**, and **Signature Help**) and can be extracted into Markdown API reference docs using `tools/cbdoc.cb` (alongside the `tools/cbfmt.cb` source formatter).
 
 ```vb
 import "std/cli"

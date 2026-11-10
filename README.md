@@ -50,6 +50,19 @@ To launch the included VS Code extension (`editors/vscode/`) in an Extension Dev
    ```
 3. Open the repository root in VS Code and press **`F5`** (*Launch CleanBasic VS Code Extension*).
 
+## Developer Tools (`tools/`)
+
+CleanBasic includes first-party command-line tools written in pure CleanBasic under `tools/`:
+- `tools/cbfmt.cb`: CleanBasic source code formatter supporting `stdin`/`stdout` piping, in-place formatting (`-w` / `--write`), formatting verification (`-c` / `--check`), and configurable indentation (`-i <n>`).
+- `tools/cbdoc.cb`: Markdown API reference generator that extracts `''` doc-comments and `pub` declarations from `.cb` files and directories.
+
+Compile them into `build/` with:
+
+```bash
+./build/cleanbasic build tools/cbfmt.cb -b build/cbfmt --release
+./build/cleanbasic build tools/cbdoc.cb -b build/cbdoc --release
+```
+
 ## Running Tests
 
 Run the test executor directly or via CTest:

@@ -1,7 +1,7 @@
 {
   "name": "cleanbasic",
   "displayName": "CleanBasic",
-  "description": "CleanBasic language support: TextMate syntax highlighting, code snippets, and Language Server Protocol (cleanbasic lsp) client.",
+  "description": "CleanBasic language support: TextMate syntax highlighting, code snippets, source formatter (cbfmt), and Language Server Protocol (cleanbasic lsp) client.",
   "version": "0.1.0",
   "publisher": "cleanbasic",
   "license": "MIT",
@@ -57,6 +57,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the cleanbasic executable. Defaults to <workspaceFolder>/build/cleanbasic if present, otherwise 'cleanbasic' on your system PATH."
+        },
+        "cleanbasic.formatterPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the cbfmt executable. Defaults to <workspaceFolder>/build/cbfmt if present (or auto-builds tools/cbfmt.cb), otherwise 'cbfmt' on your system PATH."
         },
         "cleanbasic.trace.server": {
           "type": "string",

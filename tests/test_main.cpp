@@ -2165,6 +2165,7 @@ TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are 
         const cb::JsonId config = cb::jsonGetField(parsed.arena, contributes, "configuration");
         const cb::JsonId props = cb::jsonGetField(parsed.arena, config, "properties");
         CHECK(cb::jsonGetField(parsed.arena, props, "cleanbasic.executablePath") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(parsed.arena, props, "cleanbasic.formatterPath") != cb::INVALID_ID);
         CHECK(cb::jsonGetField(parsed.arena, props, "cleanbasic.trace.server") != cb::INVALID_ID);
     }
 
@@ -2202,6 +2203,8 @@ TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are 
         const std::string extJs = cb::testE2E::readFileText("editors/vscode/extension.js");
         CHECK(extJs.find("LanguageClient") != std::string::npos);
         CHECK(extJs.find("cleanbasic.restartServer") != std::string::npos);
+        CHECK(extJs.find("registerDocumentFormattingEditProvider") != std::string::npos);
+        CHECK(extJs.find("resolveCbFmtExecutable") != std::string::npos);
         CHECK(extJs.find("path.resolve(__dirname, '..', '..', 'build', exeName)") != std::string::npos);
         CHECK(extJs.find("TransportKind.stdio") == std::string::npos);
     }
@@ -2708,8 +2711,8 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
         const int rcStdinExplicit = std::system(("./" + outBin + " -in cleanbasic - < " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
         CHECK(rcStdinExplicit == 0);
         const std::string stdinExplicitOut = cb::testE2E::readFileText(stdoutFile);
-        CHECK(stdinExplicitOut.find("{stdout}:1:CleanBasic Alpha") != std::string::npos);
-        CHECK(stdinExplicitOut.find("{stdout}:3:cleanbasic beta") != std::string::npos);
+        CHECK(stdinExplicitOut.find("{stdin}:1:CleanBasic Alpha") != std::string::npos);
+        CHECK(stdinExplicitOut.find("{stdin}:3:cleanbasic beta") != std::string::npos);
 
         const int rcStdinImplicit = std::system(("./" + outBin + " -ic cleanbasic < " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
         CHECK(rcStdinImplicit == 0);
@@ -4199,8 +4202,8 @@ TEST_CASE("Declarative CLI parser (std/cli), refactored cbgrep, cbdoc, and LSP '
         CHECK(countOut.find("2") != std::string::npos);
     }
 
-    SECTION("examples/cbdoc.cb extracts '' doc-comments and pub signatures into Markdown") {
-        const std::string workDir = "build/testArtifacts/example_cbdoc";
+    SECTION("tools/cbdoc.cb extracts '' doc-comments and pub signatures into Markdown") {
+        const std::string workDir = "build/testArtifacts/tool_cbdoc";
         std::error_code ec;
         std::filesystem::create_directories(workDir, ec);
         REQUIRE(!ec);
@@ -4210,7 +4213,7 @@ TEST_CASE("Declarative CLI parser (std/cli), refactored cbgrep, cbdoc, and LSP '
         const std::string outMd = workDir + "/cli_ref.md";
         const std::string stdoutTxt = workDir + "/stdout.txt";
 
-        const auto buildRes = cb::buildFile("examples/cbdoc.cb", outCpp, true, outBin);
+        const auto buildRes = cb::buildFile("tools/cbdoc.cb", outCpp, true, outBin);
         INFO("buildFile error: " << cb::formatDiagnostic(buildRes.error));
         REQUIRE(buildRes.ok);
 
@@ -4228,6 +4231,119 @@ TEST_CASE("Declarative CLI parser (std/cli), refactored cbgrep, cbdoc, and LSP '
         CHECK(mdText.find("newParser") != std::string::npos);
         CHECK(mdText.find("pub fn newParser(") != std::string::npos);
         CHECK(mdText.find("Creates a new declarative command-line Parser") != std::string::npos);
+    }
+
+    SECTION("tools/cbfmt.cb formats CleanBasic source via stdin, --check, and --write idempotently") {
+        const std::string workDir = "build/testArtifacts/tool_cbfmt";
+        std::error_code ec;
+        std::filesystem::create_directories(workDir, ec);
+        REQUIRE(!ec);
+
+        const std::string outCpp = workDir + "/build.cpp";
+        const std::string outBin = workDir + "/cbfmt_bin";
+        const std::string messyFile = workDir + "/messy.cb";
+        const std::string stdoutTxt = workDir + "/stdout.txt";
+
+        const auto buildRes = cb::buildFile("tools/cbfmt.cb", outCpp, true, outBin);
+        INFO("buildFile error: " << cb::formatDiagnostic(buildRes.error));
+        REQUIRE(buildRes.ok);
+
+        const std::string messySource = R"CB(
+
+'unspaced comment
+''doc comment
+pub type Item
+id as int
+name as str
+end type
+
+
+fn compute(x as int) as int
+if x > 0
+select case x
+case 1
+return 10
+case else
+return 20
+end select
+else
+dim it = Item(
+id=0,
+name="none"
+)
+return it.id
+end if
+end fn
+
+)CB";
+
+        const std::string expectedFormatted = R"CB(' unspaced comment
+'' doc comment
+pub type Item
+    id as int
+    name as str
+end type
+
+fn compute(x as int) as int
+    if x > 0
+        select case x
+            case 1
+                return 10
+            case else
+                return 20
+        end select
+    else
+        dim it = Item(
+            id=0,
+            name="none"
+        )
+        return it.id
+    end if
+end fn
+)CB";
+
+        {
+            std::ofstream f(messyFile, std::ios::binary | std::ios::trunc);
+            f << messySource;
+        }
+
+        // 1. --check on unformatted file exits with non-zero
+        const int checkFailRc = std::system(
+            ("./" + outBin + " --check " + messyFile + " > " + stdoutTxt + " 2>&1").c_str()
+        );
+        CHECK(checkFailRc != 0);
+        CHECK(cb::testE2E::readFileText(stdoutTxt).find("needs formatting") != std::string::npos);
+
+        // 2. Stdin formatting produces exact formatted output without modifying the file
+        const int stdinRc = std::system(
+            ("./" + outBin + " < " + messyFile + " > " + stdoutTxt).c_str()
+        );
+        CHECK(stdinRc == 0);
+        CHECK(cb::testE2E::readFileText(stdoutTxt) == expectedFormatted);
+        CHECK(cb::testE2E::readFileText(messyFile) == messySource);
+
+        // 3. --write formats the file in place, and subsequent --check succeeds (idempotent)
+        const int writeRc = std::system(
+            ("./" + outBin + " -w " + messyFile + " > " + stdoutTxt + " 2>&1").c_str()
+        );
+        CHECK(writeRc == 0);
+        CHECK(cb::testE2E::readFileText(messyFile) == expectedFormatted);
+
+        const int checkPassRc = std::system(
+            ("./" + outBin + " --check " + messyFile + " > " + stdoutTxt + " 2>&1").c_str()
+        );
+        CHECK(checkPassRc == 0);
+
+        // 4. Verify the formatted code passes semantic analysis
+        const auto checkFormatted = cb::checkSource(expectedFormatted, "formatted.cb");
+        REQUIRE(checkFormatted.ok);
+
+        // 5. Verify stdlib, examples, and tools pass cbfmt --check
+        const int repoCheckRc = std::system(
+            ("./" + outBin + " --check stdlib examples tools > " + stdoutTxt + " 2>&1").c_str()
+        );
+        INFO("cbfmt --check stdlib examples tools output: " << cb::testE2E::readFileText(stdoutTxt));
+        CHECK(repoCheckRc == 0);
     }
 
     SECTION("LSP Hover, Completion documentation, and Signature Help include '' doc-comments") {

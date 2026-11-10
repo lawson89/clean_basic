@@ -1,6 +1,6 @@
 # CleanBasic for VS Code
 
-This extension provides full IDE support for the **CleanBasic** (`.cb`) systems programming language, powered by the native `cleanbasic lsp` Language Server.
+This extension provides full IDE support for the **CleanBasic** (`.cb`) systems programming language, powered by the native `cleanbasic lsp` Language Server and `cbfmt` formatter.
 
 ## Features
 
@@ -16,6 +16,7 @@ This extension provides full IDE support for the **CleanBasic** (`.cb`) systems 
   - Cross-module alias completion (`player.`) respecting `pub` visibility
   - Named argument / constructor field completion (`Player(name=, health=)`)
   - Active parameter signature help (`textDocument/signatureHelp`) on `(` and `,`
+- **Document Formatting (`cbfmt`)**: Format CleanBasic documents (`Shift+Alt+F` or Format on Save) powered by `tools/cbfmt.cb` (automatically locates or builds `<workspaceFolder>/build/cbfmt`, or uses `"cleanbasic.formatterPath"`).
 
 ## Quick Start (Development Host)
 
@@ -29,4 +30,4 @@ This extension provides full IDE support for the **CleanBasic** (`.cb`) systems 
    npm install
    ```
 3. Open the repository root in VS Code and press **`F5`** (*Launch CleanBasic VS Code Extension*).
-   - The extension automatically detects `<workspaceFolder>/build/cleanbasic` (or you can set `"cleanbasic.executablePath"` in VS Code Settings).
+   - The extension automatically detects `<workspaceFolder>/build/cleanbasic` and `<workspaceFolder>/build/cbfmt` (or you can set `"cleanbasic.executablePath"` and `"cleanbasic.formatterPath"` in VS Code Settings).

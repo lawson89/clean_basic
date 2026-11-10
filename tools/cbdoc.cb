@@ -1,4 +1,4 @@
-' CleanBasic Example: cbdoc
+' CleanBasic Tool: cbdoc
 '' Markdown API documentation generator for CleanBasic (.cb) source files and directories
 '' Extracts '' doc-comments paired with pub declarations using std/cli, std/fs, and std/str
 '
@@ -145,14 +145,9 @@ fn collectCbFiles(targetPath as str) as list[str] can error
         end if
         return res
     end if
-    
+
     dim outFiles as list[str] = []
-    const files = fs.walkFiles(targetPath)
-    for path in files
-        ' Skip hidden files or files in hidden directories
-        if path.contains("/.") or fs.fileName(path).startsWith(".")
-            continue
-        end if
+    for path in fs.walkFiles(targetPath)
         if fs.ext(path) == ".cb"
             outFiles.push(path)
         end if
