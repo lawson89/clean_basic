@@ -231,7 +231,7 @@ The `cleanbasic` command-line executable (`cli_main.cpp`) parses arguments into 
 
 ### Usage Synopsis
 ```bash
-cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [-r|--release] [--opt level] [--no-pch] [--rebuild-pch] [--time]
+cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [--static] [-r|--release] [--opt level] [--no-pch] [--rebuild-pch] [--time]
 cleanbasic <file.cb> [-o output.cpp] [-c]
 cleanbasic lsp
 ```
@@ -246,6 +246,7 @@ cleanbasic lsp
 | `-b, --bin <file>` | Output binary executable path (implies `-c`; appends `.exe` on Windows targets). | `<inputParentDir>/app` (or `app.exe`). |
 | `-t, --target <target>` | Target platform (`native`, `linux`, `linux-arm64`, `windows`, `windows-arm64`, `macos`, `macos-arm64`). Implies `-c` and uses `zig c++ -target <triple>` when cross-compiling. | `native` |
 | `--cc <compiler>` | Explicit C++17 compiler override (e.g. `g++`, `clang++`, `zig c++`). | `zig c++` (cross) or `$CXX` / `g++` / `clang++` (native). |
+| `--static` | Links a fully static binary executable on Linux/Windows (implies `-c`; falls back to static C++ runtime if host `libc.a` is unavailable). | Off (defaults to hybrid static C++ runtime `-static-libstdc++ -static-libgcc` on Linux/Windows). |
 | `-r, --release` | Compiles the generated C++ with full optimizations (`-O3`). | Off (defaults to debug mode `-O0`). |
 | `--debug` | Explicitly compiles in debug mode (`-O0`). | On (`-O0`). |
 | `--opt, -O <0\|1\|2\|3\|s\|z>` | Sets the C++ optimization level explicitly. | `0` (`-O0`). |

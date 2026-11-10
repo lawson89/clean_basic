@@ -72,6 +72,23 @@ add_executable(cleanbasic
 )
 target_link_libraries(cleanbasic PRIVATE cleanbasic_core)
 target_precompile_headers(cleanbasic PRIVATE ${CLEANBASIC_PCH_HEADERS})
+option(CLEANBASIC_STATIC_RUNTIME "Link C++ runtime (libstdc++/libgcc) statically into cleanbasic" ON)
+if(CLEANBASIC_STATIC_RUNTIME AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(MINGW)
+        target_link_options(cleanbasic PRIVATE
+            -static-libstdc++
+            -static-libgcc
+            -Wl,-Bstatic
+            -lwinpthread
+            -Wl,-Bdynamic
+        )
+    else()
+        target_link_options(cleanbasic PRIVATE
+            -static-libstdc++
+            -static-libgcc
+        )
+    endif()
+endif()
 
 # CleanBasic test executor executable (Catch2)
 add_executable(cleanbasic_tests

@@ -27,6 +27,7 @@ struct CliArgs {
     bool isRelease = false;
     bool usePch = true;
     bool rebuildPch = false;
+    bool staticLink = false;
     bool showTimings = false;
     std::string errorMessage;
 };
@@ -37,7 +38,7 @@ inline bool isValidOptLevel(std::string_view level) {
 }
 
 inline void printUsage(std::string_view progName) {
-    std::cout << "Usage: " << progName << " build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [-r|--release] [--opt level] [--time]" << std::endl
+    std::cout << "Usage: " << progName << " build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [--static] [-r|--release] [--opt level] [--time]" << std::endl
               << "       " << progName << " <file.cb>" << std::endl
               << "       " << progName << " lsp" << std::endl << std::endl
               << "Options:" << std::endl
@@ -48,6 +49,7 @@ inline void printUsage(std::string_view progName) {
               << "  -t, --target <target> Target platform: native, linux, linux-arm64, windows," << std::endl
               << "                        windows-arm64, macos, macos-arm64 (implies -c, uses zig c++)" << std::endl
               << "  --cc <compiler>       C++17 compiler command override (e.g., 'g++', 'clang++', 'zig c++')" << std::endl
+              << "  --static              Link a fully static binary executable on Linux/Windows (implies -c)" << std::endl
               << "  -r, --release         Compile with full optimizations (-O3)" << std::endl
               << "  --debug               Compile in debug mode (-O0, default)" << std::endl
               << "  --opt, -O <0|1|2|3|s> Set C++ optimization level (default: 0)" << std::endl
@@ -179,6 +181,10 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
             args.rebuildPch = true;
             args.usePch = true;
             idx += 1;
+        } else if (arg == "--static") {
+            args.staticLink = true;
+            args.compileBinary = true;
+            idx += 1;
         } else if (arg == "--time" || arg == "--timing") {
             args.showTimings = true;
             idx += 1;
@@ -260,6 +266,7 @@ inline int runCli(std::string_view progName, const std::vector<std::string_view>
     buildOpts.isRelease = args.isRelease;
     buildOpts.usePch = args.usePch;
     buildOpts.rebuildPch = args.rebuildPch;
+    buildOpts.staticLink = args.staticLink;
 
     const BuildFileResult res = buildFileWithOptions(args.inputFile, buildOpts);
 

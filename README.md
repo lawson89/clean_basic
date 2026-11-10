@@ -25,11 +25,12 @@ Transpile a `.cb` source file to a C++17 unity build file (`build.cpp`):
 ./build/cleanbasic build path/to/file.cb -o build.cpp
 ```
 
-Or transpile and compile directly into a native binary (defaults to fast `-O0` debug mode with automatic C++17 Precompiled Header caching; pass `-r` / `--release` for `-O3` release builds or `--time` for a detailed stage timing breakdown):
+Or transpile and compile directly into a native binary (defaults to fast `-O0` debug mode with automatic C++17 Precompiled Header caching and portable static C++ runtime linking on Linux/Windows; pass `-r` / `--release` for `-O3` release builds, `--static` for a fully static Linux/Windows executable, or `--time` for a detailed stage timing breakdown):
 
 ```bash
 ./build/cleanbasic build path/to/file.cb -o build.cpp -c
 ./build/cleanbasic build path/to/file.cb -c --release --time
+./build/cleanbasic build path/to/file.cb --release --static
 ```
 
 ## Language Server (`cleanbasic lsp`) & VS Code Extension

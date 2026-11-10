@@ -79,6 +79,7 @@ struct BuildOptions {
     bool isRelease = false;
     bool usePch = true;
     bool rebuildPch = false;
+    bool staticLink = false;
 };
 
 struct BuildFileResult {
@@ -93,6 +94,14 @@ struct BuildFileResult {
 
 inline bool hostIsWindows() {
 #if defined(_WIN32)
+    return true;
+#else
+    return false;
+#endif
+}
+
+inline bool hostIsMacOs() {
+#if defined(__APPLE__)
     return true;
 #else
     return false;
@@ -505,6 +514,55 @@ inline std::string detectFastLinkerFlag(std::string_view compilerCmd) {
 #endif
 }
 
+inline bool isMacOsTarget(const TargetSpec& targetSpec) {
+    if (!targetSpec.isCross) {
+        return hostIsMacOs();
+    }
+    if (targetSpec.canonicalName.rfind("macos", 0) == 0) {
+        return true;
+    }
+    if (targetSpec.zigTriple.find("macos") != std::string::npos) {
+        return true;
+    }
+    return false;
+}
+
+inline std::string resolvePortableRuntimeFlags(
+    std::string_view compilerCmd,
+    const TargetSpec& targetSpec,
+    bool staticLink
+) {
+    if (isMacOsTarget(targetSpec)) {
+        return "";
+    }
+    if (staticLink) {
+        return "-static";
+    }
+    if (compilerCmd.empty() || compilerCmd.find("zig") != std::string_view::npos) {
+        return "";
+    }
+    if (targetSpec.isWindows) {
+        return "-static-libstdc++ -static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic";
+    }
+#if defined(_WIN32) || defined(__APPLE__)
+    return "-static-libstdc++ -static-libgcc";
+#else
+    static std::unordered_map<std::string, std::string> cache;
+    const std::string key(compilerCmd);
+    const auto it = cache.find(key);
+    if (it != cache.end()) {
+        return it->second;
+    }
+    std::string detectedFlags;
+    const std::string probeCmd = key + " -static-libstdc++ -static-libgcc -Wl,--version >/dev/null 2>&1";
+    if (std::system(probeCmd.c_str()) == 0) {
+        detectedFlags = "-static-libstdc++ -static-libgcc";
+    }
+    cache[key] = detectedFlags;
+    return detectedFlags;
+#endif
+}
+
 inline std::string buildCompileCommand(
     std::string_view compilerCmd,
     std::string_view cbRoot,
@@ -513,7 +571,9 @@ inline std::string buildCompileCommand(
     std::string_view binPath,
     const std::vector<std::string>& linkerFlags,
     std::string_view optLevel = "0",
-    std::string_view pchHeaderPath = ""
+    std::string_view pchHeaderPath = "",
+    bool staticLink = false,
+    const TargetSpec& targetSpec = resolveTargetSpec("native")
 ) {
     std::string resolvedOpt = "0";
     if (!optLevel.empty()) {
@@ -524,6 +584,11 @@ inline std::string buildCompileCommand(
     if (!fastLd.empty()) {
         fastLdFlags = " " + fastLd;
     }
+    std::string runtimeFlags;
+    const std::string resolvedRuntime = resolvePortableRuntimeFlags(compilerCmd, targetSpec, staticLink);
+    if (!resolvedRuntime.empty()) {
+        runtimeFlags = " " + resolvedRuntime;
+    }
     const std::string q(1, '"');
     std::string pchFlags;
     if (!pchHeaderPath.empty()) {
@@ -532,6 +597,7 @@ inline std::string buildCompileCommand(
     std::string cmd = std::string(compilerCmd) +
         " -O" + resolvedOpt + " -std=c++17 -pthread" +
         fastLdFlags +
+        runtimeFlags +
         pchFlags +
         " -I" + q + std::string(cbRoot) + "/vendor" + q +
         " -I" + q + std::string(cbRoot) + "/stdlib" + q +
@@ -979,7 +1045,9 @@ inline BuildFileResult buildFileWithOptions(
             binPath,
             linkerFlags,
             optLevel,
-            pchRes.headerPath
+            pchRes.headerPath,
+            options.staticLink,
+            targetSpec
         );
         const auto tCompileStart = std::chrono::steady_clock::now();
         int ret = std::system(compileCmd.c_str());
@@ -999,12 +1067,37 @@ inline BuildFileResult buildFileWithOptions(
                 binPath,
                 linkerFlags,
                 optLevel,
-                ""
+                "",
+                options.staticLink,
+                targetSpec
             );
             const auto tRetryStart = std::chrono::steady_clock::now();
             ret = std::system(compileCmd.c_str());
             const auto tRetryEnd = std::chrono::steady_clock::now();
             timings.cppCompileMs += elapsedMillis(tRetryStart, tRetryEnd);
+        }
+
+        if (ret != 0 && options.staticLink && !targetSpec.isCross && !targetSpec.isWindows && !isMacOsTarget(targetSpec)) {
+            std::string retryPchHeader;
+            if (timings.pchUsed) {
+                retryPchHeader = pchRes.headerPath;
+            }
+            compileCmd = buildCompileCommand(
+                compilerCmd,
+                cbRoot,
+                parentDir,
+                outCpp,
+                binPath,
+                linkerFlags,
+                optLevel,
+                retryPchHeader,
+                false,
+                targetSpec
+            );
+            const auto tFallbackStart = std::chrono::steady_clock::now();
+            ret = std::system(compileCmd.c_str());
+            const auto tFallbackEnd = std::chrono::steady_clock::now();
+            timings.cppCompileMs += elapsedMillis(tFallbackStart, tFallbackEnd);
         }
 
         timings.totalMs = timings.transpileTotalMs + timings.pchBuildMs + timings.cppCompileMs;
@@ -1047,7 +1140,8 @@ inline BuildFileResult buildFile(
     const std::string& optLevel = "0",
     bool isRelease = false,
     bool usePch = true,
-    bool rebuildPch = false
+    bool rebuildPch = false,
+    bool staticLink = false
 ) {
     BuildOptions opts{};
     opts.outputCppPath = outputPath;
@@ -1059,6 +1153,7 @@ inline BuildFileResult buildFile(
     opts.isRelease = isRelease;
     opts.usePch = usePch;
     opts.rebuildPch = rebuildPch;
+    opts.staticLink = staticLink;
     return buildFileWithOptions(inputPath, opts);
 }
 

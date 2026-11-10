@@ -2471,6 +2471,70 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "/opt/cleanbasic-sdk/build/pch/cb_pch.hpp"
         );
         CHECK(pchCmd.find(R"(-Winvalid-pch -include "/opt/cleanbasic-sdk/build/pch/cb_pch.hpp")") != std::string::npos);
+
+        // Verify Tier 1 default hybrid static C++ runtime flags and Tier 3 --static flags across targets
+        const cb::TargetSpec linuxSpec = cb::resolveTargetSpec("linux");
+        CHECK(cb::resolvePortableRuntimeFlags("g++", linuxSpec, false) == "-static-libstdc++ -static-libgcc");
+        CHECK(cb::resolvePortableRuntimeFlags("g++", linuxSpec, true) == "-static");
+        CHECK(cb::resolvePortableRuntimeFlags("zig c++ -target x86_64-linux-musl", linuxSpec, false).empty());
+        CHECK(cb::resolvePortableRuntimeFlags("zig c++ -target x86_64-linux-musl", linuxSpec, true) == "-static");
+
+        CHECK(cb::resolvePortableRuntimeFlags("g++", winSpec, false) ==
+              "-static-libstdc++ -static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic");
+        CHECK(cb::resolvePortableRuntimeFlags("g++", winSpec, true) == "-static");
+
+        const cb::TargetSpec macSpec = cb::resolveTargetSpec("macos");
+        CHECK(cb::resolvePortableRuntimeFlags("clang++", macSpec, false).empty());
+        CHECK(cb::resolvePortableRuntimeFlags("clang++", macSpec, true).empty());
+
+        const std::string winHybridCmd = cb::buildCompileCommand(
+            "g++",
+            "/opt/cleanbasic-sdk",
+            "projects/demo",
+            "projects/demo/build.cpp",
+            "projects/demo/app.exe",
+            {"-luser32"},
+            "0",
+            "",
+            false,
+            winSpec
+        );
+        const size_t bdPos = winHybridCmd.find("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic");
+        const size_t srcPos = winHybridCmd.find(R"("projects/demo/build.cpp")");
+        const size_t libPos = winHybridCmd.find("-luser32");
+        CHECK(bdPos != std::string::npos);
+        CHECK(srcPos != std::string::npos);
+        CHECK(libPos != std::string::npos);
+        CHECK(bdPos < srcPos);
+        CHECK(srcPos < libPos);
+
+        const std::string staticLinuxCmd = cb::buildCompileCommand(
+            "g++",
+            "/opt/cleanbasic-sdk",
+            "projects/demo",
+            "projects/demo/build.cpp",
+            "projects/demo/app",
+            {"-lm"},
+            "3",
+            "",
+            true,
+            linuxSpec
+        );
+        CHECK(staticLinuxCmd.find(" -static ") != std::string::npos);
+
+        const std::string staticMacCmd = cb::buildCompileCommand(
+            "clang++",
+            "/opt/cleanbasic-sdk",
+            "projects/demo",
+            "projects/demo/build.cpp",
+            "projects/demo/app",
+            {},
+            "3",
+            "",
+            true,
+            macSpec
+        );
+        CHECK(staticMacCmd.find("-static") == std::string::npos);
     }
 
     SECTION("parseCliArgs parses --target, --bin, and --cc and buildFile compiles with custom options") {
@@ -2539,6 +2603,12 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         CHECK(rebuildPchArgs.ok);
         CHECK(rebuildPchArgs.usePch);
         CHECK(rebuildPchArgs.rebuildPch);
+        CHECK_FALSE(rebuildPchArgs.staticLink);
+
+        const cb::CliArgs staticArgs = cb::parseCliArgs({"build", "main.cb", "--static"});
+        CHECK(staticArgs.ok);
+        CHECK(staticArgs.compileBinary);
+        CHECK(staticArgs.staticLink);
 
         const cb::CliArgs badOptArgs = cb::parseCliArgs({"main.cb", "-c", "--opt", "9"});
         CHECK_FALSE(badOptArgs.ok);
@@ -2628,6 +2698,20 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         REQUIRE(noPchRes.ok);
         CHECK_FALSE(noPchRes.timings.pchUsed);
         CHECK(noPchRes.compileCommand.find("-include") == std::string::npos);
+
+        // Verify end-to-end buildFileWithOptions compilation with staticLink = true produces a working binary
+        const std::string staticBin = "build/testArtifacts/cliOptsFibStaticBin";
+        cb::BuildOptions staticOpts{};
+        staticOpts.outputCppPath = outCpp;
+        staticOpts.compileBinary = true;
+        staticOpts.binaryOutput = staticBin;
+        staticOpts.target = "native";
+        staticOpts.compiler = "g++";
+        staticOpts.staticLink = true;
+        const cb::BuildFileResult staticRes = cb::buildFileWithOptions("tests/cases/fibonacci.cb", staticOpts);
+        INFO("Static build diagnostic: " << cb::formatDiagnostic(staticRes.error));
+        REQUIRE(staticRes.ok);
+        CHECK(std::filesystem::exists(staticBin, ec));
 
         // Verify runCli with --release and --time outputs timing breakdown and compiles with -O3
         std::ostringstream capturedCout;
