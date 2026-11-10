@@ -3853,7 +3853,7 @@ end fn
 
 fn caller() can error
     dim total = 0
-    total += stepOne()
+    total += 1 + stepOne()
 end fn
 )CB";
         const auto resComp = cb::transpileSource(nestedInCompound, "nestedInCompound.cb");
@@ -3872,6 +3872,66 @@ end fn
         CHECK_FALSE(resUtf8.ok);
         CHECK(resUtf8.error.kind == "AnalyzerError");
         CHECK(resUtf8.error.message.find("Fallible call to 'toUtf8' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+    }
+
+    SECTION("Supports fallible iterable in for-in loops and direct fallible RHS in compound assignments") {
+        const std::string code = R"CB(
+fn loadItems() as list[str] can error
+    return ["a", "b"]
+end fn
+
+fn countItem(s as str) as int can error
+    return s.len()
+end fn
+
+fn processAll() as int can error
+    dim total = 0
+    dim label = "items:"
+    for item in loadItems()
+        total += countItem(item)
+        label &= item
+    end for
+    return total
+end fn
+)CB";
+        const auto res = cb::transpileSource(code, "fallibleForAndCompound.cb");
+        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("auto [_val1, _err1] = loadItems();") != std::string::npos);
+        CHECK(res.cppCode.find("for (const auto& item : _val1) {") != std::string::npos);
+        CHECK(res.cppCode.find("auto [_val2, _err2] = countItem(item);") != std::string::npos);
+        CHECK(res.cppCode.find("total += _val2;") != std::string::npos);
+
+        const std::string unhandledFor = R"CB(
+fn loadItems() as list[str] can error
+    return ["a"]
+end fn
+
+fn badCaller()
+    for item in loadItems()
+        print(item)
+    end for
+end fn
+)CB";
+        const auto badForRes = cb::transpileSource(unhandledFor, "unhandledFor.cb");
+        CHECK_FALSE(badForRes.ok);
+        CHECK(badForRes.error.kind == "AnalyzerError");
+        CHECK(badForRes.error.message.find("Unhandled error") != std::string::npos);
+
+        const std::string unhandledCompound = R"CB(
+fn stepOne() as int can error
+    return 1
+end fn
+
+fn badCaller()
+    dim total = 0
+    total += stepOne()
+end fn
+)CB";
+        const auto badCompRes = cb::transpileSource(unhandledCompound, "unhandledCompound.cb");
+        CHECK_FALSE(badCompRes.ok);
+        CHECK(badCompRes.error.kind == "AnalyzerError");
+        CHECK(badCompRes.error.message.find("Unhandled error") != std::string::npos);
     }
 }
 

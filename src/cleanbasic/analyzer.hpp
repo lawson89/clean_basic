@@ -664,7 +664,11 @@ public:
 
         if (auto* vassign = arena.getStmtMut<VarAssignment>(stmtId)) {
             ensureContainerTypesInExpr(vassign->value, scope);
-            checkFallibleUsage(fn, vassign->value, scope, hasActiveOnError, vassign->implicitBubble);
+            ExprId fallibleCheckExpr = vassign->value;
+            if (vassign->compoundRhs != INVALID_ID) {
+                fallibleCheckExpr = vassign->compoundRhs;
+            }
+            checkFallibleUsage(fn, fallibleCheckExpr, scope, hasActiveOnError, vassign->implicitBubble);
 
             const TypeId valType = inferExprType(arena, vassign->value, symbols, scope, moduleId);
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
@@ -727,7 +731,12 @@ public:
                 validateExprCalls(fn, vassign->target, scope, false);
             }
 
-            validateExprCalls(fn, vassign->value, scope, true);
+            if (vassign->compoundRhs != INVALID_ID) {
+                validateExprCalls(fn, vassign->target, scope, false);
+                validateExprCalls(fn, vassign->compoundRhs, scope, true);
+            } else {
+                validateExprCalls(fn, vassign->value, scope, true);
+            }
             return;
         }
 
@@ -778,7 +787,9 @@ public:
                     bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
                 }
             } else if (forStmt->hasIterable) {
-                validateExprCalls(fn, forStmt->iterable, scope, false);
+                bool dummyBubble = false;
+                checkFallibleUsage(fn, forStmt->iterable, scope, hasActiveOnError, dummyBubble);
+                validateExprCalls(fn, forStmt->iterable, scope, true);
                 const TypeId iterTid = inferExprType(arena, forStmt->iterable, symbols, scope, moduleId);
                 if (iterTid < arena.types.size()) {
                     const TypeNode iterT = resolveAliasNode(arena, symbols, moduleId, iterTid);

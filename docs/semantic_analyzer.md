@@ -287,7 +287,7 @@ When function `caller` invokes a fallible function `callee` (`callee.isFallible 
   Compilation fails immediately with an `AnalyzerError`:
   `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function '<caller>' calls fallible function '<callee>').`
 * **Top-Level Statement Rule for Fallible Calls:**
-  Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, or a standalone expression statement (`fallible()`). Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if`/`while` conditions) is rejected with:
+  Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()`, `x = fallible()`, or compound assignment `x += fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignment sub-expressions `x += 1 + fallible()`, or `if` conditions) is rejected with:
   `AnalyzerError: Fallible call to '<name>' must be assigned to a variable, returned directly, or called as a standalone statement.`
 
 ### 7.3 `on error` Scope Activation & Mandatory Control-Flow Exit (`stmtListHasExit`)

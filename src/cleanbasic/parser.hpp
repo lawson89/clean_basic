@@ -573,6 +573,8 @@ public:
             stmt.hasDeclaredType = false;
             stmt.declaredType = INVALID_ID;
             stmt.value = valExpr;
+            stmt.compoundOp = binOp;
+            stmt.compoundRhs = rhsExpr;
             return arena.addStmt(start.line, start.col, std::move(stmt));
         }
 

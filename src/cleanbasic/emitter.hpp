@@ -885,7 +885,11 @@ public:
         std::unordered_map<std::string, VarSymbol>& scope,
         std::unordered_set<std::string>& declaredVars
     ) {
-        const std::string callCpp = emitExpr(stmt.value, scope);
+        ExprId callExprId = stmt.value;
+        if (stmt.compoundRhs != INVALID_ID) {
+            callExprId = stmt.compoundRhs;
+        }
+        const std::string callCpp = emitExpr(callExprId, scope);
         const auto [valTmp, errVar] = nextValErrTemps();
         const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
 
@@ -899,6 +903,19 @@ public:
 
     if (stmt.target != INVALID_ID) {
         const ExprId tid = stmt.target;
+        std::string rhs = "0";
+        if (hasValue) {
+            rhs = valTmp;
+        }
+        if (stmt.compoundRhs != INVALID_ID) {
+            const std::string lhsCpp = emitExpr(tid, scope, true);
+            if (stmt.compoundOp == "&") {
+                emitLine(lhsCpp + " += cbToStr(" + rhs + ");");
+            } else {
+                emitLine(lhsCpp + " " + stmt.compoundOp + "= " + rhs + ";");
+            }
+            return;
+        }
         if (const auto* ident = arena.getExpr<Identifier>(tid)) {
             const std::string& name = ident->name;
             TypeId retT = symbols.typeAuto;
@@ -910,10 +927,6 @@ public:
             const bool isNewDecl = stmt.isDim || stmt.isConst || (declaredVars.find(name) == declaredVars.end());
             scope[name] = VarSymbol{name, retT, false, stmt.isConst};
             declaredVars.insert(name);
-            std::string rhs = "0";
-            if (hasValue) {
-                rhs = valTmp;
-            }
             if (isNewDecl) {
                 std::string prefix = "auto ";
                 if (stmt.isConst) {
@@ -925,10 +938,6 @@ public:
             }
         } else {
             const std::string lhsCpp = emitExpr(tid, scope, true);
-            std::string rhs = "0";
-            if (hasValue) {
-                rhs = valTmp;
-            }
             emitLine(lhsCpp + " = " + rhs + ";");
         }
     }
@@ -940,7 +949,11 @@ public:
     std::unordered_map<std::string, VarSymbol>& scope,
     std::unordered_set<std::string>& declaredVars
 ) {
-    if (const auto* call = arena.getExpr<FuncCall>(stmt.value)) {
+    ExprId checkExprId = stmt.value;
+    if (stmt.compoundRhs != INVALID_ID) {
+        checkExprId = stmt.compoundRhs;
+    }
+    if (const auto* call = arena.getExpr<FuncCall>(checkExprId)) {
         const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
         if (fnSym.has_value() && fnSym->isFallible) {
             emitFallibleAssignment(line, fn, stmt, *fnSym, scope, declaredVars);
@@ -1224,6 +1237,15 @@ public:
 
         if (forS->hasIterable) {
             std::string iterCpp = emitExpr(forS->iterable, scope);
+            if (const auto* call = arena.getExpr<FuncCall>(forS->iterable)) {
+                const auto fnOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+                if (fnOpt.has_value() && fnOpt->isFallible) {
+                    const auto [valTmp, errVar] = nextValErrTemps();
+                    emitLine("auto [" + valTmp + ", " + errVar + "] = " + iterCpp + ";");
+                    emitActiveErrorHandlerOrBubble(stmtNode.line, fn, errVar, scope, declaredVars);
+                    iterCpp = valTmp;
+                }
+            }
             const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, currentModuleId);
             const TypeNode iterType = resolveAliasNode(arena, symbols, currentModuleId, iterTid);
 

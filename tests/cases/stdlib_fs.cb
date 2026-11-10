@@ -13,7 +13,7 @@
 ' EXPECT_OUT: Path helpers: dir=build/testArtifacts/stdlibFsSandbox, file=notes.txt, ext=.txt
 ' EXPECT_OUT: Whole-file lines=3, first=alpha, copiedSize=18, renamedExists=true
 ' EXPECT_OUT: Streamed lines=3: [L1] [L2] [L3], eofAfter=true
-' EXPECT_OUT: WalkFiles count=3, first=build/testArtifacts/stdlibFsSandbox/nested/deep.txt
+' EXPECT_OUT: WalkFiles count=3, allWithHidden=5, bytes=32, first=build/testArtifacts/stdlibFsSandbox/nested/deep.txt
 ' EXPECT_OUT: Directory entries=3: nested, renamed.txt
 ' EXPECT_OUT: AbsPath leaf=stdlibFsSandbox, tempDirValid=true
 ' EXPECT_OUT: Caught missing file (code=404)
@@ -85,10 +85,30 @@ fn testWalkFiles(baseDir as str) can error
     dim nestedDir = fs.joinPath(baseDir, "nested")
     fs.mkdir(nestedDir)
     fs.write(fs.joinPath(nestedDir, "deep.txt"), "deep")
-    
-    dim files = fs.walkFiles(baseDir)
-    ' We expect: renamed.txt, stream.log, nested/deep.txt
-    print("WalkFiles count=" & files.len() & ", first=" & files[0])
+
+    dim hiddenFile = fs.joinPath(baseDir, ".hidden.txt")
+    fs.write(hiddenFile, "secret")
+    dim hiddenDir = fs.joinPath(baseDir, ".hiddenDir")
+    fs.mkdir(hiddenDir)
+    fs.write(fs.joinPath(hiddenDir, "inside.txt"), "secret2")
+
+    dim visibleCount = 0
+    dim totalVisibleBytes = 0
+    dim firstVisible = ""
+    for path in fs.walkFiles(baseDir)
+        if visibleCount == 0
+            firstVisible = path
+        end if
+        visibleCount += 1
+        totalVisibleBytes += fs.size(path)
+    end for
+
+    dim allFiles = fs.walkFiles(baseDir, includeHidden=true)
+    fs.remove(hiddenFile)
+    fs.removeAll(hiddenDir)
+
+    ' We expect visible: nested/deep.txt (4), renamed.txt (18), stream.log (10) -> 3 files, 32 bytes; allFiles -> 5 files
+    print("WalkFiles count=" & visibleCount & ", allWithHidden=" & allFiles.len() & ", bytes=" & totalVisibleBytes & ", first=" & firstVisible)
 end fn
 
 fn testMissingFile(baseDir as str)

@@ -542,11 +542,9 @@ CbFile cb_std_fs__stdin();
 [[nodiscard]] std::tuple<CbFile, CbError> cb_std_fs__open(const std::string& path);
 [[nodiscard]] std::tuple<bool, CbError> cb_std_fs__readLine(const CbFile& f, std::string& outLine);
 void cb_std_fs__close(CbFile& f);
-[[nodiscard]] std::tuple<std::vector<std::string>, CbError> cb_std_fs__walkFiles(const std::string& path);
+[[nodiscard]] std::tuple<std::vector<std::string>, CbError> cb_std_fs__walkFiles(const std::string& path, bool includeHidden);
 bool cb_std_fs__isDir(const std::string& path);
-std::string cb_std_fs__fileName(const std::string& path);
-bool matchLine(const std::string& line, const std::string& pattern, bool ignoreCase, bool lineNumbers, bool invert, bool countOnly, const std::string& source, int64_t lineNum);
-[[nodiscard]] std::tuple<int64_t, CbError> search(const std::string& path, const std::string& pattern, bool ignoreCase, bool lineNumbers, bool invert, bool countOnly);
+[[nodiscard]] std::tuple<int64_t, CbError> search(const std::string& path, const cb_std_cli__Args& args);
 int64_t cbMain();
 
 bool cb_std_str__contains(const std::string& s, const std::string& sub) {
@@ -934,7 +932,7 @@ CbFile cb_std_fs__stdin() {
 [[nodiscard]] std::tuple<CbFile, CbError> cb_std_fs__open(const std::string& path) {
     auto [_val2, _err2] = cbFsOpen(path);
     if (cbHasError(_err2)) {
-        cbStampError(_err2, "/home/lawson89/code/clean_basic/stdlib/fs/fs.cb", 98);
+        cbStampError(_err2, "/home/lawson89/code/clean_basic/stdlib/fs/fs.cb", 116);
         return { CbFile{}, _err2 };
     }
     return { _val2, CbError{"", 0} };
@@ -943,7 +941,7 @@ CbFile cb_std_fs__stdin() {
 [[nodiscard]] std::tuple<bool, CbError> cb_std_fs__readLine(const CbFile& f, std::string& outLine) {
     auto [_val3, _err3] = cbFsReadLine(f, outLine);
     if (cbHasError(_err3)) {
-        cbStampError(_err3, "/home/lawson89/code/clean_basic/stdlib/fs/fs.cb", 108);
+        cbStampError(_err3, "/home/lawson89/code/clean_basic/stdlib/fs/fs.cb", 126);
         return { {}, _err3 };
     }
     return { _val3, CbError{"", 0} };
@@ -953,10 +951,10 @@ void cb_std_fs__close(CbFile& f) {
     cbFsClose(f);
 }
 
-[[nodiscard]] std::tuple<std::vector<std::string>, CbError> cb_std_fs__walkFiles(const std::string& path) {
-    auto [_val4, _err4] = cbFsWalkFiles(path);
+[[nodiscard]] std::tuple<std::vector<std::string>, CbError> cb_std_fs__walkFiles(const std::string& path, bool includeHidden) {
+    auto [_val4, _err4] = cbFsWalkFiles(path, includeHidden);
     if (cbHasError(_err4)) {
-        cbStampError(_err4, "/home/lawson89/code/clean_basic/stdlib/fs/fs.cb", 160);
+        cbStampError(_err4, "/home/lawson89/code/clean_basic/stdlib/fs/fs.cb", 178);
         return { std::vector<std::string>{}, _err4 };
     }
     return { _val4, CbError{"", 0} };
@@ -966,39 +964,18 @@ bool cb_std_fs__isDir(const std::string& path) {
     return cbFsIsDir(path);
 }
 
-std::string cb_std_fs__fileName(const std::string& path) {
-    return cbFsFileName(path);
-}
-
-bool matchLine(const std::string& line, const std::string& pattern, bool ignoreCase, bool lineNumbers, bool invert, bool countOnly, const std::string& source, int64_t lineNum) {
-    bool matched = false;
-    if (ignoreCase) {
-        matched = cb_std_str__asciiContainsIgnoreCase(line, pattern);
-    } else {
-        matched = cb_std_str__contains(line, pattern);
-    }
-    if (invert) {
-        matched = (!matched);
-    }
-    if (matched) {
-        if ((!countOnly)) {
-            if (lineNumbers) {
-                (std::cout << ((((((std::string("") + source) + std::string(":")) + cbToStr(lineNum)) + std::string(":")) + line) + std::string("")) << std::endl);
-            } else {
-                (std::cout << ((((std::string("") + source) + std::string(":")) + line) + std::string("")) << std::endl);
-            }
-        }
-    }
-    return matched;
-}
-
-[[nodiscard]] std::tuple<int64_t, CbError> search(const std::string& path, const std::string& pattern, bool ignoreCase, bool lineNumbers, bool invert, bool countOnly) {
+[[nodiscard]] std::tuple<int64_t, CbError> search(const std::string& path, const cb_std_cli__Args& args) {
+    const std::string pattern = cb_std_cli__get(args, std::string("pattern"), std::string(""));
+    const bool ignoreCase = cb_std_cli__has(args, std::string("ignore-case"));
+    const bool lineNumbers = cb_std_cli__has(args, std::string("line-number"));
+    const bool countOnly = cb_std_cli__has(args, std::string("count"));
+    const bool invert = cb_std_cli__has(args, std::string("invert-match"));
     CbFile f = cb_std_fs__stdin();
     std::string source = std::string("{stdout}");
     if ((path != std::string("-"))) {
         auto [_val5, _err5] = cb_std_fs__open(path);
         if (cbHasError(_err5)) {
-            cbStampError(_err5, "examples/cbgrep.cb", 40);
+            cbStampError(_err5, "examples/cbgrep.cb", 20);
             return { {}, _err5 };
         }
         f = _val5;
@@ -1013,20 +990,36 @@ bool matchLine(const std::string& line, const std::string& pattern, bool ignoreC
     while (true) {
         auto [_val6, _err6] = cb_std_fs__readLine(f, line);
         if (cbHasError(_err6)) {
-            cbStampError(_err6, "examples/cbgrep.cb", 50);
+            cbStampError(_err6, "examples/cbgrep.cb", 30);
             return { {}, _err6 };
         }
         if (!_val6) { break; }
         lineNum = (lineNum + 1);
-        if (matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, source, lineNum)) {
+        bool matched = false;
+        if (ignoreCase) {
+            matched = cb_std_str__asciiContainsIgnoreCase(line, pattern);
+        } else {
+            matched = cb_std_str__contains(line, pattern);
+        }
+        if (invert) {
+            matched = (!matched);
+        }
+        if (matched) {
             matchCount = (matchCount + 1);
+            if ((!countOnly)) {
+                if (lineNumbers) {
+                    (std::cout << ((((((std::string("") + source) + std::string(":")) + cbToStr(lineNum)) + std::string(":")) + line) + std::string("")) << std::endl);
+                } else {
+                    (std::cout << ((((std::string("") + source) + std::string(":")) + line) + std::string("")) << std::endl);
+                }
+            }
         }
     }
     if (countOnly) {
         if ((path != std::string("-"))) {
             (std::cout << ((((std::string("") + path) + std::string(":")) + cbToStr(matchCount)) + std::string("")) << std::endl);
         } else {
-            (std::cout << cbToStr(matchCount) << std::endl);
+            (std::cout << matchCount << std::endl);
         }
     }
     return { matchCount, CbError{"", 0} };
@@ -1041,9 +1034,9 @@ int64_t cbMain() {
     cb_std_cli__addArg(p, std::string("pattern"), std::string("Search pattern"), true);
     auto [_val7, _err7] = cb_std_cli__parse(p);
     if (cbHasError(_err7)) {
-        cbStampError(_err7, "examples/cbgrep.cb", 87);
+        cbStampError(_err7, "examples/cbgrep.cb", 79);
         CbError e = _err7;
-        cb_std_os__eprint((std::string("cbgrep: ") + e.msg));
+        cb_std_os__eprint(((std::string("cbgrep: ") + e.msg) + std::string("")));
         return 2;
     }
     const auto args = _val7;
@@ -1051,60 +1044,39 @@ int64_t cbMain() {
         cb_std_cli__printUsage(p);
         return 0;
     }
-    const std::string pattern = cb_std_cli__get(args, std::string("pattern"), std::string(""));
-    const bool ignoreCase = cb_std_cli__has(args, std::string("ignore-case"));
-    const bool lineNumbers = cb_std_cli__has(args, std::string("line-number"));
-    const bool countOnly = cb_std_cli__has(args, std::string("count"));
-    const bool invert = cb_std_cli__has(args, std::string("invert-match"));
     std::vector<std::string> targets = args.rest;
     if ((static_cast<int64_t>(targets.size()) == 0)) {
         targets.push_back(std::string("-"));
     }
     int64_t totalMatches = 0;
     for (const auto& target : targets) {
-        if ((target == std::string("-"))) {
-            auto [_val8, _err8] = search(std::string("-"), pattern, ignoreCase, lineNumbers, invert, countOnly);
+        if (cb_std_fs__isDir(target)) {
+            auto [_val8, _err8] = cb_std_fs__walkFiles(target, false);
             if (cbHasError(_err8)) {
-                cbStampError(_err8, "examples/cbgrep.cb", 112);
+                cbStampError(_err8, "examples/cbgrep.cb", 98);
                 CbError e = _err8;
-                cb_std_os__eprint((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg));
+                cb_std_os__eprint(((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg) + std::string("")));
                 continue;
             }
-            auto mStdn = _val8;
-            totalMatches = (totalMatches + mStdn);
-        } else if (cb_std_fs__isDir(target)) {
-            auto [_val9, _err9] = cb_std_fs__walkFiles(target);
-            if (cbHasError(_err9)) {
-                cbStampError(_err9, "examples/cbgrep.cb", 115);
-                CbError e = _err9;
-                cb_std_os__eprint((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg));
-                continue;
-            }
-            auto files = _val9;
-            for (const auto& path : files) {
-                if ((cb_std_str__contains(path, std::string("/.")) || cb_std_str__startsWith(cb_std_fs__fileName(path), std::string(".")))) {
+            for (const auto& path : _val8) {
+                auto [_val9, _err9] = search(path, args);
+                if (cbHasError(_err9)) {
+                    cbStampError(_err9, "examples/cbgrep.cb", 103);
+                    CbError e2 = _err9;
+                    cb_std_os__eprint(((((std::string("cbgrep: ") + path) + std::string(": ")) + e2.msg) + std::string("")));
                     continue;
                 }
-                auto [_val10, _err10] = search(path, pattern, ignoreCase, lineNumbers, invert, countOnly);
-                if (cbHasError(_err10)) {
-                    cbStampError(_err10, "examples/cbgrep.cb", 124);
-                    CbError e2 = _err10;
-                    cb_std_os__eprint((((std::string("cbgrep: ") + path) + std::string(": ")) + e2.msg));
-                    continue;
-                }
-                auto mFile = _val10;
-                totalMatches = (totalMatches + mFile);
+                totalMatches += _val9;
             }
         } else {
-            auto [_val11, _err11] = search(target, pattern, ignoreCase, lineNumbers, invert, countOnly);
-            if (cbHasError(_err11)) {
-                cbStampError(_err11, "examples/cbgrep.cb", 128);
-                CbError e = _err11;
-                cb_std_os__eprint((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg));
+            auto [_val10, _err10] = search(target, args);
+            if (cbHasError(_err10)) {
+                cbStampError(_err10, "examples/cbgrep.cb", 106);
+                CbError e = _err10;
+                cb_std_os__eprint(((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg) + std::string("")));
                 continue;
             }
-            auto mTarget = _val11;
-            totalMatches = (totalMatches + mTarget);
+            totalMatches += _val10;
         }
     }
     if ((totalMatches > 0)) {

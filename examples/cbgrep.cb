@@ -6,34 +6,14 @@ import "std/cli"
 import "std/os"
 import "std/fs"
 
-
-fn matchLine(line as str, pattern as str, ignoreCase as bool, lineNumbers as bool, invert as bool, countOnly as bool, source as str, lineNum as int) as bool
-    dim matched = false
-    if ignoreCase
-        matched = line.asciiContainsIgnoreCase(pattern)
-    else
-        matched = line.contains(pattern)
-    end if
-
-    if invert
-        matched = not matched
-    end if
-
-    if matched
-        if not countOnly
-            if lineNumbers
-                print($"{source}:{lineNum.toStr()}:{line}")
-            else
-                print($"{source}:{line}")
-            end if
-        end if
-    end if
-    return matched
-end fn
-
-
 ' Searches for matches in a file or standard input.
-fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, invert as bool, countOnly as bool) as int can error
+fn search(path as str, args as cli.Args) as int can error
+    const pattern = args.get("pattern")
+    const ignoreCase = args.has("ignore-case")
+    const lineNumbers = args.has("line-number")
+    const countOnly = args.has("count")
+    const invert = args.has("invert-match")
+
     dim f = fs.stdin()
     dim source = "{stdout}"
     if path != "-"
@@ -49,16 +29,34 @@ fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, 
     dim line = ""
     while f.readLine(line)
         lineNum += 1
-        if matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, source, lineNum)
+        dim matched = false
+        if ignoreCase
+            matched = line.asciiContainsIgnoreCase(pattern)
+        else
+            matched = line.contains(pattern)
+        end if
+
+        if invert
+            matched = not matched
+        end if
+
+        if matched
             matchCount += 1
+            if not countOnly
+                if lineNumbers
+                    print($"{source}:{lineNum}:{line}")
+                else
+                    print($"{source}:{line}")
+                end if
+            end if
         end if
     end while
 
     if countOnly
         if path != "-"
-            print($"{path}:{matchCount.toStr()}")
+            print($"{path}:{matchCount}")
         else
-            print(matchCount.toStr())
+            print(matchCount)
         end if
     end if
 
@@ -74,7 +72,7 @@ fn main() as int
     p.addArg("pattern", "Search pattern", required=true)
 
     on error e
-        os.eprint("cbgrep: " & e.msg)
+        os.eprint($"cbgrep: {e.msg}")
         return 2
     end error
 
@@ -84,12 +82,6 @@ fn main() as int
         return 0
     end if
 
-    const pattern = args.get("pattern")
-    const ignoreCase = args.has("ignore-case")
-    const lineNumbers = args.has("line-number")
-    const countOnly = args.has("count")
-    const invert = args.has("invert-match")
-
     dim targets = args.rest
     if targets.len() == 0
         targets.push("-")
@@ -98,29 +90,20 @@ fn main() as int
     dim totalMatches = 0
     for target in targets
         on error e
-            os.eprint("cbgrep: " & target & ": " & e.msg)
+            os.eprint($"cbgrep: {target}: {e.msg}")
             continue
         end error
 
-        if target == "-"
-            dim mStdn = search("-", pattern, ignoreCase, lineNumbers, invert, countOnly)
-            totalMatches += mStdn
-        else if fs.isDir(target)
-            dim files = fs.walkFiles(target)
-            for path in files
-                if path.contains("/.") or fs.fileName(path).startsWith(".")
-                    continue
-                end if
+        if fs.isDir(target)
+            for path in fs.walkFiles(target)
                 on error e2
-                    os.eprint("cbgrep: " & path & ": " & e2.msg)
+                    os.eprint($"cbgrep: {path}: {e2.msg}")
                     continue
                 end error
-                dim mFile = search(path, pattern, ignoreCase, lineNumbers, invert, countOnly)
-                totalMatches += mFile
+                totalMatches += search(path, args)
             end for
         else
-            dim mTarget = search(target, pattern, ignoreCase, lineNumbers, invert, countOnly)
-            totalMatches += mTarget
+            totalMatches += search(target, args)
         end if
     end for
 

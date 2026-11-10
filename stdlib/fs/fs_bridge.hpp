@@ -527,7 +527,7 @@ inline std::tuple<std::vector<std::string>, CbError> cbFsDir(const std::string& 
     return {std::move(entries), CbError{"", 0}};
 }
 
-inline std::tuple<std::vector<std::string>, CbError> cbFsWalkFiles(const std::string& path) {
+inline std::tuple<std::vector<std::string>, CbError> cbFsWalkFiles(const std::string& path, bool includeHidden = false) {
     if (path.empty()) {
         return {std::vector<std::string>{}, CbError{"Cannot walk empty path", 400}};
     }
@@ -541,7 +541,14 @@ inline std::tuple<std::vector<std::string>, CbError> cbFsWalkFiles(const std::st
          it.increment(ec)) {
         if (ec) break;
         const auto& entry = *it;
+        const std::string fname = entry.path().filename().generic_string();
         std::error_code isFileEc;
+        if (!includeHidden && !fname.empty() && fname[0] == '.') {
+            if (entry.is_directory(isFileEc) && !isFileEc) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
         if (entry.is_regular_file(isFileEc) && !isFileEc) {
             entries.push_back(entry.path().generic_string());
         }
