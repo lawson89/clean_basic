@@ -525,7 +525,6 @@ std::string cb_std_str__sliceFrom(const std::string& s, int64_t start);
 std::string cb_std_str__charAt(const std::string& s, int64_t idx);
 std::vector<std::string> cb_std_os__args();
 void cb_std_os__eprint(const std::string& msg);
-bool cb_std_os__readLine(std::string& outLine);
 cb_std_cli__Parser cb_std_cli__newParser(const std::string& name, const std::string& version, const std::string& description);
 void cb_std_cli__addFlag(cb_std_cli__Parser& p, const std::string& name, const std::string& shortName, const std::string& help);
 void cb_std_cli__addArg(cb_std_cli__Parser& p, const std::string& name, const std::string& help, bool required);
@@ -539,6 +538,7 @@ void cb_std_cli__printUsage(const cb_std_cli__Parser& p);
 [[nodiscard]] std::tuple<cb_std_cli__Args, CbError> cb_std_cli__parse(const cb_std_cli__Parser& p);
 bool cb_std_cli__has(const cb_std_cli__Args& a, const std::string& name);
 std::string cb_std_cli__get(const cb_std_cli__Args& a, const std::string& name, const std::string& defaultVal);
+CbFile cb_std_fs__stdin();
 [[nodiscard]] std::tuple<CbFile, CbError> cb_std_fs__open(const std::string& path);
 [[nodiscard]] std::tuple<bool, CbError> cb_std_fs__readLine(const CbFile& f, std::string& outLine);
 void cb_std_fs__close(CbFile& f);
@@ -595,10 +595,6 @@ std::vector<std::string> cb_std_os__args() {
 
 void cb_std_os__eprint(const std::string& msg) {
     cbOsEprint(msg);
-}
-
-bool cb_std_os__readLine(std::string& outLine) {
-    return cbOsReadLine(outLine);
 }
 
 cb_std_cli__Parser cb_std_cli__newParser(const std::string& name, const std::string& version, const std::string& description) {
@@ -931,6 +927,10 @@ std::string cb_std_cli__get(const cb_std_cli__Args& a, const std::string& name, 
     return defaultVal;
 }
 
+CbFile cb_std_fs__stdin() {
+    return cbFsStdin();
+}
+
 [[nodiscard]] std::tuple<CbFile, CbError> cb_std_fs__open(const std::string& path) {
     auto [_val2, _err2] = cbFsOpen(path);
     if (cbHasError(_err2)) {
@@ -993,39 +993,33 @@ bool matchLine(const std::string& line, const std::string& pattern, bool ignoreC
 }
 
 [[nodiscard]] std::tuple<int64_t, CbError> search(const std::string& path, const std::string& pattern, bool ignoreCase, bool lineNumbers, bool invert, bool countOnly) {
+    CbFile f = cb_std_fs__stdin();
+    std::string source = std::string("{stdout}");
+    if ((path != std::string("-"))) {
+        auto [_val5, _err5] = cb_std_fs__open(path);
+        if (cbHasError(_err5)) {
+            cbStampError(_err5, "examples/cbgrep.cb", 40);
+            return { {}, _err5 };
+        }
+        f = _val5;
+        source = path;
+    }
+    auto _defer_1 = cbDefer([&]() {
+        cb_std_fs__close(f);
+    });
     int64_t lineNum = 0;
     int64_t matchCount = 0;
     std::string line = std::string("");
-    if ((path == std::string("-"))) {
-        while (cb_std_os__readLine(line)) {
-            lineNum = (lineNum + 1);
-            bool matched = matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, std::string("{stdout}"), lineNum);
-            if (matched) {
-                matchCount = (matchCount + 1);
-            }
+    while (true) {
+        auto [_val6, _err6] = cb_std_fs__readLine(f, line);
+        if (cbHasError(_err6)) {
+            cbStampError(_err6, "examples/cbgrep.cb", 50);
+            return { {}, _err6 };
         }
-    } else {
-        auto [_val5, _err5] = cb_std_fs__open(path);
-        if (cbHasError(_err5)) {
-            cbStampError(_err5, "examples/cbgrep.cb", 50);
-            return { {}, _err5 };
-        }
-        auto f = _val5;
-        auto _defer_1 = cbDefer([&]() {
-            cb_std_fs__close(f);
-        });
-        while (true) {
-            auto [_val6, _err6] = cb_std_fs__readLine(f, line);
-            if (cbHasError(_err6)) {
-                cbStampError(_err6, "examples/cbgrep.cb", 54);
-                return { {}, _err6 };
-            }
-            if (!_val6) { break; }
-            lineNum = (lineNum + 1);
-            bool matched = matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, path, lineNum);
-            if (matched) {
-                matchCount = (matchCount + 1);
-            }
+        if (!_val6) { break; }
+        lineNum = (lineNum + 1);
+        if (matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, source, lineNum)) {
+            matchCount = (matchCount + 1);
         }
     }
     if (countOnly) {

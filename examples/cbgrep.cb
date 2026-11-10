@@ -34,31 +34,25 @@ end fn
 
 ' Searches for matches in a file or standard input.
 fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, invert as bool, countOnly as bool) as int can error
+    dim f = fs.stdin()
+    dim source = "{stdout}"
+    if path != "-"
+        f = fs.open(path)
+        source = path
+    end if
+    defer
+        f.close()
+    end defer
+
     dim lineNum = 0
     dim matchCount = 0
     dim line = ""
-    
-    if path == "-"
-        while os.readLine(line)
-            lineNum += 1
-            dim matched = matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, "{stdout}", lineNum)
-            if matched
-                matchCount += 1
-            end if
-        end while
-    else
-        dim f = fs.open(path)
-        defer
-            f.close()
-        end defer
-        while f.readLine(line)
-            lineNum += 1
-            dim matched = matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, path, lineNum)
-            if matched
-                matchCount += 1
-            end if
-        end while
-    end if
+    while f.readLine(line)
+        lineNum += 1
+        if matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, source, lineNum)
+            matchCount += 1
+        end if
+    end while
 
     if countOnly
         if path != "-"

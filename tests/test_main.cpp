@@ -2704,6 +2704,91 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
 
         const int rcNoMatch = std::system(("./" + outBin + " nonexistentPatternXYZ " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
         CHECK(rcNoMatch != 0);
+
+        const int rcStdinExplicit = std::system(("./" + outBin + " -in cleanbasic - < " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcStdinExplicit == 0);
+        const std::string stdinExplicitOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(stdinExplicitOut.find("{stdout}:1:CleanBasic Alpha") != std::string::npos);
+        CHECK(stdinExplicitOut.find("{stdout}:3:cleanbasic beta") != std::string::npos);
+
+        const int rcStdinImplicit = std::system(("./" + outBin + " -ic cleanbasic < " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcStdinImplicit == 0);
+        const std::string stdinImplicitOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(stdinImplicitOut.find("2") != std::string::npos);
+    }
+
+    SECTION("fs.stdin(), fs.stdout(), and fs.stderr() streaming I/O with piped stdin and separated stdout/stderr") {
+        const std::string workDir = "build/testArtifacts/stdStreamsTest";
+        std::error_code ec;
+        std::filesystem::create_directories(workDir, ec);
+        REQUIRE(!ec);
+
+        const std::string cbPath = workDir + "/std_streams.cb";
+        const std::string cppPath = workDir + "/build.cpp";
+        const std::string binPath = workDir + "/std_streams_bin";
+        const std::string stdinPath = workDir + "/stdin.txt";
+        const std::string stdoutPath = workDir + "/stdout.txt";
+        const std::string stderrPath = workDir + "/stderr.txt";
+
+        {
+            std::ofstream inFile(stdinPath, std::ios::binary | std::ios::trunc);
+            inFile << "lineOne" << std::endl
+                   << "lineTwo" << std::endl
+                   << "RAWB";
+        }
+
+        const std::string cbSource = R"CB(
+import "std/fs"
+
+fn main() as int
+    on error e
+        print("Error: " & e.msg)
+        return 1
+    end error
+
+    dim inStream = fs.stdin()
+    dim outStream = fs.stdout()
+    dim errStream = fs.stderr()
+    defer
+        inStream.close()
+        outStream.close()
+        errStream.close()
+    end defer
+
+    dim firstLine = ""
+    dim secondLine = ""
+    dim ok1 = inStream.readLine(firstLine)
+    dim ok2 = inStream.readLine(secondLine)
+    dim rawBytes = inStream.readBytes(4)
+    dim atEof = inStream.eof()
+
+    outStream.writeStr("OUT:")
+    outStream.writeLine(firstLine & "|" & secondLine & "|eof=" & atEof.toStr())
+    outStream.flush()
+
+    errStream.writeStr("ERR:")
+    errStream.writeBytes(rawBytes)
+    errStream.writeLine("|ok=" & (ok1 and ok2).toStr())
+    errStream.flush()
+    return 0
+end fn
+)CB";
+        {
+            std::ofstream cbOut(cbPath, std::ios::binary | std::ios::trunc);
+            cbOut << cbSource;
+        }
+
+        const cb::BuildFileResult buildRes = cb::buildFile(cbPath, cppPath, true, binPath, "native", "g++");
+        INFO("std_streams build diagnostic: " << cb::formatDiagnostic(buildRes.error));
+        REQUIRE(buildRes.ok);
+
+        const int rc = std::system(("./" + binPath + " < " + stdinPath + " > " + stdoutPath + " 2> " + stderrPath).c_str());
+        CHECK(rc == 0);
+
+        const std::string outText = cb::testE2E::readFileText(stdoutPath);
+        const std::string errText = cb::testE2E::readFileText(stderrPath);
+        CHECK(outText.find("OUT:lineOne|lineTwo|eof=true") != std::string::npos);
+        CHECK(errText.find("ERR:RAWB|ok=true") != std::string::npos);
     }
 }
 

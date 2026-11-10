@@ -20,6 +20,9 @@ extern fn cbFsCopy(src as str, dst as str) can error
 extern fn cbFsRename(src as str, dst as str) can error
 
 ' Streaming File operations
+extern fn cbFsStdin() as CbFile
+extern fn cbFsStdout() as CbFile
+extern fn cbFsStderr() as CbFile
 extern fn cbFsOpen(path as str) as CbFile can error
 extern fn cbFsOpenMode(path as str, mode as str) as CbFile can error
 extern fn cbFsReadLine(f as CbFile, byref outLine as str) as bool can error
@@ -93,6 +96,21 @@ end fn
 
 ' --- Public API: Streaming File operations (UFCS on File) ---
 
+'' Returns a streaming File handle for standard input (stdin).
+pub fn stdin() as File
+    return cbFsStdin()
+end fn
+
+'' Returns a streaming File handle for standard output (stdout).
+pub fn stdout() as File
+    return cbFsStdout()
+end fn
+
+'' Returns a streaming File handle for standard error (stderr).
+pub fn stderr() as File
+    return cbFsStderr()
+end fn
+
 '' Opens a file at path for reading ("r" mode) and returns a streaming File handle.
 pub fn open(path as str) as File can error
     return cbFsOpen(path)
@@ -139,12 +157,12 @@ pub fn close(byref f as File)
 end fn
 
 '' Reads up to count raw bytes from an open File handle.
-pub fn readBytes(byref f as File, count as int) as bytes can error
+pub fn readBytes(f as File, count as int) as bytes can error
     return cbFsReadFileBytes(f, count)
 end fn
 
 '' Writes a raw bytes buffer to an open File handle.
-pub fn writeBytes(byref f as File, data as bytes) can error
+pub fn writeBytes(f as File, data as bytes) can error
     cbFsWriteFileBytes(f, data)
 end fn
 

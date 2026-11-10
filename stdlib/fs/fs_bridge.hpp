@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -13,14 +14,31 @@
 #include <utility>
 #include <vector>
 
+constexpr int64_t cbFsClosedHandle = -1;
+constexpr int64_t cbFsStdinHandle = -2;
+constexpr int64_t cbFsStdoutHandle = -3;
+constexpr int64_t cbFsStderrHandle = -4;
+
 struct CbFile {
-    int64_t handle = -1;
+    int64_t handle = cbFsClosedHandle;
 };
 
 struct CbFileSlot {
     std::fstream stream;
     bool inUse = false;
 };
+
+inline CbFile cbFsStdin() {
+    return CbFile{cbFsStdinHandle};
+}
+
+inline CbFile cbFsStdout() {
+    return CbFile{cbFsStdoutHandle};
+}
+
+inline CbFile cbFsStderr() {
+    return CbFile{cbFsStderrHandle};
+}
 
 inline std::vector<CbFileSlot>& cbFsSlotTable() {
     static std::vector<CbFileSlot> table;
@@ -42,6 +60,54 @@ inline bool cbFsValidSlot(int64_t handle) {
         return false;
     }
     return tbl[idx].inUse;
+}
+
+inline CbError cbFsResolveInputStream(int64_t handle, std::istream*& outStream) {
+    if (handle == cbFsStdinHandle) {
+        outStream = &std::cin;
+        return CbError{"", 0};
+    }
+    if (handle == cbFsStdoutHandle || handle == cbFsStderrHandle) {
+        outStream = nullptr;
+        return CbError{"Cannot read from write-only standard output/error stream", 400};
+    }
+    if (!cbFsValidSlot(handle)) {
+        outStream = nullptr;
+        return CbError{"Invalid or closed file handle", 400};
+    }
+    auto& s = cbFsSlotTable()[static_cast<size_t>(handle)].stream;
+    if (!s.is_open()) {
+        outStream = nullptr;
+        return CbError{"File stream is not open", 400};
+    }
+    outStream = &s;
+    return CbError{"", 0};
+}
+
+inline CbError cbFsResolveOutputStream(int64_t handle, std::ostream*& outStream) {
+    if (handle == cbFsStdoutHandle) {
+        outStream = &std::cout;
+        return CbError{"", 0};
+    }
+    if (handle == cbFsStderrHandle) {
+        outStream = &std::cerr;
+        return CbError{"", 0};
+    }
+    if (handle == cbFsStdinHandle) {
+        outStream = nullptr;
+        return CbError{"Cannot write to read-only standard input stream", 400};
+    }
+    if (!cbFsValidSlot(handle)) {
+        outStream = nullptr;
+        return CbError{"Invalid or closed file handle", 400};
+    }
+    auto& s = cbFsSlotTable()[static_cast<size_t>(handle)].stream;
+    if (!s.is_open()) {
+        outStream = nullptr;
+        return CbError{"File stream is not open", 400};
+    }
+    outStream = &s;
+    return CbError{"", 0};
 }
 
 inline void cbFsStripCr(std::string& line) {
@@ -249,22 +315,19 @@ inline std::tuple<CbFile, CbError> cbFsOpen(const std::string& path) {
 }
 
 inline std::tuple<bool, CbError> cbFsReadLine(CbFile f, std::string& outLine) {
-    if (!cbFsValidSlot(f.handle)) {
+    std::istream* in = nullptr;
+    const CbError err = cbFsResolveInputStream(f.handle, in);
+    if (cbHasError(err)) {
         outLine.clear();
-        return {false, CbError{"Invalid or closed file handle", 400}};
-    }
-    auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.is_open()) {
-        outLine.clear();
-        return {false, CbError{"File stream is not open", 400}};
+        return {false, err};
     }
     std::string line;
-    if (std::getline(s, line)) {
+    if (std::getline(*in, line)) {
         cbFsStripCr(line);
         outLine = std::move(line);
         return {true, CbError{"", 0}};
     }
-    if (s.bad()) {
+    if (in->bad()) {
         outLine.clear();
         return {false, CbError{"I/O error while reading line from file", 500}};
     }
@@ -273,29 +336,25 @@ inline std::tuple<bool, CbError> cbFsReadLine(CbFile f, std::string& outLine) {
 }
 
 inline bool cbFsEof(CbFile f) {
-    if (!cbFsValidSlot(f.handle)) {
+    std::istream* in = nullptr;
+    const CbError err = cbFsResolveInputStream(f.handle, in);
+    if (cbHasError(err) || in == nullptr) {
         return true;
     }
-    auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.is_open()) {
+    if (in->eof()) {
         return true;
     }
-    if (s.eof()) {
-        return true;
-    }
-    return s.peek() == std::char_traits<char>::eof();
+    return in->peek() == std::char_traits<char>::eof();
 }
 
 inline CbError cbFsWriteStream(CbFile f, const std::string& text) {
-    if (!cbFsValidSlot(f.handle)) {
-        return CbError{"Invalid or closed file handle", 400};
+    std::ostream* out = nullptr;
+    const CbError err = cbFsResolveOutputStream(f.handle, out);
+    if (cbHasError(err)) {
+        return err;
     }
-    auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.is_open()) {
-        return CbError{"File stream is not open", 400};
-    }
-    s.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (s.fail() || s.bad()) {
+    out->write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (out->fail() || out->bad()) {
         return CbError{"Failed to write to file stream", 500};
     }
     return CbError{"", 0};
@@ -306,59 +365,59 @@ inline CbError cbFsWriteLine(CbFile f, const std::string& text) {
 }
 
 inline std::tuple<std::vector<uint8_t>, CbError> cbFsReadFileBytes(CbFile f, int64_t count) {
-    if (!cbFsValidSlot(f.handle)) {
-        return {std::vector<uint8_t>{}, CbError{"Invalid or closed file handle", 400}};
+    std::istream* in = nullptr;
+    const CbError err = cbFsResolveInputStream(f.handle, in);
+    if (cbHasError(err)) {
+        return {std::vector<uint8_t>{}, err};
     }
     if (count <= 0) {
         return {std::vector<uint8_t>{}, CbError{"", 0}};
     }
-    auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.is_open()) {
-        return {std::vector<uint8_t>{}, CbError{"File stream is not open", 400}};
-    }
     std::vector<uint8_t> buf(static_cast<size_t>(count));
-    s.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(count));
-    const std::streamsize bytesRead = s.gcount();
+    in->read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(count));
+    const std::streamsize bytesRead = in->gcount();
     buf.resize(static_cast<size_t>(bytesRead));
-    if (s.bad()) {
+    if (in->bad()) {
         return {std::vector<uint8_t>{}, CbError{"I/O error while reading bytes from stream", 500}};
     }
     return {buf, CbError{"", 0}};
 }
 
 inline CbError cbFsWriteFileBytes(CbFile f, const std::vector<uint8_t>& data) {
-    if (!cbFsValidSlot(f.handle)) {
-        return CbError{"Invalid or closed file handle", 400};
-    }
-    auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.is_open()) {
-        return CbError{"File stream is not open", 400};
+    std::ostream* out = nullptr;
+    const CbError err = cbFsResolveOutputStream(f.handle, out);
+    if (cbHasError(err)) {
+        return err;
     }
     if (!data.empty()) {
-        s.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        out->write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     }
-    if (s.fail() || s.bad()) {
+    if (out->fail() || out->bad()) {
         return CbError{"Failed to write binary data to file stream", 500};
     }
     return CbError{"", 0};
 }
 
 inline CbError cbFsFlush(CbFile f) {
-    if (!cbFsValidSlot(f.handle)) {
-        return CbError{"Invalid or closed file handle", 400};
+    if (f.handle == cbFsStdinHandle) {
+        return CbError{"", 0};
     }
-    auto& s = cbFsSlotTable()[static_cast<size_t>(f.handle)].stream;
-    if (!s.is_open()) {
-        return CbError{"File stream is not open", 400};
+    std::ostream* out = nullptr;
+    const CbError err = cbFsResolveOutputStream(f.handle, out);
+    if (cbHasError(err)) {
+        return err;
     }
-    s.flush();
-    if (s.fail() || s.bad()) {
+    out->flush();
+    if (out->fail() || out->bad()) {
         return CbError{"Failed to flush file stream", 500};
     }
     return CbError{"", 0};
 }
 
 inline bool cbFsIsOpen(CbFile f) {
+    if (f.handle == cbFsStdinHandle || f.handle == cbFsStdoutHandle || f.handle == cbFsStderrHandle) {
+        return true;
+    }
     if (!cbFsValidSlot(f.handle)) {
         return false;
     }
@@ -366,6 +425,20 @@ inline bool cbFsIsOpen(CbFile f) {
 }
 
 inline void cbFsClose(CbFile& f) {
+    if (f.handle == cbFsStdinHandle) {
+        f.handle = cbFsClosedHandle;
+        return;
+    }
+    if (f.handle == cbFsStdoutHandle) {
+        std::cout.flush();
+        f.handle = cbFsClosedHandle;
+        return;
+    }
+    if (f.handle == cbFsStderrHandle) {
+        std::cerr.flush();
+        f.handle = cbFsClosedHandle;
+        return;
+    }
     std::lock_guard<std::mutex> lock(cbFsSlotMutex());
     if (cbFsValidSlot(f.handle)) {
         auto& slot = cbFsSlotTable()[static_cast<size_t>(f.handle)];
@@ -375,7 +448,7 @@ inline void cbFsClose(CbFile& f) {
         slot.stream.clear();
         slot.inUse = false;
     }
-    f.handle = -1;
+    f.handle = cbFsClosedHandle;
 }
 
 inline bool cbFsExists(const std::string& path) {

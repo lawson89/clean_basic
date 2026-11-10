@@ -1,6 +1,9 @@
 ' EXPECT_CPP: #include "
 ' EXPECT_CPP: fs_bridge.hpp"
 ' EXPECT_CPP: cb_std_fs__write(
+' EXPECT_CPP: cb_std_fs__stdin(
+' EXPECT_CPP: cb_std_fs__stdout(
+' EXPECT_CPP: cb_std_fs__stderr(
 ' EXPECT_CPP: cb_std_fs__open(
 ' EXPECT_CPP: cb_std_fs__close(
 ' EXPECT_CPP: cb_std_fs__rename(
@@ -14,6 +17,8 @@
 ' EXPECT_OUT: Directory entries=3: nested, renamed.txt
 ' EXPECT_OUT: AbsPath leaf=stdlibFsSandbox, tempDirValid=true
 ' EXPECT_OUT: Caught missing file (code=404)
+' EXPECT_OUT: Stdout stream write: hello via fs.stdout
+' EXPECT_OUT: StdStreams: open=true/true/true, outEof=true, writeStdinErr=400, readStdoutErr=400, closedAfter=false/false/false, reopened=true
 ' EXPECT_OUT: Cleanup complete: removedAll=true, exists=false
 
 import "std/fs"
@@ -97,6 +102,57 @@ fn testMissingFile(baseDir as str)
     print(content)
 end fn
 
+fn tryWriteToStdin() as int
+    on error e
+        return e.code
+    end error
+    dim inStream = fs.stdin()
+    inStream.writeLine("cannot write to stdin")
+    return 0
+end fn
+
+fn tryReadFromStdout() as int
+    on error e
+        return e.code
+    end error
+    dim outStream = fs.stdout()
+    dim line = ""
+    outStream.readLine(line)
+    return 0
+end fn
+
+fn writeBannerToStream(out as fs.File, msg as str) can error
+    out.writeStr("Stdout stream write: ")
+    out.writeBytes(b"he")
+    out.writeLine(msg)
+    out.flush()
+end fn
+
+fn testStandardStreams() can error
+    dim inStream = fs.stdin()
+    dim outStream = fs.stdout()
+    dim errStream = fs.stderr()
+
+    dim initInOpen = inStream.isOpen()
+    dim initOutOpen = outStream.isOpen()
+    dim initErrOpen = errStream.isOpen()
+    dim outEof = outStream.eof() and errStream.eof()
+
+    inStream.flush()
+    writeBannerToStream(outStream, "llo via fs.stdout")
+    errStream.flush()
+
+    dim writeStdinErr = tryWriteToStdin()
+    dim readStdoutErr = tryReadFromStdout()
+
+    inStream.close()
+    outStream.close()
+    errStream.close()
+
+    dim freshOut = fs.stdout()
+    print("StdStreams: open=" & initInOpen & "/" & initOutOpen & "/" & initErrOpen & ", outEof=" & outEof & ", writeStdinErr=" & writeStdinErr & ", readStdoutErr=" & readStdoutErr & ", closedAfter=" & inStream.isOpen() & "/" & outStream.isOpen() & "/" & errStream.isOpen() & ", reopened=" & freshOut.isOpen())
+end fn
+
 fn main() as int
     on error e
         print("Unexpected error: " & e.msg)
@@ -123,6 +179,7 @@ fn main() as int
     print("AbsPath leaf=" & fs.fileName(absBase) & ", tempDirValid=" & (tmpDir.len() > 0 and fs.isDir(tmpDir)))
 
     testMissingFile(baseDir)
+    testStandardStreams()
 
     dim removedCount = fs.removeAll(baseDir)
     print("Cleanup complete: removedAll=" & (removedCount >= 3) & ", exists=" & fs.exists(baseDir))
