@@ -1,12 +1,29 @@
 ' CleanBasic Example: cbgrep
-'' Fast Unix grep utility written in pure CleanBasic
-'' Demonstrates std/cli, std/os, std/fs (walkFiles + streaming), and error handling.
+' Fast simple grep utility written in pure CleanBasic
+' Demonstrates std/cli, std/os, std/fs (walkFiles + streaming), and error handling.
 
 import "std/cli"
 import "std/os"
 import "std/fs"
 
-'' Searches for matches in a file or standard input.
+
+fn matchLine(line as str, pattern as str, ignoreCase as bool, invert as bool) as bool
+    dim matched = false
+    if ignoreCase
+        matched = line.asciiContainsIgnoreCase(pattern)
+    else
+        matched = line.contains(pattern)
+    end if
+
+    if invert
+        matched = not matched
+    end if
+
+    return matched
+end fn
+
+
+' Searches for matches in a file or standard input.
 fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, invert as bool, countOnly as bool) as int can error
     dim lineNum = 0
     dim matchCount = 0
@@ -15,24 +32,15 @@ fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, 
     if path == "-"
         while os.readLine(line)
             lineNum += 1
-            dim matched = false
-            if ignoreCase
-                matched = line.asciiContainsIgnoreCase(pattern)
-            else
-                matched = line.contains(pattern)
-            end if
-
-            if invert
-                matched = not matched
-            end if
+            dim matched = matchLine(line, pattern, ignoreCase, invert)
 
             if matched
                 matchCount += 1
                 if not countOnly
                     if lineNumbers
-                        print("(stdin):" & lineNum.toStr() & ":" & line)
+                        print($"(stdin):{lineNum.toStr()}:{line}")
                     else
-                        print("(stdin):" & line)
+                        print($"(stdin):{line}")
                     end if
                 end if
             end if
@@ -44,24 +52,15 @@ fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, 
         end defer
         while f.readLine(line)
             lineNum += 1
-            dim matched = false
-            if ignoreCase
-                matched = line.asciiContainsIgnoreCase(pattern)
-            else
-                matched = line.contains(pattern)
-            end if
-
-            if invert
-                matched = not matched
-            end if
+            dim matched = matchLine(line, pattern, ignoreCase, invert)
 
             if matched
                 matchCount += 1
                 if not countOnly
                     if lineNumbers
-                        print(path & ":" & lineNum.toStr() & ":" & line)
+                        print($"{path}:{lineNum.toStr()}:{line}")
                     else
-                        print(path & ":" & line)
+                        print($"{path}:{line}")
                     end if
                 end if
             end if
@@ -70,7 +69,7 @@ fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, 
 
     if countOnly
         if path != "-"
-            print(path & ":" & matchCount.toStr())
+            print($"{path}:{matchCount.toStr()}")
         else
             print(matchCount.toStr())
         end if

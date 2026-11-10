@@ -615,6 +615,41 @@ public:
         validateExprCalls(dummyFn, defaultExprId, emptyScope, false);
     }
 
+    void validateDeclDefaults(DeclId did, const DeclNode& declNode) {
+        std::unordered_map<std::string, VarSymbol> emptyScope;
+        if (const auto* cdecl = arena.getDecl<ConstDecl>(did)) {
+            const std::string key = symbolKey(declNode.moduleId, cdecl->name);
+            const TypeId valTid = inferExprType(arena, cdecl->value, symbols, emptyScope, moduleId);
+            TypeId targetTid = valTid;
+            if (symbols.constants.count(key) > 0) {
+                targetTid = symbols.constants.at(key).typeId;
+            }
+            validateEnumAssignment(declNode.line, declNode.col, cdecl->name, targetTid, valTid);
+            FnDecl dummyFn{};
+            dummyFn.name = cdecl->name;
+            dummyFn.isFallible = false;
+            validateExprCalls(dummyFn, cdecl->value, emptyScope, false);
+        } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
+            FnDecl dummyFn{};
+            dummyFn.name = tdecl->name;
+            dummyFn.isFallible = false;
+            for (const auto& fld : tdecl->fields) {
+                if (fld.hasDefault && fld.defaultValue != INVALID_ID) {
+                    validateDefaultValueExpr(dummyFn, fld.line, fld.col, fld.name, fld.typeId, fld.defaultValue, emptyScope);
+                }
+            }
+        } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
+            FnDecl dummyFn{};
+            dummyFn.name = fdecl->name;
+            dummyFn.isFallible = false;
+            for (const auto& p : fdecl->params) {
+                if (p.hasDefault && p.defaultValue != INVALID_ID) {
+                    validateDefaultValueExpr(dummyFn, p.line, p.col, p.name, p.typeId, p.defaultValue, emptyScope);
+                }
+            }
+        }
+    }
+
     void analyzeStmt(
         const FnDecl& fn,
         StmtId stmtId,
@@ -1249,39 +1284,8 @@ public:
             const auto& declNode = arena.decls[did];
             fileName = declNode.fileName;
             moduleId = declNode.moduleId;
-            if (const auto* cdecl = arena.getDecl<ConstDecl>(did)) {
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                const std::string key = symbolKey(declNode.moduleId, cdecl->name);
-                const TypeId valTid = inferExprType(arena, cdecl->value, symbols, emptyScope, moduleId);
-                TypeId targetTid = valTid;
-                if (symbols.constants.count(key) > 0) {
-                    targetTid = symbols.constants.at(key).typeId;
-                }
-                validateEnumAssignment(declNode.line, declNode.col, cdecl->name, targetTid, valTid);
-                FnDecl dummyFn{};
-                dummyFn.name = cdecl->name;
-                dummyFn.isFallible = false;
-                validateExprCalls(dummyFn, cdecl->value, emptyScope, false);
-            } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                FnDecl dummyFn{};
-                dummyFn.name = tdecl->name;
-                dummyFn.isFallible = false;
-                for (const auto& fld : tdecl->fields) {
-                    if (fld.hasDefault && fld.defaultValue != INVALID_ID) {
-                        validateDefaultValueExpr(dummyFn, fld.line, fld.col, fld.name, fld.typeId, fld.defaultValue, emptyScope);
-                    }
-                }
-            } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                FnDecl dummyFn{};
-                dummyFn.name = fdecl->name;
-                dummyFn.isFallible = false;
-                for (const auto& p : fdecl->params) {
-                    if (p.hasDefault && p.defaultValue != INVALID_ID) {
-                        validateDefaultValueExpr(dummyFn, p.line, p.col, p.name, p.typeId, p.defaultValue, emptyScope);
-                    }
-                }
+            validateDeclDefaults(did, declNode);
+            if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 if (!fdecl->isExtern) {
                     analyzeFn(*fdecl);
                 }

@@ -76,6 +76,14 @@ inline DefinitionTarget makeDefTarget(std::string_view fileName, uint32_t line, 
     return DefinitionTarget{std::string(fileName), line, col, len};
 }
 
+template <typename Sym>
+inline void bindSymbolTarget(ResolvedCursorSymbol& res, const Sym& sym, std::string hoverMarkdown) {
+    res.hoverMarkdown = std::move(hoverMarkdown);
+    if (!sym.fileName.empty()) {
+        res.definition = makeDefTarget(sym.fileName, sym.line, sym.col, sym.name.size());
+    }
+}
+
 struct CursorTokenContext {
     bool found = false;
     Token token;
@@ -137,30 +145,12 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         const auto scopeIt = snap.symbols.fnScopes.find(fnKeyOpt.value());
         if (scopeIt != snap.symbols.fnScopes.end()) activeScope = scopeIt->second;
     }
-    const auto bindFn = [&](const FnSymbol& fn) {
-        res.hoverMarkdown = formatFnHoverMarkdown(snap.arena, fn);
-        if (!fn.fileName.empty()) res.definition = makeDefTarget(fn.fileName, fn.line, fn.col, fn.name.size());
-    };
-    const auto bindType = [&](const TypeSymbol& ts) {
-        res.hoverMarkdown = formatTypeHoverMarkdown(snap.arena, ts);
-        if (!ts.fileName.empty()) res.definition = makeDefTarget(ts.fileName, ts.line, ts.col, ts.name.size());
-    };
-    const auto bindAlias = [&](const AliasSymbol& al) {
-        res.hoverMarkdown = formatAliasHoverMarkdown(snap.arena, snap.symbols, al);
-        if (!al.fileName.empty()) res.definition = makeDefTarget(al.fileName, al.line, al.col, al.name.size());
-    };
-    const auto bindEnum = [&](const EnumSymbol& es) {
-        res.hoverMarkdown = formatEnumHoverMarkdown(es);
-        if (!es.fileName.empty()) res.definition = makeDefTarget(es.fileName, es.line, es.col, es.name.size());
-    };
-    const auto bindUnion = [&](const UnionSymbol& us) {
-        res.hoverMarkdown = formatUnionHoverMarkdown(snap.arena, us);
-        if (!us.fileName.empty()) res.definition = makeDefTarget(us.fileName, us.line, us.col, us.name.size());
-    };
-    const auto bindConst = [&](const ConstSymbol& cs) {
-        res.hoverMarkdown = formatConstHoverMarkdown(snap.arena, cs);
-        if (!cs.fileName.empty()) res.definition = makeDefTarget(cs.fileName, cs.line, cs.col, cs.name.size());
-    };
+    const auto bindFn = [&](const FnSymbol& fn) { bindSymbolTarget(res, fn, formatFnHoverMarkdown(snap.arena, fn)); };
+    const auto bindType = [&](const TypeSymbol& ts) { bindSymbolTarget(res, ts, formatTypeHoverMarkdown(snap.arena, ts)); };
+    const auto bindAlias = [&](const AliasSymbol& al) { bindSymbolTarget(res, al, formatAliasHoverMarkdown(snap.arena, snap.symbols, al)); };
+    const auto bindEnum = [&](const EnumSymbol& es) { bindSymbolTarget(res, es, formatEnumHoverMarkdown(es)); };
+    const auto bindUnion = [&](const UnionSymbol& us) { bindSymbolTarget(res, us, formatUnionHoverMarkdown(snap.arena, us)); };
+    const auto bindConst = [&](const ConstSymbol& cs) { bindSymbolTarget(res, cs, formatConstHoverMarkdown(snap.arena, cs)); };
     if (cursorCtx.hasDotReceiver) {
         const std::string& recv = cursorCtx.receiverName;
         const std::string& member = tok.value;
@@ -255,8 +245,7 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
     }
     const auto localIt = activeScope.find(tok.value);
     if (localIt != activeScope.end()) {
-        res.hoverMarkdown = formatVarHoverMarkdown(snap.arena, localIt->second);
-        if (!localIt->second.fileName.empty()) res.definition = makeDefTarget(localIt->second.fileName, localIt->second.line, localIt->second.col, localIt->second.name.size());
+        bindSymbolTarget(res, localIt->second, formatVarHoverMarkdown(snap.arena, localIt->second));
         return res;
     }
     const std::string symKey = resolveSymbolKey(snap.symbols, currentModId, tok.value);

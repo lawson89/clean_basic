@@ -290,20 +290,25 @@ inline std::string appendDocCommentMarkdown(std::string md, std::string_view doc
     return md;
 }
 
+inline std::string buildHoverHeader(std::string_view keyword, std::string_view name, bool isPub, bool isExtern = false) {
+    std::string header;
+    if (isPub) header += "pub ";
+    if (isExtern) header += "extern ";
+    header.append(keyword);
+    header += " ";
+    header.append(name);
+    return header;
+}
+
 inline std::string formatFnHoverMarkdown(const AstArena& arena, const FnSymbol& fn) {
-    std::string sig;
-    if (fn.isPub) sig += "pub ";
-    if (fn.isExtern) sig += "extern ";
-    sig += "fn " + fn.name + formatFnDetailSignature(arena, fn.params, fn.returnType, fn.isFallible);
+    std::string sig = buildHoverHeader("fn", fn.name, fn.isPub, fn.isExtern);
+    sig += formatFnDetailSignature(arena, fn.params, fn.returnType, fn.isFallible);
     return appendDocCommentMarkdown(wrapVbCodeBlock(sig), fn.docComment);
 }
 
 inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts) {
     const std::string nl(1, static_cast<char>(10));
-    std::string code;
-    if (ts.isPub) code += "pub ";
-    if (ts.isExtern) code += "extern ";
-    code += "type " + ts.name;
+    std::string code = buildHoverHeader("type", ts.name, ts.isPub, ts.isExtern);
     if (ts.isExtern && ts.fieldOrder.empty()) return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);
     code += nl;
     for (const auto& f : ts.fieldOrder) {
@@ -318,11 +323,7 @@ inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymb
 
 inline std::string formatEnumHoverMarkdown(const EnumSymbol& es) {
     const std::string nl(1, static_cast<char>(10));
-    std::string code;
-    if (es.isPub) {
-        code += "pub ";
-    }
-    code += "enum " + es.name + nl;
+    std::string code = buildHoverHeader("enum", es.name, es.isPub) + nl;
     for (const auto& m : es.members) {
         code += "    " + m.name;
         const auto vit = es.memberValues.find(m.name);
@@ -337,11 +338,7 @@ inline std::string formatEnumHoverMarkdown(const EnumSymbol& es) {
 
 inline std::string formatUnionHoverMarkdown(const AstArena& arena, const UnionSymbol& us) {
     const std::string nl(1, static_cast<char>(10));
-    std::string code;
-    if (us.isPub) {
-        code += "pub ";
-    }
-    code += "union " + us.name + nl;
+    std::string code = buildHoverHeader("union", us.name, us.isPub) + nl;
     for (const auto& uv : us.variants) {
         TypeId vtid = uv.type;
         const auto vit = us.variantTypes.find(uv.name);
@@ -356,12 +353,10 @@ inline std::string formatUnionHoverMarkdown(const AstArena& arena, const UnionSy
 
 inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalSymbolTable& symbols, const AliasSymbol& al) {
     const std::string nl(1, static_cast<char>(10));
-    std::string code;
-    if (al.isPub) code += "pub ";
     const std::string rawTarget = formatCleanbasicType(arena, al.targetType);
     const TypeId resolvedTid = resolveAlias(arena, symbols, al.moduleId, al.targetType);
     const std::string resolvedTarget = formatCleanbasicType(arena, resolvedTid);
-    code += "alias " + al.name + " = " + rawTarget;
+    std::string code = buildHoverHeader("alias", al.name, al.isPub) + " = " + rawTarget;
     std::string md = wrapVbCodeBlock(code);
     if (resolvedTarget != rawTarget) {
         md += nl + "Resolved type: " + wrapInlineCode(resolvedTarget);
@@ -370,9 +365,7 @@ inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalS
 }
 
 inline std::string formatConstHoverMarkdown(const AstArena& arena, const ConstSymbol& cs) {
-    std::string code;
-    if (cs.isPub) code += "pub ";
-    code += "const " + cs.name + " as " + formatCleanbasicType(arena, cs.typeId);
+    std::string code = buildHoverHeader("const", cs.name, cs.isPub) + " as " + formatCleanbasicType(arena, cs.typeId);
     return appendDocCommentMarkdown(wrapVbCodeBlock(code), cs.docComment);
 }
 
