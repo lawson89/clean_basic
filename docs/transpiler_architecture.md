@@ -231,7 +231,7 @@ The `cleanbasic` command-line executable (`cli_main.cpp`) parses arguments into 
 
 ### Usage Synopsis
 ```bash
-cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler]
+cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [-r|--release] [--opt level] [--time]
 cleanbasic <file.cb> [-o output.cpp] [-c]
 cleanbasic lsp
 ```
@@ -246,6 +246,10 @@ cleanbasic lsp
 | `-b, --bin <file>` | Output binary executable path (implies `-c`; appends `.exe` on Windows targets). | `<inputParentDir>/app` (or `app.exe`). |
 | `-t, --target <target>` | Target platform (`native`, `linux`, `linux-arm64`, `windows`, `windows-arm64`, `macos`, `macos-arm64`). Implies `-c` and uses `zig c++ -target <triple>` when cross-compiling. | `native` |
 | `--cc <compiler>` | Explicit C++17 compiler override (e.g. `g++`, `clang++`, `zig c++`). | `zig c++` (cross) or `$CXX` / `g++` / `clang++` (native). |
+| `-r, --release` | Compiles the generated C++ with full optimizations (`-O3`). | Off (defaults to debug mode `-O0`). |
+| `--debug` | Explicitly compiles in debug mode (`-O0`). | On (`-O0`). |
+| `--opt, -O <0\|1\|2\|3\|s\|z>` | Sets the C++ optimization level explicitly. | `0` (`-O0`). |
+| `--time` | Prints a detailed stopwatch timing breakdown of transpilation and C++ compilation stages. | Off |
 | `-h, --help` | Prints CLI usage instructions and exits with code `0`. | Off |
 
 ### Portable SDK Root Discovery & Compilation Command (`cb::buildFile`)
@@ -254,10 +258,10 @@ CleanBasic supports zero-configuration portable SDK zip distributions (`cleanbas
 2. Relative to the running `cleanbasic` executable (`<exeDir>`, `<exeDir>/..`, or `<exeDir>/../..` containing `stdlib/` and `vendor/`).
 3. Compile-time `CLEANBASIC_ROOT_DIR` or current working directory (`.`) fallback.
 
-When binary compilation (`-c`, `-b`, or `-t`) is enabled, `cb::buildFile()` collects all deduplicated `import link "<lib>"` declarations from `GlobalSymbolTable::linkLibs`, transforms each into `-l<lib>`, and runs:
+When binary compilation (`-c`, `-b`, or `-t`) is enabled, `cb::buildFile()` collects all deduplicated `import link "<lib>"` declarations from `GlobalSymbolTable::linkLibs`, transforms each into `-l<lib>`, and runs (defaulting to `-O0` debug mode, or `-O3` with `--release`):
 
 ```bash
-<compiler> -O3 -std=c++17 -pthread -I"<sdkRoot>/vendor" -I"<sdkRoot>/stdlib" -I"<inputDir>" "<outCpp>" -o "<binPath>" [-l<lib1> -l<lib2> ...]
+<compiler> -O<optLevel> -std=c++17 -pthread -I"<sdkRoot>/vendor" -I"<sdkRoot>/stdlib" -I"<inputDir>" "<outCpp>" -o "<binPath>" [-l<lib1> -l<lib2> ...]
 ```
 * On success, the CLI prints:
   ```text

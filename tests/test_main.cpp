@@ -2440,11 +2440,22 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "projects/demo/app.exe",
             {"-lm"}
         );
-        CHECK(cmd.find("zig c++ -target x86_64-windows-gnu -O3 -std=c++17 -pthread") != std::string::npos);
+        CHECK(cmd.find("zig c++ -target x86_64-windows-gnu -O0 -std=c++17 -pthread") != std::string::npos);
         CHECK(cmd.find(R"(-I"/opt/cleanbasic-sdk/vendor")") != std::string::npos);
         CHECK(cmd.find(R"(-I"/opt/cleanbasic-sdk/stdlib")") != std::string::npos);
         CHECK(cmd.find(R"(-I"projects/demo")") != std::string::npos);
         CHECK(cmd.find(R"("projects/demo/build.cpp" -o "projects/demo/app.exe" -lm)") != std::string::npos);
+
+        const std::string releaseCmd = cb::buildCompileCommand(
+            crossCc,
+            "/opt/cleanbasic-sdk",
+            "projects/demo",
+            "projects/demo/build.cpp",
+            "projects/demo/app.exe",
+            {"-lm"},
+            "3"
+        );
+        CHECK(releaseCmd.find("zig c++ -target x86_64-windows-gnu -O3 -std=c++17 -pthread") != std::string::npos);
     }
 
     SECTION("parseCliArgs parses --target, --bin, and --cc and buildFile compiles with custom options") {
@@ -2463,6 +2474,48 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
 
         const cb::CliArgs badArgs = cb::parseCliArgs({"build", "main.cb", "--target"});
         CHECK_FALSE(badArgs.ok);
+
+        const cb::CliArgs defaultOptArgs = cb::parseCliArgs({"main.cb", "-c"});
+        CHECK(defaultOptArgs.ok);
+        CHECK(defaultOptArgs.optLevel == "0");
+        CHECK_FALSE(defaultOptArgs.isRelease);
+        CHECK_FALSE(defaultOptArgs.showTimings);
+
+        const cb::CliArgs releaseLongArgs = cb::parseCliArgs({"main.cb", "-c", "--release"});
+        CHECK(releaseLongArgs.ok);
+        CHECK(releaseLongArgs.optLevel == "3");
+        CHECK(releaseLongArgs.isRelease);
+
+        const cb::CliArgs releaseShortArgs = cb::parseCliArgs({"main.cb", "-c", "-r"});
+        CHECK(releaseShortArgs.ok);
+        CHECK(releaseShortArgs.optLevel == "3");
+        CHECK(releaseShortArgs.isRelease);
+
+        const cb::CliArgs debugExplicitArgs = cb::parseCliArgs({"main.cb", "-c", "--release", "--debug"});
+        CHECK(debugExplicitArgs.ok);
+        CHECK(debugExplicitArgs.optLevel == "0");
+        CHECK_FALSE(debugExplicitArgs.isRelease);
+
+        const cb::CliArgs opt2Args = cb::parseCliArgs({"main.cb", "-c", "--opt", "2"});
+        CHECK(opt2Args.ok);
+        CHECK(opt2Args.optLevel == "2");
+        CHECK_FALSE(opt2Args.isRelease);
+
+        const cb::CliArgs optShortInlineArgs = cb::parseCliArgs({"main.cb", "-c", "-O1"});
+        CHECK(optShortInlineArgs.ok);
+        CHECK(optShortInlineArgs.optLevel == "1");
+
+        const cb::CliArgs optShortSepArgs = cb::parseCliArgs({"main.cb", "-c", "-O", "1"});
+        CHECK(optShortSepArgs.ok);
+        CHECK(optShortSepArgs.optLevel == "1");
+
+        const cb::CliArgs timeArgs = cb::parseCliArgs({"main.cb", "-c", "--time"});
+        CHECK(timeArgs.ok);
+        CHECK(timeArgs.showTimings);
+
+        const cb::CliArgs badOptArgs = cb::parseCliArgs({"main.cb", "-c", "--opt", "9"});
+        CHECK_FALSE(badOptArgs.ok);
+        CHECK(badOptArgs.errorMessage.find("Invalid optimization level") != std::string::npos);
 
         // Verify buildFile rejects unknown target with TargetError
         const cb::BuildFileResult badTargetRes = cb::buildFile(
@@ -2489,9 +2542,28 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         INFO("Build diagnostic: " << cb::formatDiagnostic(okRes.error));
         REQUIRE(okRes.ok);
         CHECK(okRes.outputBinaryPath == outBin);
+        CHECK(okRes.compileCommand.find(" -O0 ") != std::string::npos);
         CHECK(okRes.compileCommand.find(R"(-I")") != std::string::npos);
+        CHECK(okRes.timings.transpileTotalMs > 0.0);
+        CHECK(okRes.timings.cppCompileMs > 0.0);
+        CHECK(okRes.timings.totalMs >= okRes.timings.transpileTotalMs);
         std::error_code ec;
         CHECK(std::filesystem::exists(outBin, ec));
+
+        // Verify runCli with --release and --time outputs timing breakdown and compiles with -O3
+        std::ostringstream capturedCout;
+        std::streambuf* origCout = std::cout.rdbuf(capturedCout.rdbuf());
+        const int cliRc = cb::runCli(
+            "cleanbasic",
+            {"build", "tests/cases/fibonacci.cb", "-o", outCpp, "-b", outBin, "--cc", "g++", "--release", "--time"}
+        );
+        std::cout.rdbuf(origCout);
+        CHECK(cliRc == 0);
+        const std::string cliOut = capturedCout.str();
+        CHECK(cliOut.find("Build Timing Breakdown:") != std::string::npos);
+        CHECK(cliOut.find("Total Transpilation:") != std::string::npos);
+        CHECK(cliOut.find("C++ Compile & Link:") != std::string::npos);
+        CHECK(cliOut.find("Total Build Time:") != std::string::npos);
     }
 }
 

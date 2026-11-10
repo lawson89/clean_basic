@@ -7,6 +7,7 @@
 #include "src/cleanbasic/lexer.hpp"
 #include "src/cleanbasic/parser.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -19,12 +20,30 @@
 
 namespace cb {
 
+struct BuildTimings {
+    double lexParseMs = 0.0;
+    double moduleLoadMs = 0.0;
+    double analyzeMs = 0.0;
+    double emitMs = 0.0;
+    double transpileTotalMs = 0.0;
+    double cppCompileMs = 0.0;
+    double totalMs = 0.0;
+};
+
+inline double elapsedMillis(
+    std::chrono::steady_clock::time_point start,
+    std::chrono::steady_clock::time_point end
+) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
 struct CheckSourceResult {
     bool ok = false;
     AstArena arena;
     Program program;
     GlobalSymbolTable symbols;
     DiagnosticError error;
+    BuildTimings timings{};
 };
 
 struct TranspileResult {
@@ -32,6 +51,7 @@ struct TranspileResult {
     std::string cppCode;
     GlobalSymbolTable symbols;
     DiagnosticError error;
+    BuildTimings timings{};
 };
 
 struct TargetSpec {
@@ -50,6 +70,8 @@ struct BuildOptions {
     std::string binaryOutput;
     std::string target;
     std::string compiler;
+    std::string optLevel = "0";
+    bool isRelease = false;
 };
 
 struct BuildFileResult {
@@ -59,6 +81,7 @@ struct BuildFileResult {
     std::string compileCommand;
     std::vector<std::string> linkerFlags;
     DiagnosticError error;
+    BuildTimings timings{};
 };
 
 inline bool hostIsWindows() {
@@ -216,11 +239,16 @@ inline std::string buildCompileCommand(
     std::string_view inputParentDir,
     std::string_view outCppPath,
     std::string_view binPath,
-    const std::vector<std::string>& linkerFlags
+    const std::vector<std::string>& linkerFlags,
+    std::string_view optLevel = "0"
 ) {
+    std::string resolvedOpt = "0";
+    if (!optLevel.empty()) {
+        resolvedOpt = std::string(optLevel);
+    }
     const std::string q(1, '"');
     std::string cmd = std::string(compilerCmd) +
-        " -O3 -std=c++17 -pthread" +
+        " -O" + resolvedOpt + " -std=c++17 -pthread" +
         " -I" + q + std::string(cbRoot) + "/vendor" + q +
         " -I" + q + std::string(cbRoot) + "/stdlib" + q +
         " -I" + q + std::string(inputParentDir) + q +
@@ -476,16 +504,29 @@ inline CheckSourceResult checkSource(
     std::string_view fileName = "main.cb",
     const std::unordered_map<std::string, std::string>& openBuffers = {}
 ) {
+    BuildTimings timings{};
+    const auto t0 = std::chrono::steady_clock::now();
+
     const auto lexRes = tokenize(source, fileName);
     if (!lexRes.ok) {
-        return CheckSourceResult{false, {}, {}, {}, lexRes.error};
+        const auto t1 = std::chrono::steady_clock::now();
+        timings.lexParseMs = elapsedMillis(t0, t1);
+        timings.transpileTotalMs = timings.lexParseMs;
+        timings.totalMs = timings.lexParseMs;
+        return CheckSourceResult{false, {}, {}, {}, lexRes.error, timings};
     }
 
     auto parseRes = parseTokens(lexRes.tokens, fileName);
     if (!parseRes.ok) {
-        return CheckSourceResult{false, {}, {}, {}, parseRes.error};
+        const auto t1 = std::chrono::steady_clock::now();
+        timings.lexParseMs = elapsedMillis(t0, t1);
+        timings.transpileTotalMs = timings.lexParseMs;
+        timings.totalMs = timings.lexParseMs;
+        return CheckSourceResult{false, {}, {}, {}, parseRes.error, timings};
     }
     attachDocCommentsToDecls(parseRes.arena, parseRes.program.declarations, source);
+    const auto tLexParseEnd = std::chrono::steady_clock::now();
+    timings.lexParseMs = elapsedMillis(t0, tLexParseEnd);
 
     ModuleLoaderState loader{};
     loader.rootBaseDir = parentDirOf(fileName);
@@ -497,7 +538,11 @@ inline CheckSourceResult checkSource(
 
     preloadStdStrPrelude(parseRes.arena, fileName, loader);
     if (loader.hasError) {
-        return CheckSourceResult{false, {}, {}, {}, loader.error};
+        const auto tModEnd = std::chrono::steady_clock::now();
+        timings.moduleLoadMs = elapsedMillis(tLexParseEnd, tModEnd);
+        timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs;
+        timings.totalMs = timings.transpileTotalMs;
+        return CheckSourceResult{false, {}, {}, {}, loader.error, timings};
     }
 
     loadModuleDeclarationsRecursive(
@@ -507,14 +552,22 @@ inline CheckSourceResult checkSource(
         fileName,
         loader
     );
+    const auto tModEnd = std::chrono::steady_clock::now();
+    timings.moduleLoadMs = elapsedMillis(tLexParseEnd, tModEnd);
     if (loader.hasError) {
-        return CheckSourceResult{false, {}, {}, {}, loader.error};
+        timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs;
+        timings.totalMs = timings.transpileTotalMs;
+        return CheckSourceResult{false, {}, {}, {}, loader.error, timings};
     }
     parseRes.program.declarations = std::move(loader.mergedDecls);
 
     auto anaRes = analyzeProgram(parseRes.arena, parseRes.program);
+    const auto tAnalyzeEnd = std::chrono::steady_clock::now();
+    timings.analyzeMs = elapsedMillis(tModEnd, tAnalyzeEnd);
+    timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs + timings.analyzeMs;
+    timings.totalMs = timings.transpileTotalMs;
     if (!anaRes.ok) {
-        return CheckSourceResult{false, {}, {}, {}, anaRes.error};
+        return CheckSourceResult{false, {}, {}, {}, anaRes.error, timings};
     }
 
     return CheckSourceResult{
@@ -522,7 +575,8 @@ inline CheckSourceResult checkSource(
         std::move(parseRes.arena),
         std::move(parseRes.program),
         std::move(anaRes.symbols),
-        {}
+        {},
+        timings
     };
 }
 
@@ -533,11 +587,18 @@ inline TranspileResult transpileSource(
 ) {
     auto checkRes = checkSource(source, fileName, openBuffers);
     if (!checkRes.ok) {
-        return TranspileResult{false, "", {}, checkRes.error};
+        return TranspileResult{false, "", {}, checkRes.error, checkRes.timings};
     }
 
+    const auto tEmitStart = std::chrono::steady_clock::now();
     std::string cppCode = emitProgram(checkRes.arena, checkRes.symbols, checkRes.program);
-    return TranspileResult{true, std::move(cppCode), std::move(checkRes.symbols), {}};
+    const auto tEmitEnd = std::chrono::steady_clock::now();
+
+    BuildTimings timings = checkRes.timings;
+    timings.emitMs = elapsedMillis(tEmitStart, tEmitEnd);
+    timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs + timings.analyzeMs + timings.emitMs;
+    timings.totalMs = timings.transpileTotalMs;
+    return TranspileResult{true, std::move(cppCode), std::move(checkRes.symbols), {}, timings};
 }
 
 inline BuildFileResult buildFileWithOptions(
@@ -572,8 +633,11 @@ inline BuildFileResult buildFileWithOptions(
         BuildFileResult res{};
         res.ok = false;
         res.error = transRes.error;
+        res.timings = transRes.timings;
         return res;
     }
+
+    BuildTimings timings = transRes.timings;
 
     std::string outCpp = parentDir + "/build.cpp";
     if (!options.outputCppPath.empty()) {
@@ -584,6 +648,7 @@ inline BuildFileResult buildFileWithOptions(
         BuildFileResult res{};
         res.ok = false;
         res.error = makeError("IOError", "Failed to open output file: " + outCpp, outCpp, 1, 1);
+        res.timings = timings;
         return res;
     }
     outFile << transRes.cppCode;
@@ -593,6 +658,15 @@ inline BuildFileResult buildFileWithOptions(
     linkerFlags.reserve(transRes.symbols.linkLibs.size());
     for (const auto& lib : transRes.symbols.linkLibs) {
         linkerFlags.push_back("-l" + lib);
+    }
+
+    std::string optLevel = options.optLevel;
+    if (optLevel.empty()) {
+        if (options.isRelease) {
+            optLevel = "3";
+        } else {
+            optLevel = "0";
+        }
     }
 
     std::string binPath;
@@ -607,9 +681,14 @@ inline BuildFileResult buildFileWithOptions(
             parentDir,
             outCpp,
             binPath,
-            linkerFlags
+            linkerFlags,
+            optLevel
         );
+        const auto tCompileStart = std::chrono::steady_clock::now();
         const int ret = std::system(compileCmd.c_str());
+        const auto tCompileEnd = std::chrono::steady_clock::now();
+        timings.cppCompileMs = elapsedMillis(tCompileStart, tCompileEnd);
+        timings.totalMs = timings.transpileTotalMs + timings.cppCompileMs;
         if (ret != 0) {
             BuildFileResult res{};
             res.ok = false;
@@ -617,6 +696,7 @@ inline BuildFileResult buildFileWithOptions(
             res.outputBinaryPath = binPath;
             res.compileCommand = compileCmd;
             res.linkerFlags = linkerFlags;
+            res.timings = timings;
             res.error = makeError(
                 "CompilationError",
                 "C++ compilation failed with code " + std::to_string(ret) + " (command: " + compilerCmd + ")",
@@ -634,6 +714,7 @@ inline BuildFileResult buildFileWithOptions(
     res.outputBinaryPath = binPath;
     res.compileCommand = compileCmd;
     res.linkerFlags = std::move(linkerFlags);
+    res.timings = timings;
     return res;
 }
 
@@ -643,7 +724,9 @@ inline BuildFileResult buildFile(
     bool compileBinary = false,
     const std::string& binaryOutput = "",
     const std::string& target = "",
-    const std::string& compiler = ""
+    const std::string& compiler = "",
+    const std::string& optLevel = "0",
+    bool isRelease = false
 ) {
     BuildOptions opts{};
     opts.outputCppPath = outputPath;
@@ -651,6 +734,8 @@ inline BuildFileResult buildFile(
     opts.binaryOutput = binaryOutput;
     opts.target = target;
     opts.compiler = compiler;
+    opts.optLevel = optLevel;
+    opts.isRelease = isRelease;
     return buildFileWithOptions(inputPath, opts);
 }
 

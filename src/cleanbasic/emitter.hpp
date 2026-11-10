@@ -94,6 +94,7 @@ public:
     int indentLevel = 0;
     uint32_t tempCounter = 0;
     uint32_t deferCounter = 0;
+    uint32_t deferDepth = 0;
     std::optional<ErrorBlock> activeErrorBlock = std::nullopt;
     std::string currentModuleId = "";
     std::string currentFileName = "main.cb";
@@ -813,6 +814,9 @@ public:
     const FnDecl& fn,
     std::string_view errVar
 ) {
+    if (deferDepth > 0) {
+        return "return;";
+    }
     if (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType)) {
         return "return " + std::string(errVar) + ";";
     }
@@ -1044,6 +1048,10 @@ public:
     std::unordered_map<std::string, VarSymbol>& scope,
     std::unordered_set<std::string>& declaredVars
 ) {
+    if (deferDepth > 0) {
+        emitLine("return;");
+        return;
+    }
     if (!stmt.hasValue) {
         if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
             emitLine(R"(return CbError{"", 0};)");
@@ -1514,11 +1522,13 @@ public:
         const std::string deferVar = "_defer_" + std::to_string(deferCounter);
         emitLine("auto " + deferVar + " = cbDefer([&]() {");
         indentLevel += 1;
+        deferDepth += 1;
         auto defDecls = declaredVars;
         const std::optional<ErrorBlock> prevEb = activeErrorBlock;
         activeErrorBlock = std::nullopt;
         emitStmtList(fn, defS->body, scope, defDecls);
         activeErrorBlock = prevEb;
+        deferDepth -= 1;
         indentLevel -= 1;
         emitLine("});");
         return;
