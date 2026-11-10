@@ -71,33 +71,36 @@ end fn
 
 fn testUnknownFlagError() can error
     dim p = buildSampleParser()
-    on error e
+    try
+        p.parseArgs(["-z", "needle"])
+        assert(false, "Expected unknown option error")
+    catch e
         assert(e.msg.contains("Unknown option '-z'"))
         return
-    end error
-    p.parseArgs(["-z", "needle"])
-    assert(false, "Expected unknown option error")
+    end try
 end fn
 
 fn testMissingPositionalError() can error
     dim p = buildSampleParser()
-    on error e
+    try
+        p.parseArgs(["-i"])
+        assert(false, "Expected missing argument error")
+    catch e
         assert(e.msg.contains("Missing required argument '<pattern>'"))
         return
-    end error
-    p.parseArgs(["-i"])
-    assert(false, "Expected missing argument error")
+    end try
 end fn
 
 fn testMissingRequiredOptionError() can error
     dim p = cli.newParser(name="deploy")
     p.addOption("env", "e", "Target environment", required=true)
-    on error e
+    try
+        p.parseArgs([])
+        assert(false, "Expected missing required option error")
+    catch e
         assert(e.msg.contains("Missing required option '--env'"))
         return
-    end error
-    p.parseArgs([])
-    assert(false, "Expected missing required option error")
+    end try
 end fn
 
 fn testErrorHandling() can error

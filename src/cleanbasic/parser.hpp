@@ -749,14 +749,17 @@ public:
         return arena.addStmt(start.line, start.col, SelectStmt{target, std::move(cases), hasCaseElse, std::move(caseElse)});
     }
 
-    StmtId parseOnErrorStmt() {
-        const Token start = match("KEYWORD", "on error");
-        const Token errIdent = match("IDENT");
+    StmtId parseTryCatchStmt() {
+        const Token start = match("KEYWORD", "try");
         expectNewlineOrEof();
-        std::vector<StmtId> body = parseStmtBlockUntil({"end error"}, "Unclosed 'on error' block, expected 'end error'");
-        match("KEYWORD", "end error");
+        std::vector<StmtId> tryBody = parseStmtBlockUntil({"catch"}, "Unclosed 'try' block, expected 'catch'");
+        match("KEYWORD", "catch");
+        const Token catchIdent = match("IDENT");
         expectNewlineOrEof();
-        return arena.addStmt(start.line, start.col, ErrorBlock{errIdent.value, std::move(body)});
+        std::vector<StmtId> catchBody = parseStmtBlockUntil({"end try"}, "Unclosed 'catch' block, expected 'end try'");
+        match("KEYWORD", "end try");
+        expectNewlineOrEof();
+        return arena.addStmt(start.line, start.col, TryCatchStmt{std::move(tryBody), catchIdent.value, std::move(catchBody)});
     }
 
     StmtId parseDeferStmt() {
@@ -821,8 +824,8 @@ public:
         if (check("KEYWORD", "select case")) {
             return parseSelectStmt();
         }
-        if (check("KEYWORD", "on error")) {
-            return parseOnErrorStmt();
+        if (check("KEYWORD", "try")) {
+            return parseTryCatchStmt();
         }
         if (check("KEYWORD", "defer")) {
             return parseDeferStmt();

@@ -120,7 +120,7 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 
 ---
 
-## 4. Lowering of `can error`, Implicit Bubbling, `on error` & `defer`
+## 4. Lowering of `can error`, Implicit Bubbling, `try / catch` & `defer`
 
 ### 4.1 Raising Errors (`error("...", code=N)`) & Successful Returns
 Inside a `fn connect(ip as str) as Connection can error`:
@@ -139,8 +139,8 @@ Inside a `fn connect(ip as str) as Connection can error`:
   ```
 
 ### 4.2 Implicit Error Bubbling (`emitFallibleAssignment`, `emitExprStmt` & `emitReturn`)
-Fallible calls at the root of a variable assignment (`dim x = f()`), standalone call (`f()`), or direct return (`return f()`) are unpacked into temporary `auto [_val, _err]` bindings and checked via `emitActiveErrorHandlerOrBubble()`.
-When a `can error` function calls another fallible function with no active `on error` block in scope:
+Fallible calls at the root of a variable assignment (`dim x = f()`), standalone call (`f()`), or direct return (`return f()`) are unpacked into temporary `auto [_val, _err]` bindings and checked via `emitErrorCheck()`.
+When a `can error` function calls another fallible function outside of a `try / catch` block:
 
 **CleanBasic Source:**
 ```vb
@@ -167,32 +167,41 @@ end fn
 ```
 If `connect(...)` returns a non-empty `CbError`, `processNetwork()` immediately returns `{ {}, _err1 }` upward. If `connect(...)` succeeds, `_defer_1` is constructed on the stack, and `closeConnection(conn)` is guaranteed to run when `processNetwork()` exits. Multiple `defer` blocks in the same scope declare `_defer_1`, `_defer_2`, etc., which C++ destroys in reverse declaration order (**LIFO**).
 
-### 4.3 Scope-Level `on error` Handling (`emitActiveErrorHandlerOrBubble`)
-When `on error e ... end error` is encountered in a block, `emitStmt()` stores the `ErrorBlock` in `state.activeErrorBlock`. Every subsequent fallible call in that scope checks `if (cbHasError(_errN))` and inlines the handler body with `CbError e = _errN;`:
+### 4.3 Exception-less `try / catch` Lowering (`TryCatchStmt` & `emitErrorCheck`)
+When `try ... catch e ... end try` is encountered, `emitStmt()` lowers the block using a structured `do { ... } while(false);` loop. Fallible calls inside the `try` block assign `_catch_err = _errN;` and `break;` out of the `do-while` block:
 
 **CleanBasic Source:**
 ```vb
 fn startServer()
-    on error e
+    try
+        dim records = processNetwork()
+        print("Processed: ", records)
+    catch e
         print("Failed (code=" & e.code & "): " & e.msg)
-        return
-    end error
-    dim records = processNetwork()
-    print("Processed: ", records)
+    end try
 end fn
 ```
 
 **Emitted C++17:**
 ```cpp
 void startServer() {
-    auto [_val2, _err2] = processNetwork();
-    if (cbHasError(_err2)) {
-        CbError e = _err2;
-        (std::cout << (((std::string("Failed (code=") + cbToStr(e.code)) + std::string("): ")) + e.msg) << std::endl);
-        return;
+    {
+        CbError _catch_err{};
+        do {
+            auto [_val2, _err2] = processNetwork();
+            if (cbHasError(_err2)) {
+                cbStampError(_err2, "network.cb", 42);
+                _catch_err = _err2;
+                break;
+            }
+            auto records = _val2;
+            (std::cout << std::string("Processed: ") << records << std::endl);
+        } while(false);
+        if (cbHasError(_catch_err)) {
+            CbError e = _catch_err;
+            (std::cout << (((std::string("Failed (code=") + cbToStr(e.code)) + std::string("): ")) + e.msg) << std::endl);
+        }
     }
-    auto records = _val2;
-    (std::cout << std::string("Processed: ") << records << std::endl);
 }
 ```
 

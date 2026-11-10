@@ -4,9 +4,9 @@ This extension provides full IDE support for the **CleanBasic** (`.cb`) systems 
 
 ## Features
 
-- **TextMate Syntax Highlighting**: Multi-word keywords (`select case`, `on error`, `can error`, `end fn`, etc.), built-in primitive and generic container types (`int`, `float`, `str`, `bool`, `cptr`, `err`, `list[T]`, `dict[K, V]`), logical operators (`and`, `or`, `not`), and comments (`'` and `#`).
-- **Block Folding & Auto-Indentation**: Folding and smart indentation for `fn ... end fn`, `type ... end type`, `if ... end if`, `for ... end for`, `select case ... end select`, `on error ... end error`, and `defer ... end defer`.
-- **Ergonomic Code Snippets**: Quick tab-completion templates for `fn`, `pub fn`, `fnerr`, `type`, `pub type`, `if`, `for`, `forin`, `select`, `onerror`, and `defer`.
+- **TextMate Syntax Highlighting**: Multi-word keywords (`select case`, `end try`, `can error`, `end fn`, etc.), built-in primitive and generic container types (`int`, `float`, `str`, `bool`, `cptr`, `err`, `list[T]`, `dict[K, V]`), logical operators (`and`, `or`, `not`), and comments (`'` and `#`).
+- **Block Folding & Auto-Indentation**: Folding and smart indentation for `fn ... end fn`, `type ... end type`, `if ... end if`, `for ... end for`, `select case ... end select`, `try ... catch ... end try`, and `defer ... end defer`.
+- **Ergonomic Code Snippets**: Quick tab-completion templates for `fn`, `pub fn`, `fnerr`, `type`, `pub type`, `if`, `for`, `forin`, `select`, `try`, and `defer`.
 - **Live Diagnostics (`textDocument/publishDiagnostics`)**: Real-time lexer, parser, import, and semantic analyzer error underlines on open, edit, and save.
 - **Document Outline (`textDocument/documentSymbol`)**: Hierarchical outline of structs (with nested fields), functions (with full signatures), and type aliases.
 - **Hover Type Signatures (`textDocument/hover`)**: Rich Markdown hover tooltips for local variables, parameters (`byref`), struct fields, UFCS methods, functions (`can error`), aliases, and built-ins.

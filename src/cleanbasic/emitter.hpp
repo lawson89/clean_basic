@@ -95,7 +95,7 @@ public:
     uint32_t tempCounter = 0;
     uint32_t deferCounter = 0;
     uint32_t deferDepth = 0;
-    std::optional<ErrorBlock> activeErrorBlock = std::nullopt;
+    std::vector<std::string> catchErrStack;
     std::string currentModuleId = "";
     std::string currentFileName = "main.cb";
 
@@ -834,37 +834,22 @@ public:
     std::unordered_map<std::string, VarSymbol>& scope,
     std::unordered_set<std::string>& declaredVars
 ) {
-    const std::optional<ErrorBlock> savedErrorBlock = activeErrorBlock;
     for (const StmtId sid : stmts) {
         emitStmt(fn, sid, scope, declaredVars);
     }
-    activeErrorBlock = savedErrorBlock;
 }
 
-    void emitActiveErrorHandlerOrBubble(uint32_t line, 
-        const FnDecl& fn,
-        const std::string& errTmp,
-        std::unordered_map<std::string, VarSymbol>& scope,
-        std::unordered_set<std::string>& declaredVars
-    ) {
-        if (activeErrorBlock.has_value()) {
-            const ErrorBlock activeEb = activeErrorBlock.value();
+    void emitErrorCheck(uint32_t line, const FnDecl& fn, const std::string& errTmp, bool breaksToCatch) {
+        if (breaksToCatch) {
+            std::string catchVar = "_catch_err";
+            if (!catchErrStack.empty()) {
+                catchVar = catchErrStack.back();
+            }
             emitLine("if (cbHasError(" + errTmp + ")) {");
             indentLevel += 1;
-            emitLine("cbStampError(" + errTmp + ", \"" + currentFileName + "\", " + std::to_string(line) + ");");
-            emitLine("CbError " + activeEb.errVar + " = " + errTmp + ";");
-            auto errScope = scope;
-            TypeId errTid = symbols.typeErr;
-            if (errTid == INVALID_ID) {
-                errTid = arena.findType("err");
-            }
-            errScope[activeEb.errVar] = VarSymbol{activeEb.errVar, errTid, false, false};
-            auto errDecls = declaredVars;
-            errDecls.insert(activeEb.errVar);
-            const std::optional<ErrorBlock> prevEb = activeErrorBlock;
-            activeErrorBlock = std::nullopt;
-            emitStmtList(fn, activeEb.body, errScope, errDecls);
-            activeErrorBlock = prevEb;
+            emitLine("cbStampError(" + errTmp + ", " + escapeFileName(currentFileName) + ", " + std::to_string(line) + ");");
+            emitLine(catchVar + " = " + errTmp + ";");
+            emitLine("break;");
             indentLevel -= 1;
             emitLine("}");
         } else {
@@ -875,6 +860,12 @@ public:
             emitLine(earlyRet);
             indentLevel -= 1;
             emitLine("}");
+        }
+    }
+
+    void emitCatchBreakIfPending() {
+        if (!catchErrStack.empty()) {
+            emitLine("if (cbHasError(" + catchErrStack.back() + ")) { break; }");
         }
     }
 
@@ -899,7 +890,7 @@ public:
         emitLine("auto " + errVar + " = " + callCpp + ";");
     }
 
-    emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
+    emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
 
     if (stmt.target != INVALID_ID) {
         const ExprId tid = stmt.target;
@@ -1021,13 +1012,13 @@ public:
         const FnDecl& fn,
         const ExprStmt& stmt,
         std::unordered_map<std::string, VarSymbol>& scope,
-        std::unordered_set<std::string>& declaredVars
+        std::unordered_set<std::string>& /*declaredVars*/
     ) {
         if (const auto* call = arena.getExpr<FuncCall>(stmt.expr)) {
             if (isAssertBuiltinCall(*call)) {
                 const auto [discardTmp, errVar] = nextValErrTemps();
                 emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
-                emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
+                emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
                 return;
             }
             if (isErrorBuiltinCall(*call)) {
@@ -1046,7 +1037,7 @@ public:
                     emitLine("auto " + errVar + " = " + callCpp + ";");
                 }
 
-            emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
+            emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
             return;
         }
     }
@@ -1059,7 +1050,7 @@ public:
     const FnDecl& fn,
     const ReturnStmt& stmt,
     std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
+    std::unordered_set<std::string>& /*declaredVars*/
 ) {
     if (deferDepth > 0) {
         emitLine("return;");
@@ -1079,7 +1070,7 @@ public:
         if (isAssertBuiltinCall(*call)) {
             const auto [discardTmp, errVar] = nextValErrTemps();
             emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
-            emitActiveErrorHandlerOrBubble(line, fn, errVar, scope, declaredVars);
+            emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
             return;
         }
             if (isErrorBuiltinCall(*call)) {
@@ -1092,7 +1083,7 @@ public:
             const auto [valTmp, errTmp] = nextValErrTemps();
             if (calleeSym->returnType == INVALID_ID || arena.isVoid(calleeSym->returnType)) {
                 emitLine("CbError " + errTmp + " = " + emitExpr(stmt.value, scope) + ";");
-                emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
+                emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
                 if (fn.isFallible) {
                     emitLine(R"(return CbError{"", 0};)");
                 } else {
@@ -1100,7 +1091,7 @@ public:
                 }
             } else {
                 emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
-                emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
+                emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
                 if (fn.isFallible) {
                     emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
                 } else {
@@ -1232,6 +1223,7 @@ public:
             emitStmtList(fn, forS->body, loopScope, loopDecls);
             indentLevel -= 1;
             emitLine("}");
+            emitCatchBreakIfPending();
             return;
         }
 
@@ -1242,7 +1234,7 @@ public:
                 if (fnOpt.has_value() && fnOpt->isFallible) {
                     const auto [valTmp, errVar] = nextValErrTemps();
                     emitLine("auto [" + valTmp + ", " + errVar + "] = " + iterCpp + ";");
-                    emitActiveErrorHandlerOrBubble(stmtNode.line, fn, errVar, scope, declaredVars);
+                    emitErrorCheck(stmtNode.line, fn, errVar, !catchErrStack.empty());
                     iterCpp = valTmp;
                 }
             }
@@ -1264,6 +1256,7 @@ public:
                     emitStmtList(fn, forS->body, loopScope, loopDecls);
                     indentLevel -= 1;
                     emitLine("}");
+                    emitCatchBreakIfPending();
                     return;
                 }
                 TypeId elemT = symbols.typeAuto;
@@ -1282,6 +1275,7 @@ public:
                 emitStmtList(fn, forS->body, loopScope, loopDecls);
                 indentLevel -= 1;
                 emitLine("}");
+                emitCatchBreakIfPending();
                 return;
             }
             if (forS->loopVars.size() == 2 && iterType.name == "str") {
@@ -1301,6 +1295,7 @@ public:
                 emitLine("}");
                 indentLevel -= 1;
                 emitLine("}");
+                emitCatchBreakIfPending();
                 return;
             }
             if (forS->loopVars.size() == 2 && (iterType.name == "list" || iterType.name == "bytes")) {
@@ -1330,6 +1325,7 @@ public:
                 emitLine("}");
                 indentLevel -= 1;
                 emitLine("}");
+                emitCatchBreakIfPending();
                 return;
             }
             if (iterType.typeArgs.size() == 2) {
@@ -1341,6 +1337,7 @@ public:
             emitStmtList(fn, forS->body, loopScope, loopDecls);
             indentLevel -= 1;
             emitLine("}");
+            emitCatchBreakIfPending();
             return;
         }
     }
@@ -1361,7 +1358,7 @@ public:
             const std::string callCpp = emitExpr(whileS->condition, whileScope);
             const auto [valTmp, errVar] = nextValErrTemps();
             emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
-            emitActiveErrorHandlerOrBubble(stmtNode.line, fn, errVar, whileScope, whileDecls);
+            emitErrorCheck(stmtNode.line, fn, errVar, !catchErrStack.empty());
             emitLine("if (!" + valTmp + ") { break; }");
             emitStmtList(fn, whileS->body, whileScope, whileDecls);
             indentLevel -= 1;
@@ -1374,6 +1371,7 @@ public:
             indentLevel -= 1;
             emitLine("}");
         }
+        emitCatchBreakIfPending();
         return;
     }
 
@@ -1440,6 +1438,7 @@ public:
             emitLine("}");
             indentLevel -= 1;
             emitLine("}");
+            emitCatchBreakIfPending();
             return;
         }
 
@@ -1531,11 +1530,40 @@ public:
 
         indentLevel -= 1;
         emitLine("}");
+        emitCatchBreakIfPending();
         return;
     }
 
-    if (const auto* eb = arena.getStmt<ErrorBlock>(stmtId)) {
-        activeErrorBlock = *eb;
+    if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(stmtId)) {
+        emitLine("{");
+        indentLevel += 1;
+        const std::string catchErr = "_catch_err";
+        emitLine("CbError " + catchErr + "{};");
+        emitLine("do {");
+        indentLevel += 1;
+        catchErrStack.push_back(catchErr);
+        auto tryScope = scope;
+        auto tryDecls = declaredVars;
+        emitStmtList(fn, tryCatch->tryBody, tryScope, tryDecls);
+        catchErrStack.pop_back();
+        indentLevel -= 1;
+        emitLine("} while(false);");
+        emitLine("if (cbHasError(" + catchErr + ")) {");
+        indentLevel += 1;
+        emitLine("CbError " + tryCatch->catchVarName + " = " + catchErr + ";");
+        auto catchScope = scope;
+        TypeId errTid = symbols.typeErr;
+        if (errTid == INVALID_ID) {
+            errTid = arena.findType("err");
+        }
+        catchScope[tryCatch->catchVarName] = VarSymbol{tryCatch->catchVarName, errTid, false, false};
+        auto catchDecls = declaredVars;
+        catchDecls.insert(tryCatch->catchVarName);
+        emitStmtList(fn, tryCatch->catchBody, catchScope, catchDecls);
+        indentLevel -= 1;
+        emitLine("}");
+        indentLevel -= 1;
+        emitLine("}");
         return;
     }
 
@@ -1546,10 +1574,10 @@ public:
         indentLevel += 1;
         deferDepth += 1;
         auto defDecls = declaredVars;
-        const std::optional<ErrorBlock> prevEb = activeErrorBlock;
-        activeErrorBlock = std::nullopt;
+        const auto savedCatchStack = catchErrStack;
+        catchErrStack.clear();
         emitStmtList(fn, defS->body, scope, defDecls);
-        activeErrorBlock = prevEb;
+        catchErrStack = savedCatchStack;
         deferDepth -= 1;
         indentLevel -= 1;
         emitLine("});");
@@ -1682,24 +1710,31 @@ public:
 
         emitStmtList(fn, fn.body, scope, declaredVars);
 
-        if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
-            bool endsWithReturn = false;
-            if (!fn.body.empty()) {
-                const StmtId lastSid = fn.body.back();
-                if (lastSid < arena.stmts.size()) {
-                    if (arena.getStmt<ReturnStmt>(lastSid) != nullptr) {
-                        endsWithReturn = true;
-                    } else if (const auto* es = arena.getStmt<ExprStmt>(lastSid)) {
-                        if (const auto* call = arena.getExpr<FuncCall>(es->expr)) {
-                            if (isErrorBuiltinCall(*call)) {
-                                endsWithReturn = true;
-                            }
+        bool endsWithReturn = false;
+        if (!fn.body.empty()) {
+            const StmtId lastSid = fn.body.back();
+            if (lastSid < arena.stmts.size()) {
+                if (arena.getStmt<ReturnStmt>(lastSid) != nullptr) {
+                    endsWithReturn = true;
+                } else if (const auto* es = arena.getStmt<ExprStmt>(lastSid)) {
+                    if (const auto* call = arena.getExpr<FuncCall>(es->expr)) {
+                        if (isErrorBuiltinCall(*call)) {
+                            endsWithReturn = true;
                         }
                     }
                 }
             }
-            if (!endsWithReturn) {
-                emitLine(R"(return CbError{"", 0};)");
+        }
+        if (!endsWithReturn) {
+            const bool isVoidRet = (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType));
+            if (fn.isFallible) {
+                if (isVoidRet) {
+                    emitLine(R"(return CbError{"", 0};)");
+                } else {
+                    emitLine("return { " + defaultValueForType(currentModuleId, fn.returnType) + R"(, CbError{"", 0} };)");
+                }
+            } else if (!isVoidRet) {
+                emitLine("return " + defaultValueForType(currentModuleId, fn.returnType) + ";");
             }
         }
 
@@ -1951,10 +1986,11 @@ public:
                 continue;
             }
 
-            if (const auto* eb = arena.getStmt<ErrorBlock>(stmtId)) {
+            if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(stmtId)) {
+                scanReachableStmtList(tryCatch->tryBody, modId, scope, reachable, worklist);
                 auto errScope = scope;
-                errScope[eb->errVar] = VarSymbol{eb->errVar, symbols.typeErr, false, false};
-                scanReachableStmtList(eb->body, modId, errScope, reachable, worklist);
+                errScope[tryCatch->catchVarName] = VarSymbol{tryCatch->catchVarName, symbols.typeErr, false, false};
+                scanReachableStmtList(tryCatch->catchBody, modId, errScope, reachable, worklist);
                 continue;
             }
 

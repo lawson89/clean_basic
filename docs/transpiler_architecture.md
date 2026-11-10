@@ -76,7 +76,7 @@ Gpp --> Bin : "Links -pthread & import link libs"
 | **1. Lexical Analysis** | `src/cleanbasic/lexer.hpp`<br>`cb::tokenize()` | Raw source (`std::string_view`), filename | `LexResult` (`std::vector<Token>` or `DiagnosticError`) | Scans characters into tokens, coalesces two-word keywords (`end if`, `select case`, `can error`, etc.), collapses consecutive newlines, and rejects C-style `&&`, `\|\|`, `!` operators. |
 | **2. Syntax Analysis** | `src/cleanbasic/parser.hpp`<br>`cb::parseTokens()` / `cb::parseTokensWithArena()` | `std::vector<Token>`, `AstArena` | `ParseResult` (`Program`, `AstArena`, or `DiagnosticError`) | Recursive-descent parsing of top-level declarations, statements, and precedence-climbed expressions into flat arena vectors. |
 | **3. Module Resolution** | `src/cleanbasic/pipeline.hpp`<br>`cb::loadModuleDeclarationsRecursive()` | Root `Program`, `AstArena`, file path | Merged `std::vector<DeclId>` in topological dependency order | Recursively lexes and parses imported `.cb` modules into the **same** `AstArena`, deduplicates diamond dependencies, and detects circular import chains. |
-| **4. Semantic Analysis** | `src/cleanbasic/analyzer.hpp`<br>(umbrella for `symbols.hpp`) | Unified `AstArena` & `Program` | `AnalysisResult` (`GlobalSymbolTable` or `DiagnosticError`) | Two-pass registration of types, aliases, functions, and module scopes; type inference; UFCS resolution; `const`/`dim` mutability checks; and static `can error` / `on error` verification. |
+| **4. Semantic Analysis** | `src/cleanbasic/analyzer.hpp`<br>(umbrella for `symbols.hpp`) | Unified `AstArena` & `Program` | `AnalysisResult` (`GlobalSymbolTable` or `DiagnosticError`) | Two-pass registration of types, aliases, functions, and module scopes; type inference; UFCS resolution; `const`/`dim` mutability checks; and static `can error` / `try / catch` verification. |
 | **5. C++17 Emission** | `src/cleanbasic/emitter.hpp`<br>(with `runtime_preamble.hpp`) | `AstArena`, `GlobalSymbolTable`, `Program` | `std::string` (complete `build.cpp` source) | Emits the C++17 runtime preamble, `#include` headers, forward declarations, POD `struct` definitions, free functions, RAII `cbDefer` guards, tuple error propagation, and `int main()`. |
 
 ---
@@ -176,7 +176,7 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
        IfStmt,
        ForStmt,
        SelectStmt,
-       ErrorBlock,
+       TryCatchStmt,
        DeferStmt,
        ReturnStmt,
        BreakStmt
@@ -215,12 +215,12 @@ struct DiagnosticError {
 * `LexerError` — Emitted by `cb::tokenize()` on unterminated string literals, forbidden C-style logical operators (`&&`, `||`, `!`), or unexpected characters.
 * `ParseError` — Emitted by `cb::setParseError()` when recursive-descent expectations fail (e.g., missing `end fn`, using `:` instead of `=` in named arguments, unclosed blocks).
 * `ImportError` — Emitted by `cb::loadModuleDeclarationsRecursive()` when a circular module import chain is detected.
-* `AnalyzerError` — Emitted by `cb::setAnalyzerError()` or `cb::analyzeProgram()` on duplicate module aliases, undeclared variables, `const` reassignment, private cross-module symbol access, invalid `select case` types, unhandled fallible calls, or `on error` blocks missing a control-flow exit.
+* `AnalyzerError` — Emitted by `cb::setAnalyzerError()` or `cb::analyzeProgram()` on duplicate module aliases, undeclared variables, `const` reassignment, private cross-module symbol access, invalid `select case` types, or unhandled fallible calls.
 * `FileNotFoundError` / `IOError` / `CompilationError` — Emitted by `cb::buildFile()` during file I/O or native `g++` invocation.
 
 `cb::formatDiagnostic(err)` formats diagnostics in standard compiler `<file>:<line>:<col>: <kind>: <message>` format:
 ```text
-network.cb:14:9: AnalyzerError: Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function 'main' calls fallible function 'connect').
+network.cb:14:9: AnalyzerError: Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function 'main' calls fallible function 'connect').
 ```
 
 ---

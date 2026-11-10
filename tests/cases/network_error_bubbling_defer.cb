@@ -11,10 +11,10 @@
 ' EXPECT_CPP: closeConnection(conn);
 ' EXPECT_CPP: auto [_val3, _err3] = processNetwork();
 ' EXPECT_CPP: if (cbHasError(_err3)) {
-' EXPECT_CPP: CbError e = _err3;
+' EXPECT_CPP: CbError e = _catch_err;
 ' EXPECT_CPP: auto records = _val3;
-' FORBID_CPP: try
-' FORBID_CPP: catch
+' EXPECT_CPP: do {
+' EXPECT_CPP: _catch_err = _err3;
 ' EXPECT_OUT: Closing connection: 1
 ' EXPECT_OUT: Connected and processed 100 records.
 ' EXPECT_OUT: Handled empty IP (code=408): IP cannot be empty
@@ -64,33 +64,33 @@ pub fn processNetwork() as int can error
 end fn
 
 fn startServer()
-    ' startServer() cannot fail. Register a scope-level 'on error' handler.
-    on error e
+    ' startServer() cannot fail. Register a scope-level 'try / catch' handler.
+    try
+        dim records = processNetwork()
+        print("Connected and processed ", records, " records.")
+    catch e
         print("Failed to start server: " & e)
         return
-    end error
-
-    dim records = processNetwork()
-    print("Connected and processed ", records, " records.")
+    end try
 end fn
 
 fn testFailedConnect()
-    on error errObj
+    try
+        dim badConn = connect("")
+        print("Unexpected success: " & badConn.id)
+    catch errObj
         print("Handled empty IP (code=" & errObj.code & "): " & errObj.msg)
         return
-    end error
-
-    dim badConn = connect("")
-    print("Unexpected success: " & badConn.id)
+    end try
 end fn
 
 fn testFailedPort()
-    on error e
+    try
+        validatePort(0)
+    catch e
         print("Handled bad port (code=" & e.code & "): " & e)
         return
-    end error
-
-    validatePort(0)
+    end try
 end fn
 
 fn testMultiCallAndDeferLifo()
@@ -102,15 +102,15 @@ fn testMultiCallAndDeferLifo()
         print("Defer B before error return")
     end defer
 
-    on error e
+    try
+        validatePort(8080)
+        dim c1 = connect("10.0.0.1")
+        dim c2 = connect("")
+        print("Unreachable: " & c1.id & ", " & c2.id)
+    catch e
         print("Multi-call caught (code=" & e.code & "): " & e.msg)
         return
-    end error
-
-    validatePort(8080)
-    dim c1 = connect("10.0.0.1")
-    dim c2 = connect("")
-    print("Unreachable: " & c1.id & ", " & c2.id)
+    end try
 end fn
 
 pub fn forwardConnect(ip as str) as Connection can error
@@ -118,21 +118,23 @@ pub fn forwardConnect(ip as str) as Connection can error
 end fn
 
 fn connectWithFallback(ip as str) as Connection
-    on error e
+    try
+        return forwardConnect(ip)
+    catch e
         return Connection(id=-1)
-    end error
-    return forwardConnect(ip)
+    end try
 end fn
 
 fn testDirectReturnFallible()
-    on error e
+    try
+        dim c = forwardConnect("10.0.0.2")
+        print("Forwarded connection id: " & c.id)
+        dim fallbackConn = connectWithFallback("")
+        print("Fallback connection id: " & fallbackConn.id)
+    catch e
         print("Unexpected error: " & e.msg)
         return
-    end error
-    dim c = forwardConnect("10.0.0.2")
-    print("Forwarded connection id: " & c.id)
-    dim fallbackConn = connectWithFallback("")
-    print("Fallback connection id: " & fallbackConn.id)
+    end try
 end fn
 
 fn main()

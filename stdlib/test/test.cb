@@ -32,17 +32,16 @@ pub fn run(byref s as Suite) as int
     dim passed = 0
     dim failed = 0
     for tc in s.cases
-        on error e
+        try
+            tc.runFn()
+            print("  [PASS] " & tc.name)
+            passed = passed + 1
+        catch e
             print("  [FAIL] " & tc.name)
             print("         " & e.msg)
             print("         at " & e.file & ":" & e.line.toStr())
             failed = failed + 1
-            continue
-        end error
-
-        tc.runFn()
-        print("  [PASS] " & tc.name)
-        passed = passed + 1
+        end try
     end for
 
     print("Passed: " & passed.toStr() & ", Failed: " & failed.toStr())

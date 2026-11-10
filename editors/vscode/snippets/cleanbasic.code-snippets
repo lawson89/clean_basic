@@ -83,15 +83,16 @@
     ],
     "description": "Select case block (int or bool)"
   },
-  "On Error Handler": {
-    "prefix": "onerror",
+  "Try Catch Block": {
+    "prefix": "try",
     "body": [
-      "on error ${1:e}",
+      "try",
+      "\t${0}",
+      "catch ${1:e}",
       "\tprint(\"Error: \" & ${1:e}.msg)",
-      "\treturn${0}",
-      "end error"
+      "end try"
     ],
-    "description": "Scope-level on error handler block"
+    "description": "Exception-less try / catch error handling block"
   },
   "Defer Block": {
     "prefix": "defer",

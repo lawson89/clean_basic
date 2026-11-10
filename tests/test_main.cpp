@@ -146,8 +146,9 @@ else if d
 end if
 fn check() can error
 end fn
-on error e
-end error
+try
+catch e
+end try
 defer
 end defer
 )";
@@ -186,9 +187,9 @@ end defer
     CHECK(hasKw("not"));
     CHECK(hasKw("else if"));
     CHECK(hasKw("end if"));
-    CHECK(hasKw("can error"));
-    CHECK(hasKw("on error"));
-    CHECK(hasKw("end error"));
+    CHECK(hasKw("try"));
+    CHECK(hasKw("catch"));
+    CHECK(hasKw("end try"));
     CHECK(hasKw("for"));
     CHECK(hasKw("to"));
     CHECK(hasKw("step"));
@@ -341,31 +342,7 @@ end fn
         }
     }
 
-    SECTION("Rejects legacy trailing 'on error' syntax on variable declarations, assignments, and calls") {
-        const std::string badTrailingDim = R"(fn main()
-    dim x = foo() on error e
-        return
-    end error
-end fn
-)";
-        const auto lexTd = cb::tokenize(badTrailingDim, "badTrailingDim.cb");
-        REQUIRE(lexTd.ok);
-        const auto parseTd = cb::parseTokens(lexTd.tokens, "badTrailingDim.cb");
-        CHECK_FALSE(parseTd.ok);
-        CHECK(parseTd.error.kind == "ParseError");
 
-        const std::string badTrailingCall = R"(fn main()
-    foo() on error e
-        return
-    end error
-end fn
-)";
-        const auto lexTc = cb::tokenize(badTrailingCall, "badTrailingCall.cb");
-        REQUIRE(lexTc.ok);
-        const auto parseTc = cb::parseTokens(lexTc.tokens, "badTrailingCall.cb");
-        CHECK_FALSE(parseTc.ok);
-        CHECK(parseTc.error.kind == "ParseError");
-    }
 
     SECTION("Reports ParseError on unclosed control flow block") {
         const std::string badCode = R"(fn broken()
@@ -402,7 +379,7 @@ end fn
         CHECK_FALSE(anaBad.ok);
         CHECK(anaBad.error.kind == "AnalyzerError");
         CHECK(anaBad.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
+            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block"
         ) != std::string::npos);
     }
 
@@ -421,52 +398,11 @@ end fn
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
         CHECK(res.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
+            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block"
         ) != std::string::npos);
     }
 
-    SECTION("Rejects fallible call occurring before 'on error' block is registered in scope") {
-        const std::string badOrder = R"(
-fn risky() as int can error
-    return 1
-end fn
 
-fn main()
-    dim first = risky()
-    on error e
-        return
-    end error
-    dim second = risky()
-end fn
-)";
-        const auto res = cb::transpileSource(badOrder, "badOrder.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.kind == "AnalyzerError");
-        CHECK(res.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block"
-        ) != std::string::npos);
-    }
-
-    SECTION("Rejects 'on error' block that does not terminate with return, error(...), or break") {
-        const std::string badNoExit = R"(
-fn risky() as int can error
-    return 1
-end fn
-
-fn main()
-    on error e
-        print("Caught error but forgot to exit: " & e.msg)
-    end error
-    dim val = risky()
-end fn
-)";
-        const auto res = cb::transpileSource(badNoExit, "badNoExit.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.kind == "AnalyzerError");
-        CHECK(res.error.message.find(
-            "'on error' block must terminate with an explicit control-flow exit"
-        ) != std::string::npos);
-    }
 
     SECTION("Rejects calling error(...) inside an infallible function or with invalid named args") {
         const std::string badErrorInInfallible = R"(
@@ -533,11 +469,11 @@ fn middle() as int can error
 end fn
 
 fn main()
-    on error e
+    try
+        dim res = middle()
+    catch e
         print(e.code, ": ", e.msg)
-        return
-    end error
-    dim res = middle()
+    end try
 end fn
 )";
 
@@ -587,13 +523,12 @@ fn processData() as int can error
 end fn
 
 fn main()
-    ' Explicit scope-level handling
-    on error e
+    ' Explicit try / catch handling
+    try
+        dim records = processData()
+    catch e
         print("Crash prevented (" & e.code & "): " & e.msg)
-        return
-    end error
-
-    dim records = processData()
+    end try
 end fn
 )";
 
@@ -612,9 +547,13 @@ end fn
     CHECK(cpp.find("auto _defer_1 = cbDefer([&]() {") != std::string::npos);
     CHECK(cpp.find("SQL_close(db);") != std::string::npos);
     CHECK(cpp.find(R"raw(return { 100, CbError{"", 0} };)raw") != std::string::npos);
+    CHECK(cpp.find("CbError _catch_err{};") != std::string::npos);
+    CHECK(cpp.find("do {") != std::string::npos);
     CHECK(cpp.find("auto [_val2, _err2] = processData();") != std::string::npos);
     CHECK(cpp.find("if (cbHasError(_err2)) {") != std::string::npos);
-    CHECK(cpp.find("CbError e = _err2;") != std::string::npos);
+    CHECK(cpp.find("_catch_err = _err2;") != std::string::npos);
+    CHECK(cpp.find("} while(false);") != std::string::npos);
+    CHECK(cpp.find("CbError e = _catch_err;") != std::string::npos);
     CHECK(cpp.find("auto records = _val2;") != std::string::npos);
 
     SECTION("Emits variadic print, cbToStr auto-coercion on &, and inclusive for..to loop") {
@@ -1900,9 +1839,9 @@ end fn
         // Line 2:     p.health = p.health + shield
         // Line 3: end fn
         // Line 4: fn main() as int
-        // Line 5:     on error e
-        // Line 6:         return 1
-        // Line 7:     end error
+        // Line 5:     try
+        // Line 6:     catch e
+        // Line 7:     end try
         // Line 8:     dim nums as list[int] = [1, 2]
         // Line 9:     dim hero = player.Player(name="Alice", health=100)
         // Line 10:    hero.
@@ -1923,9 +1862,9 @@ fn localBuff(byref p as player.Player, shield as int)
     p.health = p.health + shield
 end fn
 fn main() as int
-    on error e
-        return 1
-    end error
+    try
+    catch e
+    end try
     dim nums as list[int] = [1, 2]
     dim hero = player.Player(name="Alice", health=100)
     hero.
@@ -1961,9 +1900,9 @@ fn localBuff(byref p as player.Player, shield as int)
     p.health = p.health + shield
 end fn
 fn main() as int
-    on error e
-        return 1
-    end error
+    try
+    catch e
+    end try
     dim nums as list[int] = [1, 2]
     dim hero = player.Player(name="Alice", health=100)
 )";
@@ -2191,7 +2130,7 @@ TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are 
         REQUIRE(snippets.ok);
         CHECK(cb::jsonGetField(snippets.arena, snippets.root, "Function Declaration") != cb::INVALID_ID);
         CHECK(cb::jsonGetField(snippets.arena, snippets.root, "Select Case Block") != cb::INVALID_ID);
-        CHECK(cb::jsonGetField(snippets.arena, snippets.root, "On Error Handler") != cb::INVALID_ID);
+        CHECK(cb::jsonGetField(snippets.arena, snippets.root, "Try Catch Block") != cb::INVALID_ID);
 
         const cb::JsonParseResult launch = cb::parseJson(cb::testE2E::readFileText(".vscode/launch.json"));
         REQUIRE(launch.ok);
@@ -2262,15 +2201,16 @@ TEST_CASE("Standard library std/json module: vendor/ + stdlib/ resolution, UFCS 
         const std::string src = R"(import "std/json"
 
 fn main() as int
-    on error e
+    try
+        dim doc = json.parse("3.5")
+        dim root = doc.root()
+        dim pi = doc.getFloat(root)
+        if pi > 3.0
+            return 0
+        end if
+    catch e
         return 1
-    end error
-    dim doc = json.parse("3.5")
-    dim root = doc.root()
-    dim pi = doc.getFloat(root)
-    if pi > 3.0
-        return 0
-    end if
+    end try
     return 1
 end fn
 )";
@@ -2833,36 +2773,36 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
 import "std/fs"
 
 fn main() as int
-    on error e
+    try
+        dim inStream = fs.stdin()
+        dim outStream = fs.stdout()
+        dim errStream = fs.stderr()
+        defer
+            inStream.close()
+            outStream.close()
+            errStream.close()
+        end defer
+
+        dim firstLine = ""
+        dim secondLine = ""
+        dim ok1 = inStream.readLine(firstLine)
+        dim ok2 = inStream.readLine(secondLine)
+        dim rawBytes = inStream.readBytes(4)
+        dim atEof = inStream.eof()
+
+        outStream.writeStr("OUT:")
+        outStream.writeLine(firstLine & "|" & secondLine & "|eof=" & atEof.toStr())
+        outStream.flush()
+
+        errStream.writeStr("ERR:")
+        errStream.writeBytes(rawBytes)
+        errStream.writeLine("|ok=" & (ok1 and ok2).toStr())
+        errStream.flush()
+        return 0
+    catch e
         print("Error: " & e.msg)
         return 1
-    end error
-
-    dim inStream = fs.stdin()
-    dim outStream = fs.stdout()
-    dim errStream = fs.stderr()
-    defer
-        inStream.close()
-        outStream.close()
-        errStream.close()
-    end defer
-
-    dim firstLine = ""
-    dim secondLine = ""
-    dim ok1 = inStream.readLine(firstLine)
-    dim ok2 = inStream.readLine(secondLine)
-    dim rawBytes = inStream.readBytes(4)
-    dim atEof = inStream.eof()
-
-    outStream.writeStr("OUT:")
-    outStream.writeLine(firstLine & "|" & secondLine & "|eof=" & atEof.toStr())
-    outStream.flush()
-
-    errStream.writeStr("ERR:")
-    errStream.writeBytes(rawBytes)
-    errStream.writeLine("|ok=" & (ok1 and ok2).toStr())
-    errStream.flush()
-    return 0
+    end try
 end fn
 )CB";
         {
@@ -2962,11 +2902,12 @@ fn failVal() as int can error
 end fn
 
 fn main()
-    on error e
+    try
+        failVoid()
+        dim x = failVal()
+    catch e
         return
-    end error
-    failVoid()
-    dim x = failVal()
+    end try
 end fn
 )";
         const auto res = cb::transpileSource(code, "fallibleNodiscard.cb");
@@ -3162,7 +3103,7 @@ end fn
         CHECK(resBadTarget.error.message.find("select case expression must be of type 'int', 'bool', or 'str'") != std::string::npos);
     }
 
-    SECTION("continue is accepted as valid scope exit terminator for on error blocks inside loops") {
+    SECTION("try / catch blocks inside loops support fallthrough or continue in catch") {
         const std::string code = R"(
 fn fallibleTask() as int can error
     error("failed")
@@ -3171,10 +3112,11 @@ end fn
 
 fn main()
     for i = 1 to 5
-        on error e
+        try
+            dim x = fallibleTask()
+        catch e
             continue
-        end error
-        dim x = fallibleTask()
+        end try
     end for
 end fn
 )";
@@ -3851,7 +3793,7 @@ end fn
 }
 
 TEST_CASE("Direct return fallibleCall() and top-level fallible statement guardrail", "[analyzer][emitter][fallible]") {
-    SECTION("Supports return fallibleCall() in can error functions, on error blocks, and bytes.toUtf8()") {
+    SECTION("Supports return fallibleCall() in can error functions, try / catch blocks, and bytes.toUtf8()") {
         const std::string code = R"CB(
 fn parseNum(s as str) as int can error
     if s == ""
@@ -3869,10 +3811,11 @@ fn decodeBytes(raw as bytes) as str can error
 end fn
 
 fn safeParse(s as str) as int
-    on error e
+    try
+        return delegateParse(s)
+    catch e
         return -1
-    end error
-    return delegateParse(s)
+    end try
 end fn
 
 fn main()
@@ -3892,7 +3835,7 @@ end fn
         CHECK(res.cppCode.find("return _val3;") != std::string::npos);
     }
 
-    SECTION("Rejects unhandled return fallibleCall() inside infallible function without on error") {
+    SECTION("Rejects unhandled return fallibleCall() inside infallible function without try / catch") {
         const std::string badReturn = R"CB(
 fn risky() as int can error
     return 1
@@ -3905,7 +3848,7 @@ end fn
         const auto res = cb::transpileSource(badReturn, "badReturnFallible.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
-        CHECK(res.error.message.find("Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block") != std::string::npos);
+        CHECK(res.error.message.find("Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block") != std::string::npos);
     }
 
     SECTION("Rejects nested fallible calls inside sub-expressions even in can error functions") {
@@ -4464,12 +4407,14 @@ pub fn connectEndpoint(ep as Endpoint, timeoutMs as int = 1000) as bool can erro
 end fn
 
 fn main() as int
-    on error e
-        return 1
-    end error
+    ' setup
+    ' parser
+    try
     dim p = cli.newParser("app")
     dim ep = Endpoint(host="localhost", port=8080)
     dim ok = connectEndpoint(ep, 500)
+    catch e
+    end try
     return 0
 end fn
 )";

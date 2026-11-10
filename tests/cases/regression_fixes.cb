@@ -49,24 +49,24 @@ fn overload(x as str)
 end fn
 
 fn main() as int
-    on error e
+    try
+        testReturnFallible()
+        print("Connect success")
+        print("Void fallible success")
+
+        overload(1)
+        overload("test")
+
+        dim s = State(val=Status.Active)
+        s.val = Status.Inactive
+        
+        dim l as list[Status] = [Status.Active]
+        l[0] = Status.Inactive
+        
+        print("Enum assignment success")
+        return 0
+    catch e
         print("Error: ", e.msg)
         return 1
-    end error
-
-    testReturnFallible()
-    print("Connect success")
-    print("Void fallible success")
-
-    overload(1)
-    overload("test")
-
-    dim s = State(val=Status.Active)
-    s.val = Status.Inactive
-    
-    dim l as list[Status] = [Status.Active]
-    l[0] = Status.Inactive
-    
-    print("Enum assignment success")
-    return 0
+    end try
 end fn

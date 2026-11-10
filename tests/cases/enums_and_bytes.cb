@@ -179,19 +179,19 @@ fn testBinaryFiles() can error
 end fn
 
 fn main() as int
-    on error e
+    try
+        testEnums()
+        testBytesBuffers()
+        testBinaryFiles()
+        testNumericsBitwiseAndUnions()
+        dim m = HttpMethod.post
+        dim a = 10
+        dim b = 20
+        print($"Interp basic: Method={m}, code={m.toInt()}, sum={a + b}, ok={a < b and b == 20}")
+        print($"Interp braces & nested: {{{m}: {100 * 2}}} / {$"dict={lookupK({"k": 42})}"}")
+        return 0
+    catch e
         print("Error: " & e.msg)
         return 1
-    end error
-
-    testEnums()
-    testBytesBuffers()
-    testBinaryFiles()
-    testNumericsBitwiseAndUnions()
-    dim m = HttpMethod.post
-    dim a = 10
-    dim b = 20
-    print($"Interp basic: Method={m}, code={m.toInt()}, sum={a + b}, ok={a < b and b == 20}")
-    print($"Interp braces & nested: {{{m}: {100 * 2}}} / {$"dict={lookupK({"k": 42})}"}")
-    return 0
+    end try
 end fn

@@ -173,9 +173,10 @@ struct ExprNode {
 // Statements
 // ==========================================
 
-struct ErrorBlock {
-    std::string errVar;
-    std::vector<StmtId> body;
+struct TryCatchStmt {
+    std::vector<StmtId> tryBody;
+    std::string catchVarName;
+    std::vector<StmtId> catchBody;
 };
 
 struct VarAssignment {
@@ -188,11 +189,13 @@ struct VarAssignment {
     std::string compoundOp;
     ExprId compoundRhs = INVALID_ID;
     bool implicitBubble = false;
+    bool breaksToCatch = false;
 };
 
 struct ExprStmt {
     ExprId expr = INVALID_ID;
     bool implicitBubble = false;
+    bool breaksToCatch = false;
 };
 
 struct ElseIfBranch {
@@ -256,6 +259,8 @@ struct WhileStmt {
 struct ReturnStmt {
     bool hasValue = false;
     ExprId value = INVALID_ID;
+    bool implicitBubble = false;
+    bool breaksToCatch = false;
 };
 
 struct BreakStmt {};
@@ -269,7 +274,7 @@ using StmtVariant = std::variant<
     ForStmt,
     WhileStmt,
     SelectStmt,
-    ErrorBlock,
+    TryCatchStmt,
     DeferStmt,
     ReturnStmt,
     BreakStmt,

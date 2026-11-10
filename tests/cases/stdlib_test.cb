@@ -44,23 +44,25 @@ fn testAssert() can error
 end fn
 
 fn testAssertFail() can error
-    on error e
+    try
+        assert(1 == 2)
+    catch e
         assert(e.msg.contains("Assertion failed (left == right): got 1, expected 2"))
         assert(e.file.contains("stdlib_test.cb"))
         assert(e.line > 0)
         return
-    end error
-    assert(1 == 2)
+    end try
 end fn
 
 fn testCustomMsg() can error
-    on error e
+    try
+        assert(false, "custom message")
+    catch e
         assert(e.msg == "custom message")
         assert(e.file.contains("stdlib_test.cb"))
         assert(e.line > 0)
         return
-    end error
-    assert(false, "custom message")
+    end try
 end fn
 
 fn main() as int

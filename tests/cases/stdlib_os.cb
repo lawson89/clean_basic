@@ -30,20 +30,17 @@ fn testChdirRoundtrip(sandboxDir as str) can error
 end fn
 
 fn testExecFailure()
-    on error e
+    try
+        dim badOut = os.exec("exit 9")
+        print(badOut)
+    catch e
         print($"Caught exec failure (code={e.code})")
         return
-    end error
-
-    dim badOut = os.exec("exit 9")
-    print(badOut)
+    end try
 end fn
 
 fn main() as int
-    on error e
-        print("Unexpected error: " & e.msg)
-        return 1
-    end error
+    try
 
     dim argv = os.args()
     print("Args count=" & argv.len())
@@ -82,5 +79,9 @@ fn main() as int
     print(" | readExact0=[" & emptyExact & "]")
     os.eprintRaw("Stderr message ")
     os.eprint("via eprint")
-    return 0
+        return 0
+    catch e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end try
 end fn

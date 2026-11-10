@@ -183,15 +183,15 @@ fn isStandardBlockCloser(codePart as str) as bool
     if codePart == "end if" or codePart == "end for" or codePart == "end while"
         return true
     end if
-    if codePart == "end error" or codePart == "end defer"
+    if codePart == "end try" or codePart == "end defer"
         return true
     end if
     return false
 end fn
 
-'' Returns true if codePart is an "else" or "else if" branch header.
+'' Returns true if codePart is an "else", "else if", or "catch" branch header.
 fn isElseBranch(codePart as str) as bool
-    if codePart == "else" or codePart.startsWith("else if ") or codePart.startsWith("else if(")
+    if codePart == "else" or codePart.startsWith("else if ") or codePart.startsWith("else if(") or codePart.startsWith("catch ")
         return true
     end if
     return false
@@ -224,7 +224,7 @@ fn isStandardBlockOpener(codePart as str, lines as list[str], lineIdx as int) as
     if codePart.startsWith("while ") or codePart.startsWith("while(")
         return true
     end if
-    if codePart.startsWith("on error ")
+    if codePart == "try"
         return true
     end if
     if codePart == "defer"
@@ -439,91 +439,89 @@ end fn
 fn main() as int
     dim p = buildParser()
 
-    on error e
+    try
+        const args = p.parse()
+        if args.helpRequested
+            p.printUsage()
+            return 0
+        end if
+        if args.versionRequested
+            print("cbfmt 1.0")
+            return 0
+        end if
+
+        const writeInPlace = args.has("write")
+        const checkOnly = args.has("check")
+        const indentWidth = args.getInt("indent", 4)
+        if indentWidth < 0 or indentWidth > 16
+            os.eprint("cbfmt: --indent must be between 0 and 16")
+            return 2
+        end if
+
+        dim targets = args.rest
+        if targets.len() == 0 or (targets.len() == 1 and targets[0] == "-")
+            if writeInPlace
+                os.eprint("cbfmt: cannot use --write with standard input")
+                return 2
+            end if
+            const input = readStdinAll()
+            const formatted = formatSource(input, indentWidth)
+            if checkOnly
+                if input != formatted
+                    os.eprint("cbfmt: <stdin> is not formatted")
+                    return 1
+                end if
+                return 0
+            end if
+            os.printRaw(formatted)
+            return 0
+        end if
+
+        dim unformattedCount = 0
+        dim hadError = false
+
+        for target in targets
+            if not fs.exists(target)
+                os.eprint($"cbfmt: {target}: No such file or directory")
+                hadError = true
+                continue
+            end if
+
+            try
+                for filePath in collectCbFiles(target)
+                    try
+                        const original = fs.read(filePath)
+                        const formatted = formatSource(original, indentWidth)
+                        if checkOnly
+                            if original != formatted
+                                os.eprint($"cbfmt: {filePath}: needs formatting")
+                                unformattedCount += 1
+                            end if
+                        else if writeInPlace
+                            if original != formatted
+                                fs.write(filePath, formatted)
+                            end if
+                        else
+                            os.printRaw(formatted)
+                        end if
+                    catch e2
+                        os.eprint($"cbfmt: {filePath}: {e2.msg}")
+                        hadError = true
+                    end try
+                end for
+            catch e
+                os.eprint($"cbfmt: {target}: {e.msg}")
+                hadError = true
+            end try
+        end for
+
+        if hadError or unformattedCount > 0
+            return 1
+        end if
+        return 0
+    catch e
         os.eprint($"cbfmt: {e.msg}")
         os.eprint(p.usage())
         return 2
-    end error
-
-    const args = p.parse()
-    if args.helpRequested
-        p.printUsage()
-        return 0
-    end if
-    if args.versionRequested
-        print("cbfmt 1.0")
-        return 0
-    end if
-
-    const writeInPlace = args.has("write")
-    const checkOnly = args.has("check")
-    const indentWidth = args.getInt("indent", 4)
-    if indentWidth < 0 or indentWidth > 16
-        os.eprint("cbfmt: --indent must be between 0 and 16")
-        return 2
-    end if
-
-    dim targets = args.rest
-    if targets.len() == 0 or (targets.len() == 1 and targets[0] == "-")
-        if writeInPlace
-            os.eprint("cbfmt: cannot use --write with standard input")
-            return 2
-        end if
-        const input = readStdinAll()
-        const formatted = formatSource(input, indentWidth)
-        if checkOnly
-            if input != formatted
-                os.eprint("cbfmt: <stdin> is not formatted")
-                return 1
-            end if
-            return 0
-        end if
-        os.printRaw(formatted)
-        return 0
-    end if
-
-    dim unformattedCount = 0
-    dim hadError = false
-
-    for target in targets
-        if not fs.exists(target)
-            os.eprint($"cbfmt: {target}: No such file or directory")
-            hadError = true
-            continue
-        end if
-
-        on error e
-            os.eprint($"cbfmt: {target}: {e.msg}")
-            hadError = true
-            continue
-        end error
-
-        for filePath in collectCbFiles(target)
-            on error e2
-                os.eprint($"cbfmt: {filePath}: {e2.msg}")
-                hadError = true
-                continue
-            end error
-
-            const original = fs.read(filePath)
-            const formatted = formatSource(original, indentWidth)
-            if checkOnly
-                if original != formatted
-                    os.eprint($"cbfmt: {filePath}: needs formatting")
-                    unformattedCount += 1
-                end if
-            else if writeInPlace
-                if original != formatted
-                    fs.write(filePath, formatted)
-                end if
-            else
-                os.printRaw(formatted)
-            end if
-        end for
-    end for
-
-    if hadError or unformattedCount > 0
-        return 1
-    end if
-    return 0
+    end try
 end fn

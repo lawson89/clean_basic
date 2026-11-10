@@ -460,7 +460,7 @@ inline void collectGeneralScopeCompletions(const LspDocumentSnapshot& snap, std:
         if (docOpt.has_value()) doc = docOpt.value();
         addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
     }
-    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "enum", "end enum", "union", "end union", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "until", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "on error", "end error", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
+    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "enum", "end enum", "union", "end union", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "until", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
     for (const auto& kw : keywords) if (matchesCompletionPrefix(kw, prefix)) addCompletionEntry(items, seen, kw, 14, "keyword");
 }
 

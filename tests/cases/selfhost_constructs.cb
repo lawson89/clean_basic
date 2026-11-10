@@ -161,22 +161,24 @@ fn runCompilerSim() can error
     arena.exprs[0].stampExprLine(99)
     print("overloads: " & arena.formatNodeTag(7) & ", " & arena.formatNodeTag("custom", 7) & ", stamped_line=" & arena.exprs[0].line.toStr())
 
-    ' Trigger an unresolved identifier error and recover via on error
+    ' Trigger an unresolved identifier error and recover via try / catch
     dim eBad = arena.addExpr(25, ExprPayload.ident(IdentExpr(name="missingVar")))
-    on error e
+    try
+        dim ignored = evalExpr(arena, "main", eBad)
+    catch e
         dim hasFile = e.file.contains("selfhost_constructs.cb")
         dim linePos = e.line > 0
         print($"error_caught: code={e.code}, has_file={hasFile}, line_positive={linePos}, msg={e.msg}")
         return
-    end error
-    dim ignored = evalExpr(arena, "main", eBad)
+    end try
 end fn
 
 fn main() as int
-    on error e
+    try
+        runCompilerSim()
+        return 0
+    catch e
         print("Unexpected top-level error: " & e.msg)
         return 1
-    end error
-    runCompilerSim()
-    return 0
+    end try
 end fn

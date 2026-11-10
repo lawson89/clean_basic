@@ -50,7 +50,7 @@ inline bool isSingleKeyword(std::string_view word) {
     static const std::vector<std::string_view> keywords = {
         "import", "as", "pub", "extern", "alias", "type", "enum", "union", "fn",
         "dim", "const", "byref", "if", "else",
-        "for", "in", "to", "until", "step", "while", "case", "defer", "on", "error",
+        "for", "in", "to", "until", "step", "while", "case", "defer", "try", "catch", "error",
         "return", "break", "continue", "and", "or", "not",
         "true", "false", "null"
     };
@@ -87,16 +87,14 @@ inline bool matchSecondWordForMultiKw(std::string_view first, std::string_view s
     if (first == "else") {
         return second == "if";
     }
-    if (first == "on") {
-        return second == "error";
-    }
+
     if (first == "can") {
         return second == "error";
     }
     if (first == "end") {
         return second == "select" || second == "if" || second == "fn" ||
                second == "type" || second == "enum" || second == "union" || second == "for" || second == "while" ||
-               second == "defer" || second == "error";
+               second == "defer" || second == "try";
     }
     return false;
 }

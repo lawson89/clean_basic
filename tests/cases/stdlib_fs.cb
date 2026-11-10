@@ -112,33 +112,35 @@ fn testWalkFiles(baseDir as str) can error
 end fn
 
 fn testMissingFile(baseDir as str)
-    on error e
+    try
+        dim missing = fs.joinPath(baseDir, "doesNotExist.txt")
+        dim content = fs.read(missing)
+        print(content)
+    catch e
         print("Caught missing file (code=" & e.code & ")")
         return
-    end error
-
-    dim missing = fs.joinPath(baseDir, "doesNotExist.txt")
-    dim content = fs.read(missing)
-    print(content)
+    end try
 end fn
 
 fn tryWriteToStdin() as int
-    on error e
+    try
+        dim inStream = fs.stdin()
+        inStream.writeLine("cannot write to stdin")
+        return 0
+    catch e
         return e.code
-    end error
-    dim inStream = fs.stdin()
-    inStream.writeLine("cannot write to stdin")
-    return 0
+    end try
 end fn
 
 fn tryReadFromStdout() as int
-    on error e
+    try
+        dim outStream = fs.stdout()
+        dim line = ""
+        outStream.readLine(line)
+        return 0
+    catch e
         return e.code
-    end error
-    dim outStream = fs.stdout()
-    dim line = ""
-    outStream.readLine(line)
-    return 0
+    end try
 end fn
 
 fn writeBannerToStream(out as fs.File, msg as str) can error
@@ -174,10 +176,7 @@ fn testStandardStreams() can error
 end fn
 
 fn main() as int
-    on error e
-        print("Unexpected error: " & e.msg)
-        return 1
-    end error
+    try
 
     dim baseDir = "build/testArtifacts/stdlibFsSandbox"
     if fs.exists(baseDir)
@@ -203,5 +202,9 @@ fn main() as int
 
     dim removedCount = fs.removeAll(baseDir)
     print("Cleanup complete: removedAll=" & (removedCount >= 3) & ", exists=" & fs.exists(baseDir))
-    return 0
+        return 0
+    catch e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end try
 end fn

@@ -10,40 +10,18 @@
 
 namespace cb {
 
-inline bool stmtListHasExit(const AstArena& arena, const std::vector<StmtId>& stmts) {
-    if (stmts.empty()) {
-        return false;
-    }
-    const StmtId lastSid = stmts.back();
-    if (arena.getStmt<ReturnStmt>(lastSid) != nullptr) {
-        return true;
-    }
-    if (arena.getStmt<BreakStmt>(lastSid) != nullptr) {
-        return true;
-    }
-    if (arena.getStmt<ContinueStmt>(lastSid) != nullptr) {
-        return true;
-    }
-    if (const auto* estmt = arena.getStmt<ExprStmt>(lastSid)) {
-        if (const auto* call = arena.getExpr<FuncCall>(estmt->expr)) {
-            if (isErrorBuiltinCall(arena, *call)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 class Analyzer {
 public:
     AstArena& arena;
     GlobalSymbolTable& symbols;
     std::string fileName = "main.cb";
     std::string moduleId = "";
+    std::string currentFnKey = "";
     int loopDepth = 0;
+    int activeTryDepth = 0;
 
     Analyzer(AstArena& arena, GlobalSymbolTable& symbols, std::string_view fileName = "main.cb")
-        : arena(arena), symbols(symbols), fileName(fileName), moduleId(""), loopDepth(0) {}
+        : arena(arena), symbols(symbols), fileName(fileName), moduleId(""), currentFnKey(""), loopDepth(0), activeTryDepth(0) {}
 
     [[noreturn]] void setAnalyzerError(uint32_t line, uint32_t col, std::string_view msg) const {
         throw makeError("AnalyzerError", std::string(msg), fileName, line, col);
@@ -100,10 +78,11 @@ public:
         const FnDecl& fn,
         ExprId exprId,
         const std::unordered_map<std::string, VarSymbol>& scope,
-        bool hasActiveOnError,
-        bool& outImplicitBubble
+        bool& outImplicitBubble,
+        bool& outBreaksToCatch
     ) {
         outImplicitBubble = false;
+        outBreaksToCatch = false;
         if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
             bool isFallible = false;
             std::string calleeName = "";
@@ -119,12 +98,14 @@ public:
             }
 
             if (isFallible) {
-                if (!hasActiveOnError) {
+                if (activeTryDepth > 0) {
+                    outBreaksToCatch = true;
+                } else {
                     if (fn.isFallible) {
                         outImplicitBubble = true;
                     } else {
                         const auto& exprNode = arena.exprs[exprId];
-                        std::string msg = "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function '" +
+                        std::string msg = "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '" +
                             fn.name + "' calls fallible function '" + calleeName + "').";
                         setAnalyzerError(exprNode.line, exprNode.col, msg);
                     }
@@ -551,7 +532,11 @@ public:
         uint32_t line,
         uint32_t col
     ) {
-        scope[name] = VarSymbol{name, tid, isByref, isConst, fileName, line, col, line};
+        VarSymbol sym{name, tid, isByref, isConst, fileName, line, col, line};
+        scope[name] = sym;
+        if (!currentFnKey.empty()) {
+            symbols.fnScopes[currentFnKey][name] = std::move(sym);
+        }
     }
 
     void validateEnumAssignment(
@@ -653,8 +638,7 @@ public:
     void analyzeStmt(
         const FnDecl& fn,
         StmtId stmtId,
-        std::unordered_map<std::string, VarSymbol>& scope,
-        bool& hasActiveOnError
+        std::unordered_map<std::string, VarSymbol>& scope
     ) {
         if (stmtId >= arena.stmts.size()) {
             return;
@@ -668,7 +652,7 @@ public:
             if (vassign->compoundRhs != INVALID_ID) {
                 fallibleCheckExpr = vassign->compoundRhs;
             }
-            checkFallibleUsage(fn, fallibleCheckExpr, scope, hasActiveOnError, vassign->implicitBubble);
+            checkFallibleUsage(fn, fallibleCheckExpr, scope, vassign->implicitBubble, vassign->breaksToCatch);
 
             const TypeId valType = inferExprType(arena, vassign->value, symbols, scope, moduleId);
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
@@ -741,36 +725,34 @@ public:
         }
 
         if (auto* estmt = arena.getStmtMut<ExprStmt>(stmtId)) {
-            checkFallibleUsage(fn, estmt->expr, scope, hasActiveOnError, estmt->implicitBubble);
+            checkFallibleUsage(fn, estmt->expr, scope, estmt->implicitBubble, estmt->breaksToCatch);
             validateExprCalls(fn, estmt->expr, scope, true);
             return;
         }
 
-        if (const auto* errBlock = arena.getStmt<ErrorBlock>(stmtId)) {
-            bindLocalVar(scope, errBlock->errVar, symbols.typeErr, false, false, stmtNode.line, stmtNode.col);
-            auto errScope = scope;
-            analyzeBlock(fn, errBlock->body, errScope, false);
+        if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(stmtId)) {
+            auto tryScope = scope;
+            activeTryDepth += 1;
+            analyzeBlock(fn, tryCatch->tryBody, tryScope);
+            activeTryDepth -= 1;
 
-            if (!stmtListHasExit(arena, errBlock->body)) {
-                std::string msg = "'on error' block must terminate with an explicit control-flow exit ('return', 'error(...)', or 'break').";
-                setAnalyzerError(stmtNode.line, stmtNode.col, msg);
-            }
-
-            hasActiveOnError = true;
+            auto catchScope = scope;
+            bindLocalVar(catchScope, tryCatch->catchVarName, symbols.typeErr, false, false, stmtNode.line, stmtNode.col);
+            analyzeBlock(fn, tryCatch->catchBody, catchScope);
             return;
         }
 
         if (const auto* ifStmt = arena.getStmt<IfStmt>(stmtId)) {
             validateExprCalls(fn, ifStmt->condition, scope, false);
-            analyzeBlock(fn, ifStmt->thenBody, scope, hasActiveOnError);
+            analyzeBlock(fn, ifStmt->thenBody, scope);
 
             for (const auto& branch : ifStmt->elifBranches) {
                 validateExprCalls(fn, branch.condition, scope, false);
-                analyzeBlock(fn, branch.body, scope, hasActiveOnError);
+                analyzeBlock(fn, branch.body, scope);
             }
 
             if (ifStmt->hasElse) {
-                analyzeBlock(fn, ifStmt->elseBody, scope, hasActiveOnError);
+                analyzeBlock(fn, ifStmt->elseBody, scope);
             }
             return;
         }
@@ -788,7 +770,8 @@ public:
                 }
             } else if (forStmt->hasIterable) {
                 bool dummyBubble = false;
-                checkFallibleUsage(fn, forStmt->iterable, scope, hasActiveOnError, dummyBubble);
+                bool dummyBreaks = false;
+                checkFallibleUsage(fn, forStmt->iterable, scope, dummyBubble, dummyBreaks);
                 validateExprCalls(fn, forStmt->iterable, scope, true);
                 const TypeId iterTid = inferExprType(arena, forStmt->iterable, symbols, scope, moduleId);
                 if (iterTid < arena.types.size()) {
@@ -834,7 +817,7 @@ public:
                     }
                 }
             }
-            analyzeBlock(fn, forStmt->body, scope, hasActiveOnError);
+            analyzeBlock(fn, forStmt->body, scope);
             loopDepth -= 1;
             return;
         }
@@ -850,12 +833,13 @@ public:
             }
             if (isFallibleCond) {
                 bool dummyBubble = false;
-                checkFallibleUsage(fn, whileStmt->condition, scope, hasActiveOnError, dummyBubble);
+                bool dummyBreaks = false;
+                checkFallibleUsage(fn, whileStmt->condition, scope, dummyBubble, dummyBreaks);
                 validateExprCalls(fn, whileStmt->condition, scope, true);
             } else {
                 validateExprCalls(fn, whileStmt->condition, scope, false);
             }
-            analyzeBlock(fn, whileStmt->body, scope, hasActiveOnError);
+            analyzeBlock(fn, whileStmt->body, scope);
             loopDepth -= 1;
             return;
         }
@@ -900,7 +884,7 @@ public:
                     if (!scase.bindingName.empty() && boundPayloadTid != INVALID_ID) {
                         bindLocalVar(caseScope, scase.bindingName, boundPayloadTid, false, false, scase.line, scase.col);
                     }
-                    analyzeBlock(fn, scase.body, caseScope, hasActiveOnError);
+                    analyzeBlock(fn, scase.body, caseScope);
                     for (const auto& kv : caseScope) {
                         if (kv.first != scase.bindingName) {
                             scope[kv.first] = kv.second;
@@ -917,22 +901,25 @@ public:
                             setAnalyzerError(scase.line, scase.col, "case expression type does not match select case target type");
                         }
                     }
-                    analyzeBlock(fn, scase.body, scope, hasActiveOnError);
+                    analyzeBlock(fn, scase.body, scope);
                 }
             }
 
             if (selStmt->hasCaseElse) {
-                analyzeBlock(fn, selStmt->caseElse, scope, hasActiveOnError);
+                analyzeBlock(fn, selStmt->caseElse, scope);
             }
             return;
         }
 
         if (const auto* dstmt = arena.getStmt<DeferStmt>(stmtId)) {
-            analyzeBlock(fn, dstmt->body, scope, false);
+            const int savedTryDepth = activeTryDepth;
+            activeTryDepth = 0;
+            analyzeBlock(fn, dstmt->body, scope);
+            activeTryDepth = savedTryDepth;
             return;
         }
 
-        if (const auto* retStmt = arena.getStmt<ReturnStmt>(stmtId)) {
+        if (auto* retStmt = arena.getStmtMut<ReturnStmt>(stmtId)) {
             bool isReturnErrorCall = false;
             bool isReturnVoidFallibleCall = false;
             if (retStmt->hasValue) {
@@ -948,8 +935,7 @@ public:
                     }
                 }
                 if (!isReturnErrorCall) {
-                    bool implicitBubble = false;
-                    checkFallibleUsage(fn, retStmt->value, scope, hasActiveOnError, implicitBubble);
+                    checkFallibleUsage(fn, retStmt->value, scope, retStmt->implicitBubble, retStmt->breaksToCatch);
                 }
                 validateExprCalls(fn, retStmt->value, scope, true);
             }
@@ -991,17 +977,17 @@ public:
     void analyzeBlock(
         const FnDecl& fn,
         const std::vector<StmtId>& stmts,
-        std::unordered_map<std::string, VarSymbol>& scope,
-        bool inheritedOnError
+        std::unordered_map<std::string, VarSymbol>& scope
     ) {
-        bool activeOnError = inheritedOnError;
         for (const StmtId sid : stmts) {
-            analyzeStmt(fn, sid, scope, activeOnError);
+            analyzeStmt(fn, sid, scope);
         }
     }
 
     void analyzeFn(const FnDecl& fn) {
         loopDepth = 0;
+        activeTryDepth = 0;
+        currentFnKey = symbolKey(moduleId, fn.name);
         std::unordered_map<std::string, VarSymbol> scope;
         for (const auto& param : fn.params) {
             const TypeId resolvedTid = canonicalizeType(arena, symbols, moduleId, param.typeId);
@@ -1009,11 +995,12 @@ public:
             bindLocalVar(scope, param.name, resolvedTid, param.isByref, isConst, param.line, param.col);
         }
 
-        analyzeBlock(fn, fn.body, scope, false);
-        auto& savedScope = symbols.fnScopes[symbolKey(moduleId, fn.name)];
+        analyzeBlock(fn, fn.body, scope);
+        auto& savedScope = symbols.fnScopes[currentFnKey];
         for (auto& kv : scope) {
             savedScope[kv.first] = std::move(kv.second);
         }
+        currentFnKey.clear();
     }
 
     void analyzeProgram(const Program& program) {
@@ -1028,7 +1015,7 @@ public:
         // - Pass 1b: Canonicalize struct fields, union variants, enum values, module constants, and
         //   function signatures (including overload sets).
         // - Pass 2: Type-check function bodies, infer local variable types, enforce const/byref mutability,
-        //   and verify static 'can error' / 'on error' handling.
+        //   and verify static 'can error' / 'try / catch' handling.
         for (const DeclId did : program.declarations) {
             if (did >= arena.decls.size()) continue;
             const auto& declNode = arena.decls[did];

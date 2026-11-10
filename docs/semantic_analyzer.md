@@ -279,29 +279,22 @@ Whenever `error(msg, [code=N])` is called:
 
 ### 7.2 Fallible Function Calls & Implicit Bubbling (`checkFallibleUsage`)
 When function `caller` invokes a fallible function `callee` (`callee.isFallible == true`):
-* **Case 1: Active `on error` Handler in Scope (`hasActiveOnError == true`)**
-  The call is valid even if `caller` is infallible. Errors from `callee` will be routed to the active `on error` block in the current scope.
-* **Case 2: No `on error` Handler, and `caller` Declares `can error` (`caller.isFallible == true`)**
+* **Case 1: Inside a `try / catch` Block (`activeTryDepth > 0`)**
+  The call is valid even if `caller` is infallible. `checkFallibleUsage()` sets `stmt.breaksToCatch = true` on the enclosing `VarAssignment`, `ExprStmt`, or `ReturnStmt`, routing any runtime error to the enclosing `catch` block.
+* **Case 2: Outside a `try / catch` Block, and `caller` Declares `can error` (`caller.isFallible == true`)**
   The call is valid. `checkFallibleUsage()` sets `stmt.implicitBubble = true` on the enclosing `VarAssignment`, `ExprStmt`, or `ReturnStmt`, instructing the emitter to automatically unpack the error and bubble it upward if `cbHasError(_err)` is true.
-* **Case 3: No `on error` Handler, and `caller` is Infallible (`caller.isFallible == false`)**
+* **Case 3: Outside a `try / catch` Block, and `caller` is Infallible (`caller.isFallible == false`)**
   Compilation fails immediately with an `AnalyzerError`:
-  `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'on error' block (function '<caller>' calls fallible function '<callee>').`
+  `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '<caller>' calls fallible function '<callee>').`
 * **Top-Level Statement Rule for Fallible Calls:**
   Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()`, `x = fallible()`, or compound assignment `x += fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignment sub-expressions `x += 1 + fallible()`, or `if` conditions) is rejected with:
   `AnalyzerError: Fallible call to '<name>' must be assigned to a variable, returned directly, or called as a standalone statement.`
 
-### 7.3 `on error` Scope Activation & Mandatory Control-Flow Exit (`stmtListHasExit`)
-When `analyzeStmt()` encounters an `ErrorBlock` (`on error e ... end error`):
-1. It creates a child scope `errScope` with `e` bound to built-in type `err` (`CbError`, providing `e.msg` as `str` and `e.code` as `int`).
-2. It analyzes the statements inside `errBlock.body`.
-3. It verifies that `stmtListHasExit(arena, errBlock.body)` is `true`—meaning the last statement in the `on error` block is an explicit control-flow exit:
-   * `return [<expr>]` (`ReturnStmt`)
-   * `break` (`BreakStmt`)
-   * `continue` (`ContinueStmt`)
-   * `error(...)` (`ExprStmt` calling the `error` intrinsic)
-   If the block can fall through without exiting, the analyzer reports:
-   `AnalyzerError: 'on error' block must terminate with an explicit control-flow exit ('return', 'error(...)', or 'break').`
-4. Once validated, `hasActiveOnError = true` is set for all subsequent statements in the enclosing block (and inherited by nested `if` / `for` / `select case` blocks within that scope).
+### 7.3 `try / catch` Block Scoping (`TryCatchStmt`)
+When `analyzeStmt()` encounters a `TryCatchStmt` (`try ... catch e ... end try`):
+1. It creates an isolated child scope `tryScope`, increments `activeTryDepth`, and analyzes `tryCatch->tryBody`.
+2. It decrements `activeTryDepth`, creates a separate child scope `catchScope` with `e` bound to built-in type `err` (`CbError`, providing `e.msg` as `str`, `e.code` as `int`, `e.file` as `str`, and `e.line` as `int`), and analyzes `tryCatch->catchBody`.
+3. Unlike the legacy `on error` construct, the `catch` block does not require a mandatory control-flow exit and may fall through.
 
 ### 7.4 Return Value Consistency
 For every `ReturnStmt`, `analyzeStmt()` verifies (unless the statement is `return error(...)`):

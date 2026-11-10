@@ -67,9 +67,8 @@ CleanBasic uses natural multi-word BASIC block terminators and clauses. When the
 | `select` | `case` | `"select case"` |
 | `case` | `else` | `"case else"` |
 | `else` | `if` | `"else if"` |
-| `on` | `error` | `"on error"` |
 | `can` | `error` | `"can error"` |
-| `end` | `select`, `if`, `fn`, `type`, `enum`, `union`, `for`, `while`, `defer`, `error` | `"end select"`, `"end if"`, `"end fn"`, `"end type"`, `"end enum"`, `"end union"`, `"end for"`, `"end while"`, `"end defer"`, `"end error"` |
+| `end` | `select`, `if`, `fn`, `type`, `enum`, `union`, `for`, `while`, `defer`, `try` | `"end select"`, `"end if"`, `"end fn"`, `"end type"`, `"end enum"`, `"end union"`, `"end for"`, `"end while"`, `"end defer"`, `"end try"` |
 
 Coalescing these in the lexer keeps the parser LL(1) on block boundaries without requiring arbitrary backtracking.
 
@@ -173,7 +172,7 @@ Inside a function body, `parseStatement()` dispatches on leading keywords:
 | `if` | `parseIfStmt` | Parses `if <Expr>`, zero or more `else if <Expr>` branches (`ElseIfBranch`), optional `else` branch, and terminating `end if` into `IfStmt`. |
 | `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, and parses inclusive `<start> to <end> [step <step>]` into `rangeSpec`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal` or `for k, v in dictVal`). Terminated by `end for`. |
 | `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr1>[, <matchExpr2>...]` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
-| `on error` | `parseOnErrorStmt` | Parses `on error <errIdent>`, statement list body, and `end error` into `ErrorBlock`. |
+| `try` | `parseTryCatchStmt` | Parses `try`, try statement list, `catch <errIdent>`, catch statement list, and `end try` into `TryCatchStmt`. |
 | `defer` | `parseDeferStmt` | Parses `defer`, statement list body, and `end defer` into `DeferStmt`. |
 | `return` | `parseReturnStmt` | Parses `return [<Expr>]` into `ReturnStmt` (`has_value = true` if an expression precedes `NEWLINE`/`EOF`). |
 | `break` | `parseBreakStmt` | Parses `break` into `BreakStmt`. |

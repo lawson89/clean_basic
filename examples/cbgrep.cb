@@ -64,48 +64,47 @@ fn main() as int
     p.addFlag("invert-match", "v", "Invert match: select non-matching lines")
     p.addArg("pattern", "Search pattern", required=true)
 
-    on error e
+    try
+        const args = p.parse()
+        if args.helpRequested
+            p.printUsage()
+            return 0
+        end if
+        if args.versionRequested
+            print("cbgrep 1.0")
+            return 0
+        end if
+
+        dim targets = args.rest
+        if targets.len() == 0
+            targets.push("-")
+        end if
+
+        dim totalMatches = 0
+        for target in targets
+            try
+                if fs.isDir(target)
+                    for path in fs.walkFiles(target)
+                        try
+                            totalMatches += search(path, args)
+                        catch e2
+                            os.eprint($"cbgrep: {path}: {e2.msg}")
+                        end try
+                    end for
+                else
+                    totalMatches += search(target, args)
+                end if
+            catch e
+                os.eprint($"cbgrep: {target}: {e.msg}")
+            end try
+        end for
+
+        if totalMatches > 0
+            return 0
+        end if
+        return 1
+    catch e
         os.eprint($"cbgrep: {e.msg}")
         return 2
-    end error
-
-    const args = p.parse()
-    if args.helpRequested
-        p.printUsage()
-        return 0
-    end if
-    if args.versionRequested
-        print("cbgrep 1.0")
-        return 0
-    end if
-
-    dim targets = args.rest
-    if targets.len() == 0
-        targets.push("-")
-    end if
-
-    dim totalMatches = 0
-    for target in targets
-        on error e
-            os.eprint($"cbgrep: {target}: {e.msg}")
-            continue
-        end error
-
-        if fs.isDir(target)
-            for path in fs.walkFiles(target)
-                on error e2
-                    os.eprint($"cbgrep: {path}: {e2.msg}")
-                    continue
-                end error
-                totalMatches += search(path, args)
-            end for
-        else
-            totalMatches += search(target, args)
-        end if
-    end for
-
-    if totalMatches > 0
-        return 0
-    end if
-    return 1
+    end try
 end fn

@@ -195,47 +195,47 @@ end fn
 fn main() as int
     dim p = buildParser()
 
-    on error e
+    try
+        const args = p.parse()
+        if args.helpRequested
+            p.printUsage()
+            return 0
+        end if
+        if args.versionRequested
+            print("cbdoc 1.0")
+            return 0
+        end if
+
+        const target = args.get("target")
+        if not fs.exists(target)
+            os.eprint($"cbdoc: {target}: No such file or directory")
+            return 1
+        end if
+
+        const files = collectCbFiles(target)
+
+        const title = args.get("title", "CleanBasic API Reference")
+        const includePrivate = args.has("include-private")
+        dim sections as list[str] = [$"# {title}", ""]
+
+        for fpath in files
+            const entries = parseFileDocs(fpath, includePrivate)
+            if entries.len() > 0
+                sections.push(renderFileSection(fpath, entries))
+            end if
+        end for
+
+        const markdown = str.join(sections, "\n").rtrim() & "\n"
+        const outPath = args.get("output", "")
+        if outPath != ""
+            fs.write(outPath, markdown)
+        else
+            os.printRaw(markdown)
+        end if
+        return 0
+    catch e
         os.eprint($"cbdoc: {e.msg}")
         os.eprint(p.usage())
         return 2
-    end error
-
-    const args = p.parse()
-    if args.helpRequested
-        p.printUsage()
-        return 0
-    end if
-    if args.versionRequested
-        print("cbdoc 1.0")
-        return 0
-    end if
-
-    const target = args.get("target")
-    if not fs.exists(target)
-        os.eprint($"cbdoc: {target}: No such file or directory")
-        return 1
-    end if
-
-    const files = collectCbFiles(target)
-
-    const title = args.get("title", "CleanBasic API Reference")
-    const includePrivate = args.has("include-private")
-    dim sections as list[str] = [$"# {title}", ""]
-
-    for fpath in files
-        const entries = parseFileDocs(fpath, includePrivate)
-        if entries.len() > 0
-            sections.push(renderFileSection(fpath, entries))
-        end if
-    end for
-
-    const markdown = str.join(sections, "\n").rtrim() & "\n"
-    const outPath = args.get("output", "")
-    if outPath != ""
-        fs.write(outPath, markdown)
-    else
-        os.printRaw(markdown)
-    end if
-    return 0
+    end try
 end fn

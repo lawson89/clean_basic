@@ -17,10 +17,7 @@ import "std/str"
 import "std/fs"
 
 fn main() as int
-    on error e
-        print("Unexpected error: " & e.msg)
-        return 1
-    end error
+    try
 
     ' 1. Search & Match (both UFCS s.* and module str.*)
     dim sample = "alpha beta alpha beta"
@@ -151,5 +148,9 @@ fn main() as int
         " unesc=" & (unescaped == rawEsc)
     )
 
-    return 0
+        return 0
+    catch e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end try
 end fn

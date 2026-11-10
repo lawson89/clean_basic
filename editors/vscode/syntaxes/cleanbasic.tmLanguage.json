@@ -98,11 +98,11 @@
       "patterns": [
         {
           "name": "keyword.control.multiword.cleanbasic",
-          "match": "\\b(?:import\\s+header|import\\s+link|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+enum|end\\s+for|end\\s+while|end\\s+defer|end\\s+error|on\\s+error|can\\s+error)\\b"
+          "match": "\\b(?:import\\s+header|import\\s+link|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+enum|end\\s+union|end\\s+for|end\\s+while|end\\s+defer|end\\s+try|can\\s+error)\\b"
         },
         {
           "name": "keyword.control.cleanbasic",
-          "match": "\\b(?:import|as|pub|extern|type|alias|enum|fn|return|if|else|while|for|until|to|step|in|case|defer|break|continue)\\b"
+          "match": "\\b(?:import|as|pub|extern|type|alias|enum|union|fn|return|if|else|while|for|until|to|step|in|case|try|catch|defer|break|continue)\\b"
         },
         {
           "name": "storage.modifier.cleanbasic",

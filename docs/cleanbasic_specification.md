@@ -7,7 +7,7 @@ For deep-dive technical documentation on each compiler stage, consult:
 * [Transpiler Architecture & Arena Design](transpilerArchitecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
 * [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
 * [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `pub` visibility, and C++ identifier mangling.
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `on error` verification.
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `try / catch` verification.
 * [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cppEmitterAndInterop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
 * [C++17 Strict Data-Oriented Subset](cppSubset.md) — Coding standards for the transpiler implementation.
 
@@ -52,13 +52,13 @@ Param           ::= ["byref"] Identifier "as" Type ["=" Expr]
 
 Statement       ::= VarDecl | Assignment | ExprStmt
                   | IfStmt | ForStmt | SelectStmt
-                  | ErrBlock | DeferBlock | ReturnStmt | BreakStmt | ContinueStmt
+                  | TryCatchStmt | DeferBlock | ReturnStmt | BreakStmt | ContinueStmt
 
 VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr NEWLINE
 Assignment      ::= Expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=") Expr NEWLINE
 ExprStmt        ::= Expr NEWLINE
 
-ErrBlock        ::= "on error" Identifier NEWLINE Statement* "end error" NEWLINE
+TryCatchStmt    ::= "try" NEWLINE Statement* "catch" Identifier NEWLINE Statement* "end try" NEWLINE
 DeferBlock      ::= "defer" NEWLINE Statement* "end defer" NEWLINE
 
 IfStmt          ::= "if" Expr NEWLINE Statement*
@@ -187,9 +187,9 @@ end fn
 
 CleanBasic provides systems-level safety without `try/catch` performance penalties. Functions declare fallibility by adding `can error` to their signature (`fn connect(ip as str) as Connection can error` or void `fn validatePort(port as int) can error`), raise errors with `error("...", [code=N])`, and use tuple-free `return` statements.
 
-1. **Implicit Bubbling:** If a fallible function calls another fallible function (with no active `on error` handler in scope), the transpiler automatically injects an invisible check that returns the error upward. The developer writes zero error boilerplate.
-2. **Deterministic Cleanup (`defer`):** The `defer ... end defer` block guarantees execution when the function exits (via a successful return, an `on error` return, or an error bubble), mapping cleanly to C++ RAII scope-exit destructors in LIFO order.
-3. **Scope-Level Explicit Handling (`on error`):** An `on error <ident> ... end error` statement block registers an active error handler for all subsequent fallible statements in the enclosing scope (mirroring `defer ... end defer`). It binds `<ident>` as a structured `err` value with `.msg` (`str`) and `.code` (`int`) fields, and its body *must* terminate with an explicit control-flow exit (`return`, `error(...)`, or `break`). Pairing `defer` with `on error` provides clean `try / catch / finally` semantics without C++ exception overhead.
+1. **Implicit Bubbling:** If a fallible function calls another fallible function (outside of a `try ... catch` block), the transpiler automatically injects an invisible check that returns the error upward. The developer writes zero error boilerplate.
+2. **Deterministic Cleanup (`defer`):** The `defer ... end defer` block guarantees execution when the function exits (via a successful return, a `catch` return, or an error bubble), mapping cleanly to C++ RAII scope-exit destructors in LIFO order.
+3. **Exception-less `try / catch` Blocks:** A `try ... catch <ident> ... end try` statement block wraps fallible calls and lowers to a zero-exception `do { ... break; } while(false);` construct. It binds `<ident>` as a structured `err` value with `.msg` (`str`), `.code` (`int`), `.file` (`str`), and `.line` (`int`) fields, and its `catch` body can either return, break/continue, or fall through.
 
 **network.cb (Error Bubbling & Cleanup)**
 
@@ -225,15 +225,13 @@ pub fn processNetwork() as int can error
 end fn
 
 fn startServer()
-    ' startServer() cannot fail. Register a scope-level 'on error' handler
-    ' before calling any fallible functions in this scope.
-    on error e
+    ' startServer() cannot fail. Handle fallible calls in a try / catch block.
+    try
+        dim records = processNetwork()
+        print("Connected and processed ", records, " records.")
+    catch e
         print("Failed to start server (code=" & e.code.toStr() & "): " & e.msg)
-        return
-    end error
-
-    dim records = processNetwork()
-    print("Connected and processed ", records, " records.")
+    end try
 end fn
 ```
 
@@ -281,17 +279,17 @@ pub fn runSearch() as int
     p.addOption("output", "o", "Output file path", defaultVal="out.txt")
     p.addArg("pattern", "Substring pattern to search for")
 
-    on error e
+    try
+        dim args = p.parse()
+        if args.helpRequested
+            p.printUsage()
+            return 0
+        end if
+        return 0
+    catch e
         print(e.msg)
         p.printUsage()
         return 2
-    end error
-
-    dim args = p.parse()
-    if args.helpRequested
-        p.printUsage()
-        return 0
-    end if
-    return 0
+    end try
 end fn
 ```
