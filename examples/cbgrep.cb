@@ -1,148 +1,94 @@
 ' CleanBasic Example: cbgrep
-'' Fast Unix grep / ripgrep-style CLI utility written in pure CleanBasic
-'' Demonstrates std/cli, std/os, std/fs (streaming File + defer + on error), UFCS, and the std/str prelude
-'
-'' Usage:
-''   cbgrep [-icnv] <pattern> [path...]
+'' Fast Unix grep utility written in pure CleanBasic
+'' Demonstrates std/cli, std/os, std/fs (walkFiles + streaming), and error handling.
 
 import "std/cli"
 import "std/os"
 import "std/fs"
 
-'' Configuration options for the grep search.
-pub type GrepOptions
-    pattern as str
-    ignoreCase as bool = false
-    lineNumbers as bool = false
-    countOnly as bool = false
-    invertMatch as bool = false
-end type
-
-'' Returns true if the line matches the search pattern according to GrepOptions.
-fn matchesLine(opts as GrepOptions, line as str) as bool
-    dim matched = false
-    if opts.ignoreCase
-        matched = line.asciiContainsIgnoreCase(opts.pattern)
-    else
-        matched = line.contains(opts.pattern)
-    end if
-    ' Boolean inequality (XOR) handles invertMatch: 
-    ' If invertMatch is true, we return true only if matched is false.
-    return opts.invertMatch != matched
-end fn
-
-'' Formats a match for display, optionally including the path and line number.
-fn formatMatch(opts as GrepOptions, path as str, showPath as bool, lineNum as int, line as str) as str
-    if showPath and opts.lineNumbers
-        return $"{path}:{lineNum}:{line}"
-    else if showPath
-        return $"{path}:{line}"
-    else if opts.lineNumbers
-        return $"{lineNum}:{line}"
-    end if
-    return line
-end fn
-
-'' Records a match, incrementing the count and printing if countOnly is false.
-fn recordMatch(opts as GrepOptions, path as str, showPath as bool, lineNum as int, line as str, byref matchedCount as int)
-    matchedCount += 1
-    if not opts.countOnly
-        print(opts.formatMatch(path, showPath, lineNum, line))
-    end if
-end fn
-
-'' Prints the final match count for a target if countOnly is true.
-fn printCount(opts as GrepOptions, path as str, showPath as bool, matchedCount as int)
-    if not opts.countOnly
-        return
-    end if
-    if showPath
-        print($"{path}:{matchedCount}")
-    else
-        print(matchedCount)
-    end if
-end fn
-
-'' Searches for matches in standard input.
-fn searchStdin(opts as GrepOptions, showPath as bool) as int
-    dim matchedCount = 0
+'' Searches for matches in a file or standard input.
+fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, invert as bool, countOnly as bool) as int can error
     dim lineNum = 0
+    dim matchCount = 0
     dim line = ""
-    while os.readLine(line)
-        lineNum += 1
-        if opts.matchesLine(line)
-            opts.recordMatch("(standard input)", showPath, lineNum, line, matchedCount)
+    
+    if path == "-"
+        while os.readLine(line)
+            lineNum += 1
+            dim matched = false
+            if ignoreCase
+                matched = line.asciiContainsIgnoreCase(pattern)
+            else
+                matched = line.contains(pattern)
+            end if
+
+            if invert
+                matched = not matched
+            end if
+
+            if matched
+                matchCount += 1
+                if not countOnly
+                    if lineNumbers
+                        print("(stdin):" & lineNum.toStr() & ":" & line)
+                    else
+                        print("(stdin):" & line)
+                    end if
+                end if
+            end if
+        end while
+    else
+        dim f = fs.open(path)
+        defer
+            f.close()
+        end defer
+        while f.readLine(line)
+            lineNum += 1
+            dim matched = false
+            if ignoreCase
+                matched = line.asciiContainsIgnoreCase(pattern)
+            else
+                matched = line.contains(pattern)
+            end if
+
+            if invert
+                matched = not matched
+            end if
+
+            if matched
+                matchCount += 1
+                if not countOnly
+                    if lineNumbers
+                        print(path & ":" & lineNum.toStr() & ":" & line)
+                    else
+                        print(path & ":" & line)
+                    end if
+                end if
+            end if
+        end while
+    end if
+
+    if countOnly
+        if path != "-"
+            print(path & ":" & matchCount.toStr())
+        else
+            print(matchCount.toStr())
         end if
-    end while
-    opts.printCount("(standard input)", showPath, matchedCount)
-    return matchedCount
+    end if
+
+    return matchCount
 end fn
 
-'' Searches for matches in a single file at path.
-fn searchFile(path as str, opts as GrepOptions, showPath as bool, byref hadError as bool) as int
-    on error e
-        os.eprint($"cbgrep: {path}: {e.msg}")
-        hadError = true
-        return 0
-    end error
-
-    dim f = fs.open(path)
-    defer
-        f.close()
-    end defer
-
-    dim matchedCount = 0
-    dim lineNum = 0
-    dim line = ""
-    while f.readLine(line)
-        lineNum += 1
-        if opts.matchesLine(line)
-            opts.recordMatch(path, showPath, lineNum, line, matchedCount)
-        end if
-    end while
-
-    opts.printCount(path, showPath, matchedCount)
-    return matchedCount
-end fn
-
-'' Recursively searches for matches in all files within the directory at dirPath.
-fn searchDir(dirPath as str, opts as GrepOptions, byref hadError as bool) as int
-    on error e
-        os.eprint($"cbgrep: {dirPath}: {e.msg}")
-        hadError = true
-        return 0
-    end error
-
-    dim total = 0
-    const files = fs.walkFiles(dirPath)
-    for path in files
-        ' Skip hidden files or files in hidden directories
-        if path.contains("/.") or fs.fileName(path).startsWith(".")
-            continue
-        end if
-        total += searchFile(path, opts, true, hadError)
-    end for
-    return total
-end fn
-
-'' Configures the CLI parser for cbgrep.
-fn buildCliParser() as cli.Parser
-    dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files or standard input")
-    p.addFlag("ignore-case", "i", "Perform case-insensitive ASCII matching")
-    p.addFlag("line-number", "n", "Prefix each matching line with its 1-based line number")
-    p.addFlag("count", "c", "Print only a count of matching lines per input")
-    p.addFlag("invert-match", "v", "Select non-matching lines")
-    p.addArg("pattern", "Substring pattern to search for", required=true)
-    return p
-end fn
-
-'' Entry point for cbgrep.
 fn main() as int
-    dim p = buildCliParser()
+    dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files")
+    p.addFlag("ignore-case", "i", "Case-insensitive search")
+    p.addFlag("line-number", "n", "Show line numbers")
+    p.addFlag("count", "c", "Only show a count of matching lines")
+    p.addFlag("invert-match", "v", "Invert match: select non-matching lines")
+    p.addArg("pattern", "Search pattern", required=true)
 
     on error e
-        os.eprint($"cbgrep: {e.msg}")
-        os.eprint(p.usage())
+        os.eprint("cbgrep: " & e.msg)
         return 2
     end error
 
@@ -151,44 +97,47 @@ fn main() as int
         p.printUsage()
         return 0
     end if
-    if args.versionRequested
-        print("cbgrep 1.0")
-        return 0
-    end if
 
-    const opts = GrepOptions(
-        pattern=args.get("pattern"),
-        ignoreCase=args.has("ignore-case"),
-        lineNumbers=args.has("line-number"),
-        countOnly=args.has("count"),
-        invertMatch=args.has("invert-match")
-    )
-    const targets = args.rest
+    const pattern = args.get("pattern")
+    const ignoreCase = args.has("ignore-case")
+    const lineNumbers = args.has("line-number")
+    const countOnly = args.has("count")
+    const invert = args.has("invert-match")
+
+    dim targets = args.rest
+    if targets.len() == 0
+        targets.push("-")
+    end if
 
     dim totalMatches = 0
-    dim hadError = false
+    for target in targets
+        on error e
+            os.eprint("cbgrep: " & target & ": " & e.msg)
+            continue
+        end error
 
-    if targets.len() == 0
-        totalMatches = searchStdin(opts, false)
-    else
-        const showPath = targets.len() > 1
-        for target in targets
-            if target == "-"
-                totalMatches += searchStdin(opts, showPath)
-            else if not fs.exists(target)
-                os.eprint($"cbgrep: {target}: No such file or directory")
-                hadError = true
-            else if fs.isDir(target)
-                totalMatches += searchDir(target, opts, hadError)
-            else
-                totalMatches += searchFile(target, opts, showPath, hadError)
-            end if
-        end for
-    end if
+        if target == "-"
+            dim mStdn = search("-", pattern, ignoreCase, lineNumbers, invert, countOnly)
+            totalMatches += mStdn
+        else if fs.isDir(target)
+            dim files = fs.walkFiles(target)
+            for path in files
+                if path.contains("/.") or fs.fileName(path).startsWith(".")
+                    continue
+                end if
+                on error e2
+                    os.eprint("cbgrep: " & path & ": " & e2.msg)
+                    continue
+                end error
+                dim mFile = search(path, pattern, ignoreCase, lineNumbers, invert, countOnly)
+                totalMatches += mFile
+            end for
+        else
+            dim mTarget = search(target, pattern, ignoreCase, lineNumbers, invert, countOnly)
+            totalMatches += mTarget
+        end if
+    end for
 
-    if hadError
-        return 2
-    end if
     if totalMatches > 0
         return 0
     end if
