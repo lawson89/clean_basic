@@ -137,4 +137,14 @@
     ],
     "description": "Call .push(item) on a list"
   }
+,
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition}",
+      "\t${0}",
+      "end while"
+    ],
+    "description": "While loop block"
+  }
 }

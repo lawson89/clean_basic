@@ -2,11 +2,11 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "CleanBasic",
   "scopeName": "source.cleanbasic",
-  "patterns": [
-    { "include": "#comments" },
+    "patterns": [
     { "include": "#bytes" },
     { "include": "#interpolated-strings" },
     { "include": "#strings" },
+    { "include": "#comments" },
     { "include": "#declarations" },
     { "include": "#keywords" },
     { "include": "#types" },
@@ -72,7 +72,7 @@
       "patterns": [
         {
           "name": "constant.character.escape.cleanbasic",
-          "match": "\\."
+          "match": "\\\\."
         }
       ]
     },
@@ -98,11 +98,11 @@
       "patterns": [
         {
           "name": "keyword.control.multiword.cleanbasic",
-          "match": "\\b(?:import\\s+header|import\\s+link|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+enum|end\\s+for|end\\s+defer|end\\s+error|on\\s+error|can\\s+error)\\b"
+          "match": "\\b(?:import\\s+header|import\\s+link|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+enum|end\\s+for|end\\s+while|end\\s+defer|end\\s+error|on\\s+error|can\\s+error)\\b"
         },
         {
           "name": "keyword.control.cleanbasic",
-          "match": "\\b(?:import|as|pub|extern|type|alias|enum|fn|return|if|else|for|to|step|in|case|defer|break|continue)\\b"
+          "match": "\\b(?:import|as|pub|extern|type|alias|enum|fn|return|if|else|while|for|until|to|step|in|case|defer|break|continue)\\b"
         },
         {
           "name": "storage.modifier.cleanbasic",
@@ -149,12 +149,20 @@
     "numbers": {
       "patterns": [
         {
+          "name": "constant.numeric.hex.cleanbasic",
+          "match": "\\b0x[0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.cleanbasic",
+          "match": "\\b0b[01_]+\\b"
+        },
+        {
           "name": "constant.numeric.float.cleanbasic",
-          "match": "\\b[0-9]+\\.[0-9]+\\b"
+          "match": "\\b[0-9_]+\\.[0-9_]+\\b"
         },
         {
           "name": "constant.numeric.integer.cleanbasic",
-          "match": "\\b[0-9]+\\b"
+          "match": "\\b[0-9_]+\\b"
         }
       ]
     },
