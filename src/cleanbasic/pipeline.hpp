@@ -305,12 +305,24 @@ inline std::string computeBackendPchHash(
     };
     for (const auto& rel : bridgeRelPaths) {
         const std::string fullPath = std::string(cbRoot) + rel;
-        std::ifstream in(fullPath, std::ios::in | std::ios::binary);
-        if (in.is_open()) {
-            std::ostringstream ss;
-            ss << in.rdbuf();
+        std::error_code ecSize;
+        std::error_code ecTime;
+        const auto fsize = std::filesystem::file_size(fullPath, ecSize);
+        const auto mtime = std::filesystem::last_write_time(fullPath, ecTime);
+        if (!ecSize && !ecTime) {
+            const auto mtimeTicks = mtime.time_since_epoch().count();
             hash = fnv1aUpdate64(hash, "|");
-            hash = fnv1aUpdate64(hash, ss.str());
+            hash = fnv1aUpdate64(hash, std::to_string(fsize));
+            hash = fnv1aUpdate64(hash, ":");
+            hash = fnv1aUpdate64(hash, std::to_string(mtimeTicks));
+        } else {
+            std::ifstream in(fullPath, std::ios::in | std::ios::binary);
+            if (in.is_open()) {
+                std::ostringstream ss;
+                ss << in.rdbuf();
+                hash = fnv1aUpdate64(hash, "|");
+                hash = fnv1aUpdate64(hash, ss.str());
+            }
         }
     }
     return formatHex64(hash);
@@ -427,6 +439,72 @@ inline PchPrepareResult ensureBackendPch(
     return res;
 }
 
+inline bool findExecutableInPath(std::string_view exeName, std::string_view pathEnv) {
+    if (exeName.empty() || pathEnv.empty()) {
+        return false;
+    }
+    char sep = ':';
+    if (hostIsWindows()) {
+        sep = ';';
+    }
+    size_t start = 0;
+    while (start <= pathEnv.size()) {
+        const size_t pos = pathEnv.find(sep, start);
+        std::string_view dir;
+        if (pos == std::string_view::npos) {
+            dir = pathEnv.substr(start);
+            start = pathEnv.size() + 1;
+        } else {
+            dir = pathEnv.substr(start, pos - start);
+            start = pos + 1;
+        }
+        if (dir.empty()) {
+            continue;
+        }
+        std::error_code ec;
+        const std::filesystem::path candidate = std::filesystem::path(std::string(dir)) / std::string(exeName);
+        if (std::filesystem::exists(candidate, ec) && !std::filesystem::is_directory(candidate, ec)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline std::string detectFastLinkerFlag(std::string_view compilerCmd) {
+#if defined(_WIN32) || defined(__APPLE__)
+    (void)compilerCmd;
+    return "";
+#else
+    if (compilerCmd.empty() || compilerCmd.find("zig") != std::string_view::npos) {
+        return "";
+    }
+    static std::unordered_map<std::string, std::string> cache;
+    const std::string key(compilerCmd);
+    const auto it = cache.find(key);
+    if (it != cache.end()) {
+        return it->second;
+    }
+
+    const std::string pathEnv = getEnvVar("PATH");
+    std::string detectedFlag;
+    if (findExecutableInPath("mold", pathEnv)) {
+        const std::string probeCmd = key + " -fuse-ld=mold -Wl,--version >/dev/null 2>&1";
+        if (std::system(probeCmd.c_str()) == 0) {
+            detectedFlag = "-fuse-ld=mold";
+        }
+    }
+    if (detectedFlag.empty() && findExecutableInPath("ld.lld", pathEnv)) {
+        const std::string probeCmd = key + " -fuse-ld=lld -Wl,--version >/dev/null 2>&1";
+        if (std::system(probeCmd.c_str()) == 0) {
+            detectedFlag = "-fuse-ld=lld";
+        }
+    }
+
+    cache[key] = detectedFlag;
+    return detectedFlag;
+#endif
+}
+
 inline std::string buildCompileCommand(
     std::string_view compilerCmd,
     std::string_view cbRoot,
@@ -441,6 +519,11 @@ inline std::string buildCompileCommand(
     if (!optLevel.empty()) {
         resolvedOpt = std::string(optLevel);
     }
+    std::string fastLdFlags;
+    const std::string fastLd = detectFastLinkerFlag(compilerCmd);
+    if (!fastLd.empty()) {
+        fastLdFlags = " " + fastLd;
+    }
     const std::string q(1, '"');
     std::string pchFlags;
     if (!pchHeaderPath.empty()) {
@@ -448,6 +531,7 @@ inline std::string buildCompileCommand(
     }
     std::string cmd = std::string(compilerCmd) +
         " -O" + resolvedOpt + " -std=c++17 -pthread" +
+        fastLdFlags +
         pchFlags +
         " -I" + q + std::string(cbRoot) + "/vendor" + q +
         " -I" + q + std::string(cbRoot) + "/stdlib" + q +

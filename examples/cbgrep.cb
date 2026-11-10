@@ -7,7 +7,7 @@ import "std/os"
 import "std/fs"
 
 
-fn matchLine(line as str, pattern as str, ignoreCase as bool, invert as bool) as bool
+fn matchLine(line as str, pattern as str, ignoreCase as bool, lineNumbers as bool, invert as bool, countOnly as bool, source as str, lineNum as int) as bool
     dim matched = false
     if ignoreCase
         matched = line.asciiContainsIgnoreCase(pattern)
@@ -19,6 +19,15 @@ fn matchLine(line as str, pattern as str, ignoreCase as bool, invert as bool) as
         matched = not matched
     end if
 
+    if matched
+        if not countOnly
+            if lineNumbers
+                print($"{source}:{lineNum.toStr()}:{line}")
+            else
+                print($"{source}:{line}")
+            end if
+        end if
+    end if
     return matched
 end fn
 
@@ -32,17 +41,9 @@ fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, 
     if path == "-"
         while os.readLine(line)
             lineNum += 1
-            dim matched = matchLine(line, pattern, ignoreCase, invert)
-
+            dim matched = matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, "{stdout}", lineNum)
             if matched
                 matchCount += 1
-                if not countOnly
-                    if lineNumbers
-                        print($"(stdin):{lineNum.toStr()}:{line}")
-                    else
-                        print($"(stdin):{line}")
-                    end if
-                end if
             end if
         end while
     else
@@ -52,17 +53,9 @@ fn search(path as str, pattern as str, ignoreCase as bool, lineNumbers as bool, 
         end defer
         while f.readLine(line)
             lineNum += 1
-            dim matched = matchLine(line, pattern, ignoreCase, invert)
-
+            dim matched = matchLine(line, pattern, ignoreCase, lineNumbers, invert, countOnly, path, lineNum)
             if matched
                 matchCount += 1
-                if not countOnly
-                    if lineNumbers
-                        print($"{path}:{lineNum.toStr()}:{line}")
-                    else
-                        print($"{path}:{line}")
-                    end if
-                end if
             end if
         end while
     end if

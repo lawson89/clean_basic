@@ -4589,3 +4589,129 @@ TEST_CASE("Transpiler and LSP regression fixes for edge-case defects", "[regress
         cb::testE2E::runE2EFixture("regression_fixes", "tests/cases/regression_fixes.cb");
     }
 }
+
+TEST_CASE("Optimizations 1-3: Call-graph tree-shaking, fast linker detection, and alias/PCH fast paths", "[emitter][pipeline][symbols][optimization]") {
+    SECTION("Emitter call-graph tree-shaking strips unreachable imported module and stdlib functions") {
+        std::unordered_map<std::string, std::string> virtualFiles;
+        virtualFiles["/ws/helper.cb"] = R"CB(fn transitiveInternal(x as int) as int
+    return x * 2
+end fn
+
+fn defaultParamHelper() as int
+    return 7
+end fn
+
+pub fn usedPublic(a as int, b as int = defaultParamHelper()) as int
+    return transitiveInternal(a) + b
+end fn
+
+pub fn bareRefTarget(v as int) as int
+    return v + 1
+end fn
+
+pub fn unusedPublic(x as int) as int
+    return x + 999
+end fn
+
+fn unusedPrivate() as int
+    return 42
+end fn
+)CB";
+        const std::string mainSrc = R"CB(import "helper.cb"
+import "std/fs"
+import "std/os"
+
+fn applyFn(f as fn(int) as int, x as int) as int
+    return f(x)
+end fn
+
+fn localUnreferencedHelper() as int
+    return 123
+end fn
+
+fn main() as int
+    dim r1 = helper.usedPublic(10)
+    dim r2 = applyFn(helper.bareRefTarget, r1)
+    if fs.exists("README.md") and os.platform().len() > 0
+        return r2
+    end if
+    return 0
+end fn
+)CB";
+        virtualFiles["/ws/main.cb"] = mainSrc;
+
+        const auto checkRes = cb::checkSource(mainSrc, "/ws/main.cb", virtualFiles);
+        INFO("Tree-shaking check diagnostic: " << cb::formatDiagnostic(checkRes.error));
+        REQUIRE(checkRes.ok);
+
+        const std::string cpp = cb::emitProgram(checkRes.arena, checkRes.symbols, checkRes.program);
+
+        // Root module functions (including unreferenced root helpers) are preserved
+        CHECK(cpp.find("localUnreferencedHelper(") != std::string::npos);
+
+        // Reachable imported functions (direct, transitive internal, default param, bare fn ref) are emitted
+        CHECK(cpp.find("cb_helper__usedPublic(") != std::string::npos);
+        CHECK(cpp.find("cb_helper__transitiveInternal(") != std::string::npos);
+        CHECK(cpp.find("cb_helper__defaultParamHelper(") != std::string::npos);
+        CHECK(cpp.find("cb_helper__bareRefTarget(") != std::string::npos);
+
+        // Unreachable imported module functions are stripped
+        CHECK(cpp.find("cb_helper__unusedPublic") == std::string::npos);
+        CHECK(cpp.find("cb_helper__unusedPrivate") == std::string::npos);
+
+        // Referenced stdlib functions are emitted while unused stdlib functions are stripped
+        CHECK(cpp.find("cb_std_fs__exists(") != std::string::npos);
+        CHECK(cpp.find("cb_std_os__platform(") != std::string::npos);
+        CHECK(cpp.find("cb_std_fs__walkFiles") == std::string::npos);
+        CHECK(cpp.find("cb_std_fs__removeAll") == std::string::npos);
+        CHECK(cpp.find("cb_std_os__exec") == std::string::npos);
+    }
+
+    SECTION("Built-in type alias resolution fast path preserves primitive TypeIds and unwraps user aliases") {
+        const std::string src = R"CB(alias MyInt = int
+alias IntList = list[MyInt]
+
+fn main() as int
+    dim a as MyInt = 10
+    dim b as IntList = [a, 20]
+    return b[0]
+end fn
+)CB";
+        const auto checkRes = cb::checkSource(src, "alias_fastpath.cb");
+        REQUIRE(checkRes.ok);
+
+        CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeInt) == checkRes.symbols.typeInt);
+        CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeStr) == checkRes.symbols.typeStr);
+        CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeBool) == checkRes.symbols.typeBool);
+
+        const cb::TypeId myIntTid = checkRes.arena.findType("MyInt");
+        REQUIRE(myIntTid != cb::INVALID_ID);
+        CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", myIntTid) == checkRes.symbols.typeInt);
+    }
+
+    SECTION("findExecutableInPath, detectFastLinkerFlag, and stat-based computeBackendPchHash") {
+        const std::filesystem::path tmpDir = std::filesystem::temp_directory_path() / "cb_test_fast_ld_path";
+        std::error_code ec;
+        std::filesystem::create_directories(tmpDir, ec);
+        const std::filesystem::path fakeMold = tmpDir / "mold";
+        {
+            std::ofstream out(fakeMold);
+            out << "#!/bin/sh" << std::endl;
+        }
+
+        CHECK(cb::findExecutableInPath("mold", tmpDir.string()));
+        CHECK_FALSE(cb::findExecutableInPath("nonexistent_linker_xyz", tmpDir.string()));
+        CHECK(cb::detectFastLinkerFlag("zig c++ -target x86_64-linux-gnu").empty());
+
+        std::filesystem::remove_all(tmpDir, ec);
+
+        const cb::TargetSpec nativeSpec = cb::resolveTargetSpec("native");
+        const std::string rootDir = cb::cleanbasicRootDir();
+        const std::string h1 = cb::computeBackendPchHash("g++", nativeSpec, "0", rootDir);
+        const std::string h2 = cb::computeBackendPchHash("g++", nativeSpec, "0", rootDir);
+        const std::string hOpt3 = cb::computeBackendPchHash("g++", nativeSpec, "3", rootDir);
+        CHECK(h1.size() == 16);
+        CHECK(h1 == h2);
+        CHECK(h1 != hOpt3);
+    }
+}

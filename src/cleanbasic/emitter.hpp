@@ -1684,6 +1684,339 @@ public:
         indentLevel -= 1;
         emitLine("}");
     }
+
+    void scanReachableExpr(
+        ExprId exprId,
+        const std::string& modId,
+        const std::unordered_map<std::string, VarSymbol>& scope,
+        std::unordered_set<std::string>& reachable,
+        std::vector<std::string>& worklist
+    ) const {
+        if (exprId >= arena.exprs.size()) {
+            return;
+        }
+
+        auto markReachable = [&](const std::string& key) {
+            if (key.empty() || reachable.find(key) != reachable.end()) {
+                return;
+            }
+            reachable.insert(key);
+            worklist.push_back(key);
+        };
+
+        if (arena.getExpr<Identifier>(exprId) != nullptr) {
+            const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, modId);
+            if (bareFnOpt.has_value() && !bareFnOpt->isBuiltinReceiver && !bareFnOpt->isFnValueCall) {
+                markReachable(symbolKey(bareFnOpt->moduleId, bareFnOpt->name));
+            }
+            return;
+        }
+
+        if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
+            scanReachableExpr(uop->operand, modId, scope, reachable, worklist);
+            return;
+        }
+
+        if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
+            scanReachableExpr(bop->left, modId, scope, reachable, worklist);
+            scanReachableExpr(bop->right, modId, scope, reachable, worklist);
+            return;
+        }
+
+        if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
+            const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, modId);
+            if (bareFnOpt.has_value() && !bareFnOpt->isBuiltinReceiver && !bareFnOpt->isFnValueCall) {
+                markReachable(symbolKey(bareFnOpt->moduleId, bareFnOpt->name));
+            }
+            scanReachableExpr(faccess->target, modId, scope, reachable, worklist);
+            return;
+        }
+
+        if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
+            scanReachableExpr(iaccess->target, modId, scope, reachable, worklist);
+            scanReachableExpr(iaccess->index, modId, scope, reachable, worklist);
+            return;
+        }
+
+        if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
+            for (const ExprId elem : llit->elements) {
+                scanReachableExpr(elem, modId, scope, reachable, worklist);
+            }
+            return;
+        }
+
+        if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
+            for (const auto& ent : dlit->entries) {
+                scanReachableExpr(ent.key, modId, scope, reachable, worklist);
+                scanReachableExpr(ent.value, modId, scope, reachable, worklist);
+            }
+            return;
+        }
+
+        if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
+            scanReachableExpr(call->callee, modId, scope, reachable, worklist);
+            for (const ExprId argId : call->args) {
+                scanReachableExpr(argId, modId, scope, reachable, worklist);
+            }
+            for (const auto& na : call->namedArgs) {
+                scanReachableExpr(na.value, modId, scope, reachable, worklist);
+            }
+
+            const auto structOpt = resolveStructConstructor(arena, *call, symbols, modId, scope);
+            if (structOpt.has_value()) {
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                for (const auto& fdecl : structOpt->fieldOrder) {
+                    if (fdecl.hasDefault && fdecl.defaultValue != INVALID_ID) {
+                        scanReachableExpr(fdecl.defaultValue, structOpt->moduleId, emptyScope, reachable, worklist);
+                    }
+                }
+                return;
+            }
+
+            const auto fnOpt = resolveFuncCall(arena, *call, symbols, modId, scope);
+            if (fnOpt.has_value() && !fnOpt->isBuiltinReceiver && !fnOpt->isFnValueCall) {
+                markReachable(symbolKey(fnOpt->moduleId, fnOpt->name));
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                for (const auto& p : fnOpt->params) {
+                    if (p.hasDefault && p.defaultValue != INVALID_ID) {
+                        scanReachableExpr(p.defaultValue, fnOpt->moduleId, emptyScope, reachable, worklist);
+                    }
+                }
+            }
+            return;
+        }
+    }
+
+    void scanReachableStmtList(
+        const std::vector<StmtId>& stmts,
+        const std::string& modId,
+        std::unordered_map<std::string, VarSymbol>& scope,
+        std::unordered_set<std::string>& reachable,
+        std::vector<std::string>& worklist
+    ) const {
+        for (const StmtId stmtId : stmts) {
+            if (stmtId >= arena.stmts.size()) {
+                continue;
+            }
+
+            if (const auto* vassign = arena.getStmt<VarAssignment>(stmtId)) {
+                scanReachableExpr(vassign->value, modId, scope, reachable, worklist);
+                if (vassign->target != INVALID_ID) {
+                    if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
+                        TypeId varTid = symbols.typeAuto;
+                        if (vassign->hasDeclaredType) {
+                            varTid = resolveAlias(arena, symbols, modId, vassign->declaredType);
+                        } else {
+                            varTid = inferExprType(arena, vassign->value, symbols, scope, modId);
+                        }
+                        if (vassign->isDim || vassign->isConst || scope.find(ident->name) == scope.end()) {
+                            scope[ident->name] = VarSymbol{ident->name, varTid, false, vassign->isConst};
+                        }
+                    } else {
+                        scanReachableExpr(vassign->target, modId, scope, reachable, worklist);
+                    }
+                }
+                continue;
+            }
+
+            if (const auto* estmt = arena.getStmt<ExprStmt>(stmtId)) {
+                scanReachableExpr(estmt->expr, modId, scope, reachable, worklist);
+                continue;
+            }
+
+            if (const auto* ifS = arena.getStmt<IfStmt>(stmtId)) {
+                scanReachableExpr(ifS->condition, modId, scope, reachable, worklist);
+                auto thenScope = scope;
+                scanReachableStmtList(ifS->thenBody, modId, thenScope, reachable, worklist);
+                for (const auto& branch : ifS->elifBranches) {
+                    scanReachableExpr(branch.condition, modId, scope, reachable, worklist);
+                    auto elifScope = scope;
+                    scanReachableStmtList(branch.body, modId, elifScope, reachable, worklist);
+                }
+                if (ifS->hasElse) {
+                    auto elseScope = scope;
+                    scanReachableStmtList(ifS->elseBody, modId, elseScope, reachable, worklist);
+                }
+                continue;
+            }
+
+            if (const auto* forS = arena.getStmt<ForStmt>(stmtId)) {
+                auto loopScope = scope;
+                if (forS->rangeSpec.hasRange) {
+                    scanReachableExpr(forS->rangeSpec.start, modId, scope, reachable, worklist);
+                    scanReachableExpr(forS->rangeSpec.end, modId, scope, reachable, worklist);
+                    if (forS->rangeSpec.hasStep) {
+                        scanReachableExpr(forS->rangeSpec.step, modId, scope, reachable, worklist);
+                    }
+                    if (!forS->loopVars.empty()) {
+                        loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, false};
+                    }
+                } else if (forS->hasIterable) {
+                    scanReachableExpr(forS->iterable, modId, scope, reachable, worklist);
+                    const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, modId);
+                    const TypeNode iterType = resolveAliasNode(arena, symbols, modId, iterTid);
+                    if (forS->loopVars.size() == 1) {
+                        TypeId elemT = symbols.typeAuto;
+                        if (iterType.name == "str") {
+                            elemT = symbols.typeStr;
+                        } else if (!iterType.typeArgs.empty()) {
+                            elemT = iterType.typeArgs[0];
+                        } else if (iterType.name == "bytes") {
+                            elemT = symbols.typeInt;
+                        }
+                        loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], elemT, false, true};
+                    } else if (forS->loopVars.size() == 2) {
+                        if (iterType.name == "str") {
+                            loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, true};
+                            loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], symbols.typeStr, false, true};
+                        } else if (iterType.name == "list" || iterType.name == "bytes") {
+                            TypeId elemT = symbols.typeAuto;
+                            if (!iterType.typeArgs.empty()) {
+                                elemT = iterType.typeArgs[0];
+                            } else if (iterType.name == "bytes") {
+                                elemT = symbols.typeInt;
+                            }
+                            loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, true};
+                            loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], elemT, false, true};
+                        } else if (iterType.typeArgs.size() == 2) {
+                            loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], iterType.typeArgs[0], false, true};
+                            loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], iterType.typeArgs[1], false, true};
+                        }
+                    }
+                }
+                scanReachableStmtList(forS->body, modId, loopScope, reachable, worklist);
+                continue;
+            }
+
+            if (const auto* whileS = arena.getStmt<WhileStmt>(stmtId)) {
+                scanReachableExpr(whileS->condition, modId, scope, reachable, worklist);
+                auto whileScope = scope;
+                scanReachableStmtList(whileS->body, modId, whileScope, reachable, worklist);
+                continue;
+            }
+
+            if (const auto* selS = arena.getStmt<SelectStmt>(stmtId)) {
+                scanReachableExpr(selS->target, modId, scope, reachable, worklist);
+                const TypeId targetTid = inferExprType(arena, selS->target, symbols, scope, modId);
+                const auto unionTargetOpt = resolveUnionSymbol(arena, symbols, modId, targetTid);
+                for (const auto& c : selS->cases) {
+                    TypeId lastPayloadTid = INVALID_ID;
+                    for (const ExprId mExpr : c.matchExprs) {
+                        scanReachableExpr(mExpr, modId, scope, reachable, worklist);
+                        if (unionTargetOpt.has_value()) {
+                            std::string varName;
+                            if (const auto* ident = arena.getExpr<Identifier>(mExpr)) {
+                                varName = ident->name;
+                            } else if (const auto* fa = arena.getExpr<FieldAccess>(mExpr)) {
+                                varName = fa->fieldName;
+                            }
+                            const auto vTypeIt = unionTargetOpt->variantTypes.find(varName);
+                            if (vTypeIt != unionTargetOpt->variantTypes.end()) {
+                                lastPayloadTid = vTypeIt->second;
+                            }
+                        }
+                    }
+                    auto caseScope = scope;
+                    if (!c.bindingName.empty() && lastPayloadTid != INVALID_ID) {
+                        caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, false};
+                    }
+                    scanReachableStmtList(c.body, modId, caseScope, reachable, worklist);
+                }
+                if (selS->hasCaseElse) {
+                    auto elseScope = scope;
+                    scanReachableStmtList(selS->caseElse, modId, elseScope, reachable, worklist);
+                }
+                continue;
+            }
+
+            if (const auto* eb = arena.getStmt<ErrorBlock>(stmtId)) {
+                auto errScope = scope;
+                errScope[eb->errVar] = VarSymbol{eb->errVar, symbols.typeErr, false, false};
+                scanReachableStmtList(eb->body, modId, errScope, reachable, worklist);
+                continue;
+            }
+
+            if (const auto* defS = arena.getStmt<DeferStmt>(stmtId)) {
+                auto defScope = scope;
+                scanReachableStmtList(defS->body, modId, defScope, reachable, worklist);
+                continue;
+            }
+
+            if (const auto* retS = arena.getStmt<ReturnStmt>(stmtId)) {
+                if (retS->hasValue) {
+                    scanReachableExpr(retS->value, modId, scope, reachable, worklist);
+                }
+                continue;
+            }
+        }
+    }
+
+    std::unordered_set<std::string> computeReachableFunctions(const Program& program) const {
+        std::unordered_map<std::string, std::vector<std::pair<std::string, FnDecl>>> fnDeclsByKey;
+        std::unordered_set<std::string> reachable;
+        std::vector<std::string> worklist;
+
+        auto markReachable = [&](const std::string& key) {
+            if (key.empty() || reachable.find(key) != reachable.end()) {
+                return;
+            }
+            reachable.insert(key);
+            worklist.push_back(key);
+        };
+
+        std::unordered_map<std::string, VarSymbol> emptyScope;
+        for (const DeclId did : program.declarations) {
+            if (did >= arena.decls.size()) {
+                continue;
+            }
+            const auto& declNode = arena.decls[did];
+            if (!isModuleEmitted(symbols, declNode.moduleId)) {
+                continue;
+            }
+            if (const auto* td = arena.getDecl<TypeDecl>(did)) {
+                if (!td->isExtern) {
+                    for (const auto& f : td->fields) {
+                        if (f.hasDefault && f.defaultValue != INVALID_ID) {
+                            scanReachableExpr(f.defaultValue, declNode.moduleId, emptyScope, reachable, worklist);
+                        }
+                    }
+                }
+            } else if (const auto* cd = arena.getDecl<ConstDecl>(did)) {
+                scanReachableExpr(cd->value, declNode.moduleId, emptyScope, reachable, worklist);
+            } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
+                if (!fd->isExtern) {
+                    const std::string key = symbolKey(declNode.moduleId, fd->name);
+                    fnDeclsByKey[key].push_back({declNode.moduleId, *fd});
+                    if (declNode.moduleId.empty()) {
+                        markReachable(key);
+                    }
+                }
+            }
+        }
+
+        while (!worklist.empty()) {
+            const std::string key = worklist.back();
+            worklist.pop_back();
+            const auto it = fnDeclsByKey.find(key);
+            if (it == fnDeclsByKey.end()) {
+                continue;
+            }
+            for (const auto& [fnModId, fnDecl] : it->second) {
+                std::unordered_map<std::string, VarSymbol> scope;
+                for (const auto& p : fnDecl.params) {
+                    if (p.hasDefault && p.defaultValue != INVALID_ID) {
+                        scanReachableExpr(p.defaultValue, fnModId, emptyScope, reachable, worklist);
+                    }
+                    const TypeId resolvedT = resolveAlias(arena, symbols, fnModId, p.typeId);
+                    scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
+                }
+                scanReachableStmtList(fnDecl.body, fnModId, scope, reachable, worklist);
+            }
+        }
+
+        return reachable;
+    }
+
     std::string emitProgram(const Program& program) {
     if (!symbols.linkLibs.empty()) {
         std::string flags;
@@ -1724,6 +2057,7 @@ public:
         FnDecl fn;
     };
     std::vector<EmittedFnEntry> fnDecls;
+    const std::unordered_set<std::string> reachableFns = computeReachableFunctions(program);
 
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;
@@ -1756,7 +2090,12 @@ public:
                 earlyConstDecls.push_back({declNode.moduleId, *cd});
             }
         } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
-            if (!fd->isExtern) fnDecls.push_back(EmittedFnEntry{declNode.moduleId, declNode.fileName, *fd});
+            if (!fd->isExtern) {
+                const std::string fnKey = symbolKey(declNode.moduleId, fd->name);
+                if (declNode.moduleId.empty() || reachableFns.find(fnKey) != reachableFns.end()) {
+                    fnDecls.push_back(EmittedFnEntry{declNode.moduleId, declNode.fileName, *fd});
+                }
+            }
         }
     }
 

@@ -405,6 +405,10 @@ inline TypeNode resolveAliasFromNode(
     std::string_view currentModuleId,
     TypeNode curr
 ) {
+    if (curr.typeArgs.empty() && curr.returnType == INVALID_ID && isBuiltinTypeName(curr.name)) {
+        return curr;
+    }
+
     std::unordered_set<std::string> seen;
     std::string activeModId(currentModuleId);
 
@@ -483,6 +487,10 @@ inline TypeId resolveAlias(
     TypeId tid
 ) {
     if (tid >= arena.types.size()) {
+        return tid;
+    }
+    const TypeNode& initialNode = arena.types[tid];
+    if (initialNode.typeArgs.empty() && initialNode.returnType == INVALID_ID && isBuiltinTypeName(initialNode.name)) {
         return tid;
     }
     const TypeNode resolvedNode = resolveAliasNode(arena, symbols, currentModuleId, tid);
