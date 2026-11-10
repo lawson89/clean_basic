@@ -47,8 +47,31 @@
       {
         "command": "cleanbasic.restartServer",
         "title": "CleanBasic: Restart Language Server"
+      },
+      {
+        "command": "cleanbasic.previewFileDocs",
+        "title": "CleanBasic: Preview File Documentation (cbdoc)",
+        "icon": "$(book)"
+      },
+      {
+        "command": "cleanbasic.previewWorkspaceDocs",
+        "title": "CleanBasic: Preview Workspace Documentation (cbdoc)"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "cleanbasic.previewFileDocs",
+          "when": "resourceLangId == cleanbasic",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configurationDefaults": {
+      "[cleanbasic]": {
+        "editor.defaultFormatter": "cleanbasic.cleanbasic"
+      }
+    },
     "configuration": {
       "type": "object",
       "title": "CleanBasic",
@@ -62,6 +85,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the cbfmt executable. Defaults to <workspaceFolder>/build/cbfmt if present (or auto-builds tools/cbfmt.cb), otherwise 'cbfmt' on your system PATH."
+        },
+        "cleanbasic.docPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the cbdoc executable. Defaults to <workspaceFolder>/build/cbdoc if present (or auto-builds tools/cbdoc.cb), otherwise 'cbdoc' on your system PATH."
         },
         "cleanbasic.trace.server": {
           "type": "string",
