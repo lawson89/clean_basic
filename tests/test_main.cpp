@@ -2801,7 +2801,12 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
         const int rcStdinImplicit = std::system(("./" + outBin + " -ic cleanbasic < " + sampleFile + " > " + stdoutFile + " 2>&1").c_str());
         CHECK(rcStdinImplicit == 0);
         const std::string stdinImplicitOut = cb::testE2E::readFileText(stdoutFile);
-        CHECK(stdinImplicitOut.find("2") != std::string::npos);
+        CHECK(stdinImplicitOut.find("{stdin}:2") != std::string::npos);
+
+        const int rcVersion = std::system(("./" + outBin + " --version > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcVersion == 0);
+        const std::string versionOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(versionOut.find("cbgrep 1.0") != std::string::npos);
     }
 
     SECTION("fs.stdin(), fs.stdout(), and fs.stderr() streaming I/O with piped stdin and separated stdout/stderr") {
@@ -4273,6 +4278,11 @@ TEST_CASE("Declarative CLI parser (std/cli), refactored cbgrep, cbdoc, and LSP '
         const std::string helpOut = cb::testE2E::readFileText(stdoutTxt);
         CHECK(helpOut.find("Usage: cbgrep [options] <pattern>") != std::string::npos);
         CHECK(helpOut.find("-i, --ignore-case") != std::string::npos);
+
+        const int versionRc = std::system(("./" + outBin + " -V > " + stdoutTxt + " 2>&1").c_str());
+        CHECK(versionRc == 0);
+        const std::string versionOut = cb::testE2E::readFileText(stdoutTxt);
+        CHECK(versionOut.find("cbgrep 1.0") != std::string::npos);
 
         const int searchRc = std::system(("./" + outBin + " -in match " + sampleTxt + " > " + stdoutTxt + " 2>&1").c_str());
         CHECK(searchRc == 0);

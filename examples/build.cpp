@@ -1001,10 +1001,7 @@ bool cb_std_fs__isDir(const std::string& path) {
         } else {
             matched = cb_std_str__contains(line, pattern);
         }
-        if (invert) {
-            matched = (!matched);
-        }
-        if (matched) {
+        if ((matched != invert)) {
             matchCount = (matchCount + 1);
             if ((!countOnly)) {
                 if (lineNumbers) {
@@ -1016,7 +1013,7 @@ bool cb_std_fs__isDir(const std::string& path) {
         }
     }
     if (countOnly) {
-        (std::cout << ((((std::string("") + path) + std::string(":")) + cbToStr(matchCount)) + std::string("")) << std::endl);
+        (std::cout << ((((std::string("") + source) + std::string(":")) + cbToStr(matchCount)) + std::string("")) << std::endl);
     }
     return { matchCount, CbError{"", 0} };
 }
@@ -1030,7 +1027,7 @@ int64_t cbMain() {
     cb_std_cli__addArg(p, std::string("pattern"), std::string("Search pattern"), true);
     auto [_val7, _err7] = cb_std_cli__parse(p);
     if (cbHasError(_err7)) {
-        cbStampError(_err7, "examples/cbgrep.cb", 75);
+        cbStampError(_err7, "examples/cbgrep.cb", 72);
         CbError e = _err7;
         cb_std_os__eprint(((std::string("cbgrep: ") + e.msg) + std::string("")));
         return 2;
@@ -1038,6 +1035,10 @@ int64_t cbMain() {
     const auto args = _val7;
     if (args.helpRequested) {
         cb_std_cli__printUsage(p);
+        return 0;
+    }
+    if (args.versionRequested) {
+        (std::cout << std::string("cbgrep 1.0") << std::endl);
         return 0;
     }
     std::vector<std::string> targets = args.rest;
@@ -1049,7 +1050,7 @@ int64_t cbMain() {
         if (cb_std_fs__isDir(target)) {
             auto [_val8, _err8] = cb_std_fs__walkFiles(target, false);
             if (cbHasError(_err8)) {
-                cbStampError(_err8, "examples/cbgrep.cb", 94);
+                cbStampError(_err8, "examples/cbgrep.cb", 95);
                 CbError e = _err8;
                 cb_std_os__eprint(((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg) + std::string("")));
                 continue;
@@ -1057,7 +1058,7 @@ int64_t cbMain() {
             for (const auto& path : _val8) {
                 auto [_val9, _err9] = search(path, args);
                 if (cbHasError(_err9)) {
-                    cbStampError(_err9, "examples/cbgrep.cb", 99);
+                    cbStampError(_err9, "examples/cbgrep.cb", 100);
                     CbError e2 = _err9;
                     cb_std_os__eprint(((((std::string("cbgrep: ") + path) + std::string(": ")) + e2.msg) + std::string("")));
                     continue;
@@ -1067,7 +1068,7 @@ int64_t cbMain() {
         } else {
             auto [_val10, _err10] = search(target, args);
             if (cbHasError(_err10)) {
-                cbStampError(_err10, "examples/cbgrep.cb", 102);
+                cbStampError(_err10, "examples/cbgrep.cb", 103);
                 CbError e = _err10;
                 cb_std_os__eprint(((((std::string("cbgrep: ") + target) + std::string(": ")) + e.msg) + std::string("")));
                 continue;

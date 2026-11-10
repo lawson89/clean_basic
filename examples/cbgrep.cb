@@ -6,7 +6,7 @@ import "std/cli"
 import "std/os"
 import "std/fs"
 
-' Searches for matches in a file or standard input.
+'' Searches for matches in a file or standard input and returns the number of matching lines.
 fn search(path as str, args as cli.Args) as int can error
     const pattern = args.get("pattern")
     const ignoreCase = args.has("ignore-case")
@@ -36,11 +36,7 @@ fn search(path as str, args as cli.Args) as int can error
             matched = line.contains(pattern)
         end if
 
-        if invert
-            matched = not matched
-        end if
-
-        if matched
+        if matched != invert
             matchCount += 1
             if not countOnly
                 if lineNumbers
@@ -53,12 +49,13 @@ fn search(path as str, args as cli.Args) as int can error
     end while
 
     if countOnly
-        print($"{path}:{matchCount}")
+        print($"{source}:{matchCount}")
     end if
 
     return matchCount
 end fn
 
+'' CLI entry point for cbgrep.
 fn main() as int
     dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files")
     p.addFlag("ignore-case", "i", "Case-insensitive search")
@@ -75,6 +72,10 @@ fn main() as int
     const args = p.parse()
     if args.helpRequested
         p.printUsage()
+        return 0
+    end if
+    if args.versionRequested
+        print("cbgrep 1.0")
         return 0
     end if
 
