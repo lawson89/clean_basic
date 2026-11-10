@@ -207,7 +207,7 @@ end defer
     }
 }
 
-TEST_CASE("Parser builds AST for control flow and types and reports syntax errors", "[parser]") {
+TEST_CASE("Parser builds AST for control flow, ranges, and fallible signatures", "[parser]") {
     const std::string code = R"(
 pub alias ScoreMap = dict[str, list[int]]
 
@@ -263,7 +263,7 @@ end fn
         CHECK(forStmt.rangeSpec.hasStep);
     }
 
-    SECTION("Parses 'can error' on value-returning and void functions") {
+    SECTION("Parses 'can error' on value-returning and void functions and 'try / catch' blocks") {
         const std::string canErrCode = R"(
 fn connect(ip as str) as int can error
     return 1
@@ -274,46 +274,62 @@ fn validate(port as int) can error
         error("bad port", code=400)
     end if
 end fn
+
+fn run()
+    try
+        dim c = connect("127.0.0.1")
+    catch e
+        print(e.msg)
+    end try
+end fn
 )";
         const auto lexCe = cb::tokenize(canErrCode, "canErr.cb");
         REQUIRE(lexCe.ok);
         const auto parseCe = cb::parseTokens(lexCe.tokens, "canErr.cb");
         REQUIRE(parseCe.ok);
-        REQUIRE(parseCe.program.declarations.size() == 2);
+        REQUIRE(parseCe.program.declarations.size() == 3);
         const auto& fn0 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[0]);
         const auto& fn1 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[1]);
+        const auto& fn2 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[2]);
         CHECK(fn0.isFallible);
         CHECK(fn0.returnType != cb::INVALID_ID);
         CHECK(fn1.isFallible);
         CHECK(fn1.returnType != cb::INVALID_ID);
         CHECK(parseCe.arena.types[fn1.returnType].name == "void");
-        CHECK(parseCe.arena.types[fn1.returnType].name == "void");
+        REQUIRE(fn2.body.size() == 1);
+        const auto* tryStmt = parseCe.arena.getStmt<cb::TryCatchStmt>(fn2.body[0]);
+        REQUIRE(tryStmt != nullptr);
+        CHECK(tryStmt->catchVarName == "e");
+        CHECK(tryStmt->tryBody.size() == 1);
+        CHECK(tryStmt->catchBody.size() == 1);
     }
+}
 
-    SECTION("Rejects ':' in named arguments for function calls and struct initialization") {
-        const std::string badCallColon = R"(
+TEST_CASE("Parser rejects invalid named argument syntax", "[parser]") {
+    const std::string badCallColon = R"(
 fn main()
     foo(code: 408)
 end fn
 )";
-        const auto lexC1 = cb::tokenize(badCallColon, "badCallColon.cb");
-        REQUIRE(lexC1.ok);
-        const auto parseC1 = cb::parseTokens(lexC1.tokens, "badCallColon.cb");
-        CHECK_FALSE(parseC1.ok);
-        CHECK(parseC1.error.kind == "ParseError");
+    const auto lexC1 = cb::tokenize(badCallColon, "badCallColon.cb");
+    REQUIRE(lexC1.ok);
+    const auto parseC1 = cb::parseTokens(lexC1.tokens, "badCallColon.cb");
+    CHECK_FALSE(parseC1.ok);
+    CHECK(parseC1.error.kind == "ParseError");
 
-        const std::string badStructColon = R"(
+    const std::string badStructColon = R"(
 fn main()
     dim p = new Point(x: 10, y: 20)
 end fn
 )";
-        const auto lexC2 = cb::tokenize(badStructColon, "badStructColon.cb");
-        REQUIRE(lexC2.ok);
-        const auto parseC2 = cb::parseTokens(lexC2.tokens, "badStructColon.cb");
-        CHECK_FALSE(parseC2.ok);
-        CHECK(parseC2.error.kind == "ParseError");
-    }
+    const auto lexC2 = cb::tokenize(badStructColon, "badStructColon.cb");
+    REQUIRE(lexC2.ok);
+    const auto parseC2 = cb::parseTokens(lexC2.tokens, "badStructColon.cb");
+    CHECK_FALSE(parseC2.ok);
+    CHECK(parseC2.error.kind == "ParseError");
+}
 
+TEST_CASE("Parser rejects removed redundant syntax and unclosed blocks", "[parser]") {
     SECTION("Rejects removed redundant syntax ('for i in a..b', 'Type{...}', 'new Type{...}', and trailing 'as byref')") {
         const std::vector<std::string> removedSyntaxes = {
             R"(fn main()
@@ -342,8 +358,6 @@ end fn
         }
     }
 
-
-
     SECTION("Reports ParseError on unclosed control flow block") {
         const std::string badCode = R"(fn broken()
     if true
@@ -356,7 +370,6 @@ end fn
         CHECK_FALSE(badParse.ok);
         CHECK(badParse.error.kind == "ParseError");
     }
-
 }
 
 TEST_CASE("Analyzer validates fallible calls, const immutability, and implicit bubbling", "[analyzer]") {
@@ -402,7 +415,41 @@ end fn
         ) != std::string::npos);
     }
 
+    SECTION("Permits try / catch block that falls through without return, break, or continue") {
+        const std::string fallthroughCode = R"(
+fn risky() as int can error
+    error("failed", code=503)
+    return 42
+end fn
 
+fn main() as int
+    dim fallback = 0
+    try
+        dim v = risky()
+        fallback = v
+    catch e
+        print("Handled error ", e.code, ": ", e.msg)
+        fallback = -1
+    end try
+    return fallback
+end fn
+)";
+        const auto lexFt = cb::tokenize(fallthroughCode, "fallthrough.cb");
+        REQUIRE(lexFt.ok);
+        auto parseFt = cb::parseTokens(lexFt.tokens, "fallthrough.cb");
+        REQUIRE(parseFt.ok);
+        const auto anaFt = cb::analyzeProgram(parseFt.arena, parseFt.program);
+        INFO("Analyzer diagnostic: " << cb::formatDiagnostic(anaFt.error));
+        REQUIRE(anaFt.ok);
+
+        const auto& mainFn = cb::asDecl<cb::FnDecl>(parseFt.arena, parseFt.program.declarations[1]);
+        REQUIRE(mainFn.body.size() >= 2);
+        const auto& tryCatch = cb::asStmt<cb::TryCatchStmt>(parseFt.arena, mainFn.body[1]);
+        REQUIRE(!tryCatch.tryBody.empty());
+        const auto& innerAssign = cb::asStmt<cb::VarAssignment>(parseFt.arena, tryCatch.tryBody[0]);
+        CHECK(innerAssign.breaksToCatch);
+        CHECK_FALSE(innerAssign.implicitBubble);
+    }
 
     SECTION("Rejects calling error(...) inside an infallible function or with invalid named args") {
         const std::string badErrorInInfallible = R"(
@@ -441,7 +488,6 @@ end fn
         const auto res = cb::transpileSource(badPrintArg, "badPrintArg.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.kind == "AnalyzerError");
-
     }
 
     SECTION("Rejects const variable reassignment") {
@@ -552,6 +598,7 @@ end fn
     CHECK(cpp.find("auto [_val2, _err2] = processData();") != std::string::npos);
     CHECK(cpp.find("if (cbHasError(_err2)) {") != std::string::npos);
     CHECK(cpp.find("_catch_err = _err2;") != std::string::npos);
+    CHECK(cpp.find("break;") != std::string::npos);
     CHECK(cpp.find("} while(false);") != std::string::npos);
     CHECK(cpp.find("CbError e = _catch_err;") != std::string::npos);
     CHECK(cpp.find("auto records = _val2;") != std::string::npos);
@@ -999,15 +1046,16 @@ TEST_CASE("Data-oriented JSON arena parser, serializer, builders, queries, and J
     }
 }
 
+TEST_CASE("LSP URI and file path conversion helpers", "[lsp][uri]") {
+    CHECK(cb::uriToFilePath("file:///workspace/project/main.cb") == "/workspace/project/main.cb");
+    CHECK(cb::uriToFilePath("file://localhost/workspace/main.cb") == "/workspace/main.cb");
+    CHECK(cb::uriToFilePath("file:///workspace/my%20folder/main.cb") == "/workspace/my folder/main.cb");
+    CHECK(cb::uriToFilePath("file:///C:/Users/dev/main.cb") == "C:/Users/dev/main.cb");
+    CHECK(cb::filePathToUri("/workspace/project/main.cb") == "file:///workspace/project/main.cb");
+    CHECK(cb::filePathToUri("relative/main.cb") == "file:///relative/main.cb");
+}
+
 TEST_CASE("CleanBasic Language Server Phase 1: Core Loop, In-Memory Overlay & Live Diagnostics", "[lsp]") {
-    SECTION("URI and file path conversion helpers") {
-        CHECK(cb::uriToFilePath("file:///workspace/project/main.cb") == "/workspace/project/main.cb");
-        CHECK(cb::uriToFilePath("file://localhost/workspace/main.cb") == "/workspace/main.cb");
-        CHECK(cb::uriToFilePath("file:///workspace/my%20folder/main.cb") == "/workspace/my folder/main.cb");
-        CHECK(cb::uriToFilePath("file:///C:/Users/dev/main.cb") == "C:/Users/dev/main.cb");
-        CHECK(cb::filePathToUri("/workspace/project/main.cb") == "file:///workspace/project/main.cb");
-        CHECK(cb::filePathToUri("relative/main.cb") == "file:///relative/main.cb");
-    }
 
     SECTION("Full JSON-RPC lifecycle: initialize, didOpen, publishDiagnostics, didChange, didClose, shutdown, exit") {
         std::stringstream clientToServer;
@@ -1399,38 +1447,101 @@ end fn
     }
 }
 
-TEST_CASE("CleanBasic Language Server Phase 2: documentSymbol, hover, definition & snapshot fallback", "[lsp]") {
-    SECTION("End-to-end documentSymbol, hover, definition (same-file, cross-module, struct fields), and snapshot resilience") {
-        std::stringstream clientToServer;
-        std::stringstream serverToClient;
+namespace cb::testLsp {
 
-        // 1. initialize (id = 1)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
-        );
+inline void sendDidOpen(std::ostream& out, std::string_view uri, std::string_view text, int64_t version = 1) {
+    cb::JsonArena arena;
+    const cb::JsonId msg = cb::jsonAddObject(arena);
+    cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+    cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
+    const cb::JsonId params = cb::jsonAddObject(arena);
+    const cb::JsonId td = cb::jsonAddObject(arena);
+    cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, uri));
+    cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
+    cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, version));
+    cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, text));
+    cb::jsonObjectSet(arena, params, "textDocument", td);
+    cb::jsonObjectSet(arena, msg, "params", params);
+    cb::writeJsonrpcMessage(out, cb::serializeJson(arena, msg));
+}
 
-        // 2. didOpen player.cb (in-memory imported module)
-        // Line 1: pub alias Score = int
-        // Line 2: pub type Player
-        // Line 3:     name as str
-        // Line 4:     health as int
-        // Line 5: end type
-        // Line 6: pub fn heal(byref p as Player, amount as int) as int can error
-        // Line 7:     p.health = p.health + amount
-        // Line 8:     return p.health
-        // Line 9: end fn
-        {
-            cb::JsonArena arena;
-            const cb::JsonId msg = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
-            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::jsonAddObject(arena);
-            const cb::JsonId td = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/player.cb"));
-            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
-            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
-            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(pub alias Score = int
+inline void sendDidChange(std::ostream& out, std::string_view uri, int64_t version, std::string_view text) {
+    cb::JsonArena arena;
+    const cb::JsonId msg = cb::jsonAddObject(arena);
+    cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
+    cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
+    const cb::JsonId params = cb::jsonAddObject(arena);
+    const cb::JsonId td = cb::jsonAddObject(arena);
+    cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, uri));
+    cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, version));
+    cb::jsonObjectSet(arena, params, "textDocument", td);
+    const cb::JsonId changes = cb::jsonAddArray(arena);
+    const cb::JsonId changeItem = cb::jsonAddObject(arena);
+    cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, text));
+    cb::jsonArrayPush(arena, changes, changeItem);
+    cb::jsonObjectSet(arena, params, "contentChanges", changes);
+    cb::jsonObjectSet(arena, msg, "params", params);
+    cb::writeJsonrpcMessage(out, cb::serializeJson(arena, msg));
+}
+
+inline cb::JsonParseResult readResponseForId(std::istream& in, int64_t targetId) {
+    while (true) {
+        const auto rawOpt = cb::readJsonrpcMessage(in);
+        REQUIRE(rawOpt.has_value());
+        auto parsed = cb::parseJson(rawOpt.value());
+        REQUIRE(parsed.ok);
+        const auto idOpt = cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "id"));
+        if (idOpt.has_value() && idOpt.value() == targetId) {
+            return parsed;
+        }
+    }
+}
+
+inline bool hasCompletionItem(
+    const cb::JsonArena& arena,
+    cb::JsonId arrId,
+    std::string_view label,
+    int64_t expectedKind = -1,
+    std::string_view detailSubstr = ""
+) {
+    if (arrId >= arena.nodes.size() || !std::holds_alternative<cb::JsonArray>(arena.nodes[arrId])) {
+        return false;
+    }
+    const auto& elems = std::get<cb::JsonArray>(arena.nodes[arrId]).elements;
+    for (const cb::JsonId itemId : elems) {
+        const auto lbl = cb::jsonGetString(arena, cb::jsonGetField(arena, itemId, "label"));
+        if (!lbl.has_value() || lbl.value() != label) {
+            continue;
+        }
+        if (expectedKind >= 0) {
+            const auto k = cb::jsonGetInt(arena, cb::jsonGetField(arena, itemId, "kind"));
+            if (!k.has_value() || k.value() != expectedKind) {
+                continue;
+            }
+        }
+        if (!detailSubstr.empty()) {
+            const auto det = cb::jsonGetString(arena, cb::jsonGetField(arena, itemId, "detail"));
+            if (!det.has_value() || det.value().find(detailSubstr) == std::string::npos) {
+                continue;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+}  // namespace cb::testLsp
+
+TEST_CASE("LSP DocumentSymbol Provider outlines types, fields, aliases, and functions", "[lsp][documentSymbol]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
+
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
 pub type Player
     name as str
     health as int
@@ -1439,36 +1550,73 @@ pub fn heal(byref p as Player, amount as int) as int can error
     p.health = p.health + amount
     return p.health
 end fn
-)"));
-            cb::jsonObjectSet(arena, params, "textDocument", td);
-            cb::jsonObjectSet(arena, msg, "params", params);
-            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
-        }
+)");
 
-        // 3. didOpen main.cb
-        // Line 1 (0-based 0): import "player.cb"
-        // Line 2 (0-based 1): fn localBoost(base as int) as int
-        // Line 3 (0-based 2):     return base + 10
-        // Line 4 (0-based 3): end fn
-        // Line 5 (0-based 4): fn main() as int can error
-        // Line 6 (0-based 5):     const maxPotion = 50
-        // Line 7 (0-based 6):     dim hero = player.Player(name="Alice", health=100)
-        // Line 8 (0-based 7):     dim boosted = localBoost(maxPotion)
-        // Line 9 (0-based 8):     dim newHp = hero.heal(boosted)
-        // Line 10 (0-based 9):    print(hero.health, newHp)
-        // Line 11 (0-based 10):   return 0
-        // Line 12 (0-based 11): end fn
-        {
-            cb::JsonArena arena;
-            const cb::JsonId msg = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
-            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::jsonAddObject(arena);
-            const cb::JsonId td = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
-            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
-            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
-            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(import "player.cb"
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws/player.cb"}}})"
+    );
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
+
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
+
+    const auto initResp = cb::testLsp::readResponseForId(serverToClient, 1);
+    const cb::JsonId caps = cb::jsonGetField(
+        initResp.arena,
+        cb::jsonGetField(initResp.arena, initResp.root, "result"),
+        "capabilities"
+    );
+    CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "documentSymbolProvider")) == true);
+
+    const auto docSymResp = cb::testLsp::readResponseForId(serverToClient, 2);
+    const cb::JsonId symArrId = cb::jsonGetField(docSymResp.arena, docSymResp.root, "result");
+    REQUIRE(std::holds_alternative<cb::JsonArray>(docSymResp.arena.nodes[symArrId]));
+    const auto& symElems = std::get<cb::JsonArray>(docSymResp.arena.nodes[symArrId]).elements;
+    REQUIRE(symElems.size() == 3);
+
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "name")) == "Score");
+    CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "kind")) == 26);
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "detail")) == "= int");
+
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "name")) == "Player");
+    CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "kind")) == 23);
+    const cb::JsonId childrenId = cb::jsonGetField(docSymResp.arena, symElems[1], "children");
+    REQUIRE(std::holds_alternative<cb::JsonArray>(docSymResp.arena.nodes[childrenId]));
+    const auto& fieldChildren = std::get<cb::JsonArray>(docSymResp.arena.nodes[childrenId]).elements;
+    REQUIRE(fieldChildren.size() == 2);
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "name")) == "name");
+    CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "kind")) == 8);
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "detail")) == "str");
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[1], "name")) == "health");
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[1], "detail")) == "int");
+
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "name")) == "heal");
+    CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "kind")) == 12);
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "detail")) == "(byref p as Player, amount as int) as int can error");
+}
+
+TEST_CASE("LSP Hover Provider resolves variables, UFCS methods, struct fields, and builtins", "[lsp][hover]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
+
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
+pub type Player
+    name as str
+    health as int
+end type
+pub fn heal(byref p as Player, amount as int) as int can error
+    p.health = p.health + amount
+    return p.health
+end fn
+)");
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
 fn localBoost(base as int) as int
     return base + 10
 end fn
@@ -1480,80 +1628,169 @@ fn main() as int can error
     print(hero.health, newHp)
     return 0
 end fn
-)"));
-            cb::jsonObjectSet(arena, params, "textDocument", td);
-            cb::jsonObjectSet(arena, msg, "params", params);
-            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
-        }
+)");
 
-        // 4. textDocument/documentSymbol on player.cb (id = 2)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws/player.cb"}}})"
+    // Hover on inferred local variable 'hero' (0-based line 6, char 9) (id = 3)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":6,"character":9}}})"
+    );
+    // Hover on UFCS call 'hero.heal' (0-based line 8, char 23 -> 'heal') (id = 4)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":8,"character":23}}})"
+    );
+    // Hover on struct field 'hero.health' (0-based line 9, char 16 -> 'health') (id = 5)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":5,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":16}}})"
+    );
+    // Hover on builtin 'print' (0-based line 9, char 5) (id = 6)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":6,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":5}}})"
+    );
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
+
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
+
+    const auto initResp = cb::testLsp::readResponseForId(serverToClient, 1);
+    const cb::JsonId caps = cb::jsonGetField(
+        initResp.arena,
+        cb::jsonGetField(initResp.arena, initResp.root, "result"),
+        "capabilities"
+    );
+    CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "hoverProvider")) == true);
+
+    auto getHoverValue = [&](int64_t reqId) -> std::string {
+        const auto resp = cb::testLsp::readResponseForId(serverToClient, reqId);
+        const cb::JsonId contents = cb::jsonGetField(
+            resp.arena,
+            cb::jsonGetField(resp.arena, resp.root, "result"),
+            "contents"
         );
+        const auto val = cb::jsonGetString(resp.arena, cb::jsonGetField(resp.arena, contents, "value"));
+        REQUIRE(val.has_value());
+        return val.value();
+    };
 
-        // 5. textDocument/hover on inferred local variable 'hero' in main.cb (0-based line 6, char 9) (id = 3)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":6,"character":9}}})"
-        );
+    CHECK(getHoverValue(3).find("dim hero as Player") != std::string::npos);
+    CHECK(getHoverValue(4).find("pub fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
+    CHECK(getHoverValue(5).find("(field) Player.health as int") != std::string::npos);
+    CHECK(getHoverValue(6).find("fn print(values...)") != std::string::npos);
+}
 
-        // 6. textDocument/hover on UFCS call 'hero.heal' in main.cb (0-based line 8, char 23 -> 'heal') (id = 4)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":8,"character":23}}})"
-        );
+TEST_CASE("LSP Definition Provider resolves same-file, cross-module UFCS, struct field, and local variable targets", "[lsp][definition]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
 
-        // 7. textDocument/hover on struct field 'hero.health' in main.cb (0-based line 9, char 16 -> 'health') (id = 5)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":5,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":16}}})"
-        );
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
 
-        // 8. textDocument/hover on builtin 'print' in main.cb (0-based line 9, char 5) (id = 6)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":6,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":5}}})"
-        );
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
+pub type Player
+    name as str
+    health as int
+end type
+pub fn heal(byref p as Player, amount as int) as int can error
+    p.health = p.health + amount
+    return p.health
+end fn
+)");
 
-        // 9. textDocument/definition on same-file function call 'localBoost' (0-based line 7, char 20) (id = 7)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":7,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":7,"character":20}}})"
-        );
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
+fn localBoost(base as int) as int
+    return base + 10
+end fn
+fn main() as int can error
+    const maxPotion = 50
+    dim hero = player.Player(name="Alice", health=100)
+    dim boosted = localBoost(maxPotion)
+    dim newHp = hero.heal(boosted)
+    print(hero.health, newHp)
+    return 0
+end fn
+)");
 
-        // 10. textDocument/definition on cross-module UFCS call 'hero.heal' (0-based line 8, char 23) (id = 8)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":8,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":8,"character":23}}})"
-        );
+    // Definition on same-file function call 'localBoost' (0-based line 7, char 20) (id = 7)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":7,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":7,"character":20}}})"
+    );
+    // Definition on cross-module UFCS call 'hero.heal' (0-based line 8, char 23) (id = 8)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":8,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":8,"character":23}}})"
+    );
+    // Definition on struct field 'hero.health' (0-based line 9, char 16) (id = 9)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":9,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":16}}})"
+    );
+    // Definition on local const 'maxPotion' usage (0-based line 7, char 32) (id = 10)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":10,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":7,"character":32}}})"
+    );
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        // 11. textDocument/definition on struct field 'hero.health' (0-based line 9, char 16) (id = 9)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":9,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":9,"character":16}}})"
-        );
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
 
-        // 12. textDocument/definition on local const 'maxPotion' usage (0-based line 7, char 32) (id = 10)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":10,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":7,"character":32}}})"
-        );
+    const auto initResp = cb::testLsp::readResponseForId(serverToClient, 1);
+    const cb::JsonId caps = cb::jsonGetField(
+        initResp.arena,
+        cb::jsonGetField(initResp.arena, initResp.root, "result"),
+        "capabilities"
+    );
+    CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "definitionProvider")) == true);
 
-        // 13. Introduce transient syntax error in main.cb via didChange, then request documentSymbol (id = 11) and hover on 'hero' (id = 12)
-        {
-            cb::JsonArena arena;
-            const cb::JsonId msg = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
-            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::jsonAddObject(arena);
-            const cb::JsonId td = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
-            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 2));
-            cb::jsonObjectSet(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::jsonAddArray(arena);
-            const cb::JsonId changeItem = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, R"(import "player.cb"
+    auto checkDefLocation = [&](int64_t reqId, std::string_view expectedUri, int64_t expectedLine, int64_t expectedChar) {
+        const auto resp = cb::testLsp::readResponseForId(serverToClient, reqId);
+        const cb::JsonId res = cb::jsonGetField(resp.arena, resp.root, "result");
+        CHECK(cb::jsonGetString(resp.arena, cb::jsonGetField(resp.arena, res, "uri")) == expectedUri);
+        const cb::JsonId start = cb::jsonGetField(resp.arena, cb::jsonGetField(resp.arena, res, "range"), "start");
+        CHECK(cb::jsonGetInt(resp.arena, cb::jsonGetField(resp.arena, start, "line")) == expectedLine);
+        CHECK(cb::jsonGetInt(resp.arena, cb::jsonGetField(resp.arena, start, "character")) == expectedChar);
+    };
+
+    checkDefLocation(7, "file:///ws/main.cb", 1, 3);
+    checkDefLocation(8, "file:///ws/player.cb", 5, 7);
+    checkDefLocation(9, "file:///ws/player.cb", 3, 4);
+    checkDefLocation(10, "file:///ws/main.cb", 5, 10);
+}
+
+TEST_CASE("LSP Snapshot Fallback preserves symbols and hover during transient syntax errors", "[lsp][snapshot]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
+
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub type Player
+    name as str
+    health as int
+end type
+)");
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
+fn localBoost(base as int) as int
+    return base + 10
+end fn
+fn main() as int can error
+    const maxPotion = 50
+    dim hero = player.Player(name="Alice", health=100)
+    return 0
+end fn
+)");
+
+    // Introduce transient syntax error in main.cb via didChange, then request documentSymbol (id = 11) and hover on 'hero' (id = 12)
+    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 2, R"(import "player.cb"
 fn localBoost(base as int) as int
     return base + 10
 end fn
@@ -1561,260 +1798,47 @@ fn main() as int can error
     const maxPotion = 50
     dim hero = player.Player(name="Alice", health=100)
     if
-)"));
-            cb::jsonArrayPush(arena, changes, changeItem);
-            cb::jsonObjectSet(arena, params, "contentChanges", changes);
-            cb::jsonObjectSet(arena, msg, "params", params);
-            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
-        }
+)");
 
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":11,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws/main.cb"}}})"
-        );
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":12,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":6,"character":9}}})"
-        );
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":11,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///ws/main.cb"}}})"
+    );
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":12,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":6,"character":9}}})"
+    );
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        // 14. shutdown & exit
-        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
-        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
 
-        const int exitCode = cb::runLspServer(clientToServer, serverToClient);
-        CHECK(exitCode == 0);
+    const auto symFallback = cb::testLsp::readResponseForId(serverToClient, 11);
+    const cb::JsonId fbSymArr = cb::jsonGetField(symFallback.arena, symFallback.root, "result");
+    REQUIRE(std::holds_alternative<cb::JsonArray>(symFallback.arena.nodes[fbSymArr]));
+    CHECK(std::get<cb::JsonArray>(symFallback.arena.nodes[fbSymArr]).elements.size() == 2);
 
-        // Msg 1: initialize response capabilities
-        const auto initResp = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(initResp.ok);
-        const cb::JsonId caps = cb::jsonGetField(
-            initResp.arena,
-            cb::jsonGetField(initResp.arena, initResp.root, "result"),
-            "capabilities"
-        );
-        CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "documentSymbolProvider")) == true);
-        CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "definitionProvider")) == true);
-        CHECK(cb::jsonGetBool(initResp.arena, cb::jsonGetField(initResp.arena, caps, "hoverProvider")) == true);
-
-        // Msg 2 & 3: publishDiagnostics for player.cb and main.cb (both valid)
-        const auto diagPlayer = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(diagPlayer.ok);
-        const auto diagMain = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(diagMain.ok);
-
-        // Msg 4: documentSymbol response for player.cb (id = 2)
-        const auto docSymResp = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(docSymResp.ok);
-        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, docSymResp.root, "id")) == 2);
-        const cb::JsonId symArrId = cb::jsonGetField(docSymResp.arena, docSymResp.root, "result");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(docSymResp.arena.nodes[symArrId]));
-        const auto& symElems = std::get<cb::JsonArray>(docSymResp.arena.nodes[symArrId]).elements;
-        REQUIRE(symElems.size() == 3);
-
-        // Symbol 0: Alias 'Score' (kind 26)
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "name")) == "Score");
-        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "kind")) == 26);
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "detail")) == "= int");
-
-        // Symbol 1: Type 'Player' (kind 23) with 2 Field children (kind 8)
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "name")) == "Player");
-        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "kind")) == 23);
-        const cb::JsonId childrenId = cb::jsonGetField(docSymResp.arena, symElems[1], "children");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(docSymResp.arena.nodes[childrenId]));
-        const auto& fieldChildren = std::get<cb::JsonArray>(docSymResp.arena.nodes[childrenId]).elements;
-        REQUIRE(fieldChildren.size() == 2);
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "name")) == "name");
-        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "kind")) == 8);
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[0], "detail")) == "str");
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[1], "name")) == "health");
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, fieldChildren[1], "detail")) == "int");
-
-        // Symbol 2: Fn 'heal' (kind 12)
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "name")) == "heal");
-        CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "kind")) == 12);
-        CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[2], "detail")) == "(byref p as Player, amount as int) as int can error");
-
-        // Msg 5: hover on inferred variable 'hero' (id = 3)
-        const auto hoverHero = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(hoverHero.ok);
-        const cb::JsonId h3Contents = cb::jsonGetField(
-            hoverHero.arena,
-            cb::jsonGetField(hoverHero.arena, hoverHero.root, "result"),
-            "contents"
-        );
-        const auto h3Val = cb::jsonGetString(hoverHero.arena, cb::jsonGetField(hoverHero.arena, h3Contents, "value"));
-        REQUIRE(h3Val.has_value());
-        CHECK(h3Val.value().find("dim hero as Player") != std::string::npos);
-
-        // Msg 6: hover on UFCS call 'hero.heal' (id = 4)
-        const auto hoverHeal = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(hoverHeal.ok);
-        const cb::JsonId h4Contents = cb::jsonGetField(
-            hoverHeal.arena,
-            cb::jsonGetField(hoverHeal.arena, hoverHeal.root, "result"),
-            "contents"
-        );
-        const auto h4Val = cb::jsonGetString(hoverHeal.arena, cb::jsonGetField(hoverHeal.arena, h4Contents, "value"));
-        REQUIRE(h4Val.has_value());
-        CHECK(h4Val.value().find("pub fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
-
-        // Msg 7: hover on struct field 'hero.health' (id = 5)
-        const auto hoverField = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(hoverField.ok);
-        const cb::JsonId h5Contents = cb::jsonGetField(
-            hoverField.arena,
-            cb::jsonGetField(hoverField.arena, hoverField.root, "result"),
-            "contents"
-        );
-        const auto h5Val = cb::jsonGetString(hoverField.arena, cb::jsonGetField(hoverField.arena, h5Contents, "value"));
-        REQUIRE(h5Val.has_value());
-        CHECK(h5Val.value().find("(field) Player.health as int") != std::string::npos);
-
-        // Msg 8: hover on builtin 'print' (id = 6)
-        const auto hoverPrint = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(hoverPrint.ok);
-        const cb::JsonId h6Contents = cb::jsonGetField(
-            hoverPrint.arena,
-            cb::jsonGetField(hoverPrint.arena, hoverPrint.root, "result"),
-            "contents"
-        );
-        const auto h6Val = cb::jsonGetString(hoverPrint.arena, cb::jsonGetField(hoverPrint.arena, h6Contents, "value"));
-        REQUIRE(h6Val.has_value());
-        CHECK(h6Val.value().find("fn print(values...)") != std::string::npos);
-
-        // Msg 9: definition on same-file 'localBoost' (id = 7) -> main.cb, 0-based line 1, char 3
-        const auto defLocalFn = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(defLocalFn.ok);
-        const cb::JsonId def7Res = cb::jsonGetField(defLocalFn.arena, defLocalFn.root, "result");
-        CHECK(cb::jsonGetString(defLocalFn.arena, cb::jsonGetField(defLocalFn.arena, def7Res, "uri")) == "file:///ws/main.cb");
-        const cb::JsonId def7Start = cb::jsonGetField(
-            defLocalFn.arena,
-            cb::jsonGetField(defLocalFn.arena, def7Res, "range"),
-            "start"
-        );
-        CHECK(cb::jsonGetInt(defLocalFn.arena, cb::jsonGetField(defLocalFn.arena, def7Start, "line")) == 1);
-        CHECK(cb::jsonGetInt(defLocalFn.arena, cb::jsonGetField(defLocalFn.arena, def7Start, "character")) == 3);
-
-        // Msg 10: definition on cross-module UFCS 'hero.heal' (id = 8) -> player.cb, 0-based line 5, char 7
-        const auto defUfcs = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(defUfcs.ok);
-        const cb::JsonId def8Res = cb::jsonGetField(defUfcs.arena, defUfcs.root, "result");
-        CHECK(cb::jsonGetString(defUfcs.arena, cb::jsonGetField(defUfcs.arena, def8Res, "uri")) == "file:///ws/player.cb");
-        const cb::JsonId def8Start = cb::jsonGetField(
-            defUfcs.arena,
-            cb::jsonGetField(defUfcs.arena, def8Res, "range"),
-            "start"
-        );
-        CHECK(cb::jsonGetInt(defUfcs.arena, cb::jsonGetField(defUfcs.arena, def8Start, "line")) == 5);
-        CHECK(cb::jsonGetInt(defUfcs.arena, cb::jsonGetField(defUfcs.arena, def8Start, "character")) == 7);
-
-        // Msg 11: definition on struct field 'hero.health' (id = 9) -> player.cb, 0-based line 3, char 4
-        const auto defField = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(defField.ok);
-        const cb::JsonId def9Res = cb::jsonGetField(defField.arena, defField.root, "result");
-        CHECK(cb::jsonGetString(defField.arena, cb::jsonGetField(defField.arena, def9Res, "uri")) == "file:///ws/player.cb");
-        const cb::JsonId def9Start = cb::jsonGetField(
-            defField.arena,
-            cb::jsonGetField(defField.arena, def9Res, "range"),
-            "start"
-        );
-        CHECK(cb::jsonGetInt(defField.arena, cb::jsonGetField(defField.arena, def9Start, "line")) == 3);
-        CHECK(cb::jsonGetInt(defField.arena, cb::jsonGetField(defField.arena, def9Start, "character")) == 4);
-
-        // Msg 12: definition on local const 'maxPotion' (id = 10) -> main.cb, 0-based line 5, char 10
-        const auto defVar = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(defVar.ok);
-        const cb::JsonId def10Res = cb::jsonGetField(defVar.arena, defVar.root, "result");
-        CHECK(cb::jsonGetString(defVar.arena, cb::jsonGetField(defVar.arena, def10Res, "uri")) == "file:///ws/main.cb");
-        const cb::JsonId def10Start = cb::jsonGetField(
-            defVar.arena,
-            cb::jsonGetField(defVar.arena, def10Res, "range"),
-            "start"
-        );
-        CHECK(cb::jsonGetInt(defVar.arena, cb::jsonGetField(defVar.arena, def10Start, "line")) == 5);
-        CHECK(cb::jsonGetInt(defVar.arena, cb::jsonGetField(defVar.arena, def10Start, "character")) == 10);
-
-        // Msg 13: publishDiagnostics for broken main.cb after didChange
-        const auto diagBroken = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(diagBroken.ok);
-
-        // Msg 14: documentSymbol on main.cb while broken (id = 11) -> falls back to last-known-good snapshot!
-        const auto symFallback = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(symFallback.ok);
-        const cb::JsonId fbSymArr = cb::jsonGetField(symFallback.arena, symFallback.root, "result");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(symFallback.arena.nodes[fbSymArr]));
-        CHECK(std::get<cb::JsonArray>(symFallback.arena.nodes[fbSymArr]).elements.size() == 2);
-
-        // Msg 15: hover on 'hero' while main.cb has syntax error on next line (id = 12) -> falls back to last-known-good snapshot!
-        const auto hoverFallback = cb::parseJson(cb::readJsonrpcMessage(serverToClient).value());
-        REQUIRE(hoverFallback.ok);
-        const cb::JsonId h12Contents = cb::jsonGetField(
-            hoverFallback.arena,
-            cb::jsonGetField(hoverFallback.arena, hoverFallback.root, "result"),
-            "contents"
-        );
-        const auto h12Val = cb::jsonGetString(hoverFallback.arena, cb::jsonGetField(hoverFallback.arena, h12Contents, "value"));
-        REQUIRE(h12Val.has_value());
-        CHECK(h12Val.value().find("dim hero as Player") != std::string::npos);
-    }
+    const auto hoverFallback = cb::testLsp::readResponseForId(serverToClient, 12);
+    const cb::JsonId h12Contents = cb::jsonGetField(
+        hoverFallback.arena,
+        cb::jsonGetField(hoverFallback.arena, hoverFallback.root, "result"),
+        "contents"
+    );
+    const auto h12Val = cb::jsonGetString(hoverFallback.arena, cb::jsonGetField(hoverFallback.arena, h12Contents, "value"));
+    REQUIRE(h12Val.has_value());
+    CHECK(h12Val.value().find("dim hero as Player") != std::string::npos);
 }
 
-TEST_CASE("CleanBasic Language Server Phase 3: completion (dot UFCS/fields/modules/err/list, named args, types, scope) & signatureHelp", "[lsp]") {
-    auto hasCompletionItem = [](
-        const cb::JsonArena& arena,
-        cb::JsonId arrId,
-        std::string_view label,
-        int64_t expectedKind = -1,
-        std::string_view detailSubstr = ""
-    ) -> bool {
-        if (arrId >= arena.nodes.size() || !std::holds_alternative<cb::JsonArray>(arena.nodes[arrId])) {
-            return false;
-        }
-        const auto& elems = std::get<cb::JsonArray>(arena.nodes[arrId]).elements;
-        for (const cb::JsonId itemId : elems) {
-            const auto lbl = cb::jsonGetString(arena, cb::jsonGetField(arena, itemId, "label"));
-            if (!lbl.has_value() || lbl.value() != label) {
-                continue;
-            }
-            if (expectedKind >= 0) {
-                const auto k = cb::jsonGetInt(arena, cb::jsonGetField(arena, itemId, "kind"));
-                if (!k.has_value() || k.value() != expectedKind) {
-                    continue;
-                }
-            }
-            if (!detailSubstr.empty()) {
-                const auto det = cb::jsonGetString(arena, cb::jsonGetField(arena, itemId, "detail"));
-                if (!det.has_value() || det.value().find(detailSubstr) == std::string::npos) {
-                    continue;
-                }
-            }
-            return true;
-        }
-        return false;
-    };
+TEST_CASE("LSP Completion Provider resolves UFCS and fields", "[lsp][completion]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
 
-    SECTION("Two-stage dot-scrub recovery on brand-new variable, UFCS & struct fields, module exports, err/list, named args, types, and signatureHelp") {
-        std::stringstream clientToServer;
-        std::stringstream serverToClient;
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
 
-        // 1. initialize (id = 1)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
-        );
-
-        // 2. didOpen player.cb
-        {
-            cb::JsonArena arena;
-            const cb::JsonId msg = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
-            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::jsonAddObject(arena);
-            const cb::JsonId td = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/player.cb"));
-            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
-            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
-            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(pub alias Score = int
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
 pub type Player
     name as str
     health as int
@@ -1826,38 +1850,10 @@ end fn
 fn secretHelper(p as Player) as int
     return p.health
 end fn
-)"));
-            cb::jsonObjectSet(arena, params, "textDocument", td);
-            cb::jsonObjectSet(arena, msg, "params", params);
-            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
-        }
+)");
 
-        // 3. didOpen main.cb directly with a brand-new variable 'hero' and an incomplete trailing dot 'hero.' on the very next line!
-        // Note: main.cb has NO prior cached snapshot when 'hero.' is typed!
-        // Line 0: import "player.cb"
-        // Line 1: fn localBuff(byref p as player.Player, shield as int)
-        // Line 2:     p.health = p.health + shield
-        // Line 3: end fn
-        // Line 4: fn main() as int
-        // Line 5:     try
-        // Line 6:     catch e
-        // Line 7:     end try
-        // Line 8:     dim nums as list[int] = [1, 2]
-        // Line 9:     dim hero = player.Player(name="Alice", health=100)
-        // Line 10:    hero.
-        // Line 11:    return 0
-        // Line 12: end fn
-        {
-            cb::JsonArena arena;
-            const cb::JsonId msg = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
-            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didOpen"));
-            const cb::JsonId params = cb::jsonAddObject(arena);
-            const cb::JsonId td = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
-            cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
-            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
-            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(import "player.cb"
+    // Open main.cb directly with a brand-new variable 'hero' and an incomplete trailing dot 'hero.' on the very next line (two-stage scrub recovery)
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
 fn localBuff(byref p as player.Player, shield as int)
     p.health = p.health + shield
 end fn
@@ -1870,32 +1866,16 @@ fn main() as int
     hero.
     return 0
 end fn
-)"));
-            cb::jsonObjectSet(arena, params, "textDocument", td);
-            cb::jsonObjectSet(arena, msg, "params", params);
-            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
-        }
+)");
 
-        // Req id=2: textDocument/completion at 'hero.' (line 10, character 9)
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":9}}})"
-        );
+    // Req id=2: textDocument/completion at 'hero.' (line 10, character 9)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":9}}})"
+    );
 
-        // 4. didChange main.cb to test module alias completion 'player.' (line 10, char 11)
-        auto sendMainChange = [&](int version, std::string_view newLine10) {
-            cb::JsonArena arena;
-            const cb::JsonId msg = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, msg, "jsonrpc", cb::jsonAddString(arena, "2.0"));
-            cb::jsonObjectSet(arena, msg, "method", cb::jsonAddString(arena, "textDocument/didChange"));
-            const cb::JsonId params = cb::jsonAddObject(arena);
-            const cb::JsonId td = cb::jsonAddObject(arena);
-            cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///ws/main.cb"));
-            cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, version));
-            cb::jsonObjectSet(arena, params, "textDocument", td);
-            const cb::JsonId changes = cb::jsonAddArray(arena);
-            const cb::JsonId changeItem = cb::jsonAddObject(arena);
-            std::string fullSrc = R"(import "player.cb"
+    auto sendMainLine10Change = [&](int version, std::string_view newLine10) {
+        std::string fullSrc = R"(import "player.cb"
 fn localBuff(byref p as player.Player, shield as int)
     p.health = p.health + shield
 end fn
@@ -1906,177 +1886,232 @@ fn main() as int
     dim nums as list[int] = [1, 2]
     dim hero = player.Player(name="Alice", health=100)
 )";
-            fullSrc += std::string(newLine10) + "\n    return 0\nend fn\n";
-            cb::jsonObjectSet(arena, changeItem, "text", cb::jsonAddString(arena, fullSrc));
-            cb::jsonArrayPush(arena, changes, changeItem);
-            cb::jsonObjectSet(arena, params, "contentChanges", changes);
-            cb::jsonObjectSet(arena, msg, "params", params);
-            cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
-        };
+        fullSrc += std::string(newLine10) + R"(
+    return 0
+end fn
+)";
+        cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", version, fullSrc);
+    };
 
-        // Change v2: '    player.' (line 10, char 11) -> Req id=3
-        sendMainChange(2, "    player.");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":11}}})"
-        );
+    // Change v2: '    player.' (line 10, char 11) -> Req id=3 (module alias completion)
+    sendMainLine10Change(2, "    player.");
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":11}}})"
+    );
 
-        // Change v3: '    e.' (line 10, char 6) -> Req id=4 (built-in err fields .msg and .code)
-        sendMainChange(3, "    e.");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":4,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":6}}})"
-        );
+    // Change v3: '    e.' (line 10, char 6) -> Req id=4 (built-in err fields .msg and .code)
+    sendMainLine10Change(3, "    e.");
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":4,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":6}}})"
+    );
 
-        // Change v4: '    nums.' (line 10, char 9) -> Req id=5 (built-in list[int] methods .push and .append)
-        sendMainChange(4, "    nums.");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":9}}})"
-        );
+    // Change v4: '    nums.' (line 10, char 9) -> Req id=5 (built-in list[int] methods .push and .len)
+    sendMainLine10Change(4, "    nums.");
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":9}}})"
+    );
 
-        // Change v5: '    dim p2 = player.Player(' (line 10, char 27) -> Req id=6 (named field= completion) & Req id=7 (signatureHelp on struct constructor)
-        sendMainChange(5, "    dim p2 = player.Player(");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":6,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":27}}})"
-        );
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":7,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":27}}})"
-        );
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        // Change v6: '    hero.heal(25, ' (line 10, char 18) -> Req id=8 (UFCS signatureHelp at 2nd visible parameter: activeParameter == 1)
-        sendMainChange(6, "    hero.heal(25, ");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":8,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":18}}})"
-        );
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
 
-        // Change v7: '    dim x as ' (line 10, char 13) -> Req id=9 (type annotation completion after 'as ')
-        sendMainChange(7, "    dim x as ");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":9,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":13}}})"
-        );
+    const auto initResp = cb::testLsp::readResponseForId(serverToClient, 1);
+    const cb::JsonId initRes = cb::jsonGetField(initResp.arena, initResp.root, "result");
+    const cb::JsonId caps = cb::jsonGetField(initResp.arena, initRes, "capabilities");
+    CHECK(cb::jsonGetField(initResp.arena, caps, "completionProvider") != cb::JSON_INVALID_ID);
+    const cb::JsonId srvInfo = cb::jsonGetField(initResp.arena, initRes, "serverInfo");
+    CHECK(cb::jsonGetString(initResp.arena, cb::jsonGetField(initResp.arena, srvInfo, "version")) == "0.3.0");
 
-        // Change v8: '    he' (line 10, char 6) -> Req id=10 (general scope completion filtered by prefix 'he' -> finds 'hero')
-        sendMainChange(8, "    he");
-        cb::writeJsonrpcMessage(
-            clientToServer,
-            R"({"jsonrpc":"2.0","id":10,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":10,"character":6}}})"
-        );
+    const auto compHero = cb::testLsp::readResponseForId(serverToClient, 2);
+    const cb::JsonId heroItems = cb::jsonGetField(compHero.arena, compHero.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compHero.arena, heroItems, "name", 5, "as str"));
+    CHECK(cb::testLsp::hasCompletionItem(compHero.arena, heroItems, "health", 5, "as int"));
+    CHECK(cb::testLsp::hasCompletionItem(compHero.arena, heroItems, "heal", 2, "ufcs fn heal(amount as int, bonus as int) as int can error"));
+    CHECK(cb::testLsp::hasCompletionItem(compHero.arena, heroItems, "localBuff", 2, "ufcs fn localBuff(shield as int)"));
+    CHECK_FALSE(cb::testLsp::hasCompletionItem(compHero.arena, heroItems, "secretHelper"));
 
-        // shutdown & exit
-        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
-        cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
+    const auto compMod = cb::testLsp::readResponseForId(serverToClient, 3);
+    const cb::JsonId modItems = cb::jsonGetField(compMod.arena, compMod.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "Player", 22, "type Player"));
+    CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "Score", 25, "alias Score = int"));
+    CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "heal", 3));
+    CHECK_FALSE(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "secretHelper"));
 
-        const int exitCode = cb::runLspServer(clientToServer, serverToClient);
-        CHECK(exitCode == 0);
+    const auto compErr = cb::testLsp::readResponseForId(serverToClient, 4);
+    const cb::JsonId errItems = cb::jsonGetField(compErr.arena, compErr.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compErr.arena, errItems, "msg", 5, "as str"));
+    CHECK(cb::testLsp::hasCompletionItem(compErr.arena, errItems, "code", 5, "as int"));
 
-        // Helper to read next response with a specific id (skipping publishDiagnostics notifications)
-        auto readResponseForId = [&](int64_t targetId) -> cb::JsonParseResult {
-            while (true) {
-                const auto rawOpt = cb::readJsonrpcMessage(serverToClient);
-                REQUIRE(rawOpt.has_value());
-                auto parsed = cb::parseJson(rawOpt.value());
-                REQUIRE(parsed.ok);
-                const auto idOpt = cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "id"));
-                if (idOpt.has_value() && idOpt.value() == targetId) {
-                    return parsed;
-                }
-            }
-        };
+    const auto compList = cb::testLsp::readResponseForId(serverToClient, 5);
+    const cb::JsonId listItems = cb::jsonGetField(compList.arena, compList.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compList.arena, listItems, "push", 2, "fn(item as int)"));
+    CHECK(cb::testLsp::hasCompletionItem(compList.arena, listItems, "len", 2, "fn() as int"));
+    CHECK_FALSE(cb::testLsp::hasCompletionItem(compList.arena, listItems, "append"));
+}
 
-        // 1. Verify initialize capabilities (id = 1)
-        const auto initResp = readResponseForId(1);
-        const cb::JsonId initRes = cb::jsonGetField(initResp.arena, initResp.root, "result");
-        const cb::JsonId caps = cb::jsonGetField(initResp.arena, initRes, "capabilities");
-        const cb::JsonId compProv = cb::jsonGetField(initResp.arena, caps, "completionProvider");
-        REQUIRE(compProv != cb::JSON_INVALID_ID);
-        const cb::JsonId sigProv = cb::jsonGetField(initResp.arena, caps, "signatureHelpProvider");
-        REQUIRE(sigProv != cb::JSON_INVALID_ID);
-        const cb::JsonId srvInfo = cb::jsonGetField(initResp.arena, initRes, "serverInfo");
-        CHECK(cb::jsonGetString(initResp.arena, cb::jsonGetField(initResp.arena, srvInfo, "version")) == "0.3.0");
+TEST_CASE("LSP Completion Provider resolves named arguments, type annotations, and lexical scope", "[lsp][completion]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
 
-        // 2. Verify dot-completion on brand-new variable 'hero.' (id = 2)
-        // Must include struct fields ('name', 'health'), cross-module UFCS ('heal'), and same-module UFCS ('localBuff'),
-        // while excluding private cross-module 'secretHelper'.
-        const auto compHero = readResponseForId(2);
-        const cb::JsonId heroItems = cb::jsonGetField(compHero.arena, compHero.root, "result");
-        CHECK(hasCompletionItem(compHero.arena, heroItems, "name", 5, "as str"));
-        CHECK(hasCompletionItem(compHero.arena, heroItems, "health", 5, "as int"));
-        CHECK(hasCompletionItem(compHero.arena, heroItems, "heal", 2, "ufcs fn heal(amount as int, bonus as int) as int can error"));
-        CHECK(hasCompletionItem(compHero.arena, heroItems, "localBuff", 2, "ufcs fn localBuff(shield as int)"));
-        CHECK_FALSE(hasCompletionItem(compHero.arena, heroItems, "secretHelper"));
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
 
-        // 3. Verify module alias dot-completion 'player.' (id = 3)
-        const auto compMod = readResponseForId(3);
-        const cb::JsonId modItems = cb::jsonGetField(compMod.arena, compMod.root, "result");
-        CHECK(hasCompletionItem(compMod.arena, modItems, "Player", 22, "type Player"));
-        CHECK(hasCompletionItem(compMod.arena, modItems, "Score", 25, "alias Score = int"));
-        CHECK(hasCompletionItem(compMod.arena, modItems, "heal", 3));
-        CHECK_FALSE(hasCompletionItem(compMod.arena, modItems, "secretHelper"));
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub type Player
+    name as str
+    health as int
+end type
+)");
 
-        // 4. Verify built-in err dot-completion 'e.' (id = 4)
-        const auto compErr = readResponseForId(4);
-        const cb::JsonId errItems = cb::jsonGetField(compErr.arena, compErr.root, "result");
-        CHECK(hasCompletionItem(compErr.arena, errItems, "msg", 5, "as str"));
-        CHECK(hasCompletionItem(compErr.arena, errItems, "code", 5, "as int"));
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
+fn main() as int
+    dim hero = player.Player(name="Alice", health=100)
+    dim p2 = player.Player(
+    return 0
+end fn
+)");
 
-        // 5. Verify built-in list[int] dot-completion 'nums.' (id = 5)
-        const auto compList = readResponseForId(5);
-        const cb::JsonId listItems = cb::jsonGetField(compList.arena, compList.root, "result");
-        CHECK(hasCompletionItem(compList.arena, listItems, "push", 2, "fn(item as int)"));
-        CHECK(hasCompletionItem(compList.arena, listItems, "len", 2, "fn() as int"));
-        CHECK_FALSE(hasCompletionItem(compList.arena, listItems, "append"));
+    // Req id=6: named field= completion inside 'player.Player(' (line 3, char 27)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":6,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":27}}})"
+    );
 
-        // 6. Verify named field= completion inside 'player.Player(' (id = 6)
-        const auto compNamed = readResponseForId(6);
-        const cb::JsonId namedItems = cb::jsonGetField(compNamed.arena, compNamed.root, "result");
-        CHECK(hasCompletionItem(compNamed.arena, namedItems, "name=", 5, "as str"));
-        CHECK(hasCompletionItem(compNamed.arena, namedItems, "health=", 5, "as int"));
+    // Change v2: '    dim x as ' (line 3, char 13) -> Req id=9 (type annotation completion after 'as ')
+    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 2, R"(import "player.cb"
+fn main() as int
+    dim hero = player.Player(name="Alice", health=100)
+    dim x as 
+    return 0
+end fn
+)");
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":9,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":13}}})"
+    );
 
-        // 7. Verify signatureHelp inside 'player.Player(' (id = 7)
-        const auto sigCtor = readResponseForId(7);
-        const cb::JsonId sigCtorRes = cb::jsonGetField(sigCtor.arena, sigCtor.root, "result");
-        CHECK(cb::jsonGetInt(sigCtor.arena, cb::jsonGetField(sigCtor.arena, sigCtorRes, "activeParameter")) == 0);
-        const cb::JsonId ctorSigs = cb::jsonGetField(sigCtor.arena, sigCtorRes, "signatures");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sigCtor.arena.nodes[ctorSigs]));
-        const cb::JsonId ctorSig0 = std::get<cb::JsonArray>(sigCtor.arena.nodes[ctorSigs]).elements[0];
-        CHECK(cb::jsonGetString(sigCtor.arena, cb::jsonGetField(sigCtor.arena, ctorSig0, "label")) ==
-              "Player(name as str, health as int) as Player");
+    // Change v3: '    he' (line 3, char 6) -> Req id=10 (general scope completion filtered by prefix 'he' -> finds 'hero')
+    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 3, R"(import "player.cb"
+fn main() as int
+    dim hero = player.Player(name="Alice", health=100)
+    he
+    return 0
+end fn
+)");
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":10,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":6}}})"
+    );
 
-        // 8. Verify UFCS signatureHelp inside 'hero.heal(25, ' (id = 8)
-        // Receiver 'byref p as Player' is omitted from visible UFCS parameters, and activeParameter is 1 ('bonus as int')
-        const auto sigUfcs = readResponseForId(8);
-        const cb::JsonId sigUfcsRes = cb::jsonGetField(sigUfcs.arena, sigUfcs.root, "result");
-        CHECK(cb::jsonGetInt(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, sigUfcsRes, "activeParameter")) == 1);
-        const cb::JsonId ufcsSigs = cb::jsonGetField(sigUfcs.arena, sigUfcsRes, "signatures");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sigUfcs.arena.nodes[ufcsSigs]));
-        const cb::JsonId ufcsSig0 = std::get<cb::JsonArray>(sigUfcs.arena.nodes[ufcsSigs]).elements[0];
-        CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsSig0, "label")) ==
-              "fn heal(amount as int, bonus as int) as int can error");
-        const cb::JsonId ufcsParams = cb::jsonGetField(sigUfcs.arena, ufcsSig0, "parameters");
-        REQUIRE(std::holds_alternative<cb::JsonArray>(sigUfcs.arena.nodes[ufcsParams]));
-        const auto& ufcsParamElems = std::get<cb::JsonArray>(sigUfcs.arena.nodes[ufcsParams]).elements;
-        REQUIRE(ufcsParamElems.size() == 2);
-        CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[0], "label")) == "amount as int");
-        CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[1], "label")) == "bonus as int");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
-        // 9. Verify type annotation completion after 'dim x as ' (id = 9)
-        const auto compTypes = readResponseForId(9);
-        const cb::JsonId typeItems = cb::jsonGetField(compTypes.arena, compTypes.root, "result");
-        CHECK(hasCompletionItem(compTypes.arena, typeItems, "int", 14));
-        CHECK(hasCompletionItem(compTypes.arena, typeItems, "str", 14));
-        CHECK(hasCompletionItem(compTypes.arena, typeItems, "list", 14));
-        CHECK(hasCompletionItem(compTypes.arena, typeItems, "player", 9));
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
 
-        // 10. Verify general scope completion with prefix 'he' (id = 10)
-        const auto compScope = readResponseForId(10);
-        const cb::JsonId scopeItems = cb::jsonGetField(compScope.arena, compScope.root, "result");
-        CHECK(hasCompletionItem(compScope.arena, scopeItems, "hero", 6, "as Player"));
-    }
+    const auto compNamed = cb::testLsp::readResponseForId(serverToClient, 6);
+    const cb::JsonId namedItems = cb::jsonGetField(compNamed.arena, compNamed.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compNamed.arena, namedItems, "name=", 5, "as str"));
+    CHECK(cb::testLsp::hasCompletionItem(compNamed.arena, namedItems, "health=", 5, "as int"));
+
+    const auto compTypes = cb::testLsp::readResponseForId(serverToClient, 9);
+    const cb::JsonId typeItems = cb::jsonGetField(compTypes.arena, compTypes.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compTypes.arena, typeItems, "int", 14));
+    CHECK(cb::testLsp::hasCompletionItem(compTypes.arena, typeItems, "str", 14));
+    CHECK(cb::testLsp::hasCompletionItem(compTypes.arena, typeItems, "list", 14));
+    CHECK(cb::testLsp::hasCompletionItem(compTypes.arena, typeItems, "player", 9));
+
+    const auto compScope = cb::testLsp::readResponseForId(serverToClient, 10);
+    const cb::JsonId scopeItems = cb::jsonGetField(compScope.arena, compScope.root, "result");
+    CHECK(cb::testLsp::hasCompletionItem(compScope.arena, scopeItems, "hero", 6, "as Player"));
+}
+
+TEST_CASE("LSP Signature Help Provider resolves struct constructors and UFCS active parameters", "[lsp][signatureHelp]") {
+    std::stringstream clientToServer;
+    std::stringstream serverToClient;
+
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
+    );
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub type Player
+    name as str
+    health as int
+end type
+pub fn heal(byref p as Player, amount as int, bonus as int) as int can error
+    p.health = p.health + amount + bonus
+    return p.health
+end fn
+)");
+
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
+fn main() as int
+    dim hero = player.Player(name="Alice", health=100)
+    dim p2 = player.Player(
+    return 0
+end fn
+)");
+
+    // Req id=7: signatureHelp inside 'player.Player(' (line 3, char 27)
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":7,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":27}}})"
+    );
+
+    // Change v2: '    hero.heal(25, ' (line 3, char 18) -> Req id=8 (UFCS signatureHelp at 2nd visible parameter: activeParameter == 1)
+    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 2, R"(import "player.cb"
+fn main() as int
+    dim hero = player.Player(name="Alice", health=100)
+    hero.heal(25, 
+    return 0
+end fn
+)");
+    cb::writeJsonrpcMessage(
+        clientToServer,
+        R"({"jsonrpc":"2.0","id":8,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":18}}})"
+    );
+
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
+    cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
+
+    CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
+
+    const auto initResp = cb::testLsp::readResponseForId(serverToClient, 1);
+    const cb::JsonId caps = cb::jsonGetField(
+        initResp.arena,
+        cb::jsonGetField(initResp.arena, initResp.root, "result"),
+        "capabilities"
+    );
+    CHECK(cb::jsonGetField(initResp.arena, caps, "signatureHelpProvider") != cb::JSON_INVALID_ID);
+
+    const auto sigCtor = cb::testLsp::readResponseForId(serverToClient, 7);
+    const cb::JsonId sigCtorRes = cb::jsonGetField(sigCtor.arena, sigCtor.root, "result");
+    CHECK(cb::jsonGetInt(sigCtor.arena, cb::jsonGetField(sigCtor.arena, sigCtorRes, "activeParameter")) == 0);
+    const cb::JsonId ctorSigs = cb::jsonGetField(sigCtor.arena, sigCtorRes, "signatures");
+    REQUIRE(std::holds_alternative<cb::JsonArray>(sigCtor.arena.nodes[ctorSigs]));
+    const cb::JsonId ctorSig0 = std::get<cb::JsonArray>(sigCtor.arena.nodes[ctorSigs]).elements[0];
+    CHECK(cb::jsonGetString(sigCtor.arena, cb::jsonGetField(sigCtor.arena, ctorSig0, "label")) ==
+          "Player(name as str, health as int) as Player");
+
+    const auto sigUfcs = cb::testLsp::readResponseForId(serverToClient, 8);
+    const cb::JsonId sigUfcsRes = cb::jsonGetField(sigUfcs.arena, sigUfcs.root, "result");
+    CHECK(cb::jsonGetInt(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, sigUfcsRes, "activeParameter")) == 1);
+    const cb::JsonId ufcsSigs = cb::jsonGetField(sigUfcs.arena, sigUfcsRes, "signatures");
+    REQUIRE(std::holds_alternative<cb::JsonArray>(sigUfcs.arena.nodes[ufcsSigs]));
+    const cb::JsonId ufcsSig0 = std::get<cb::JsonArray>(sigUfcs.arena.nodes[ufcsSigs]).elements[0];
+    CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsSig0, "label")) ==
+          "fn heal(amount as int, bonus as int) as int can error");
+    const cb::JsonId ufcsParams = cb::jsonGetField(sigUfcs.arena, ufcsSig0, "parameters");
+    REQUIRE(std::holds_alternative<cb::JsonArray>(sigUfcs.arena.nodes[ufcsParams]));
+    const auto& ufcsParamElems = std::get<cb::JsonArray>(sigUfcs.arena.nodes[ufcsParams]).elements;
+    REQUIRE(ufcsParamElems.size() == 2);
+    CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[0], "label")) == "amount as int");
+    CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[1], "label")) == "bonus as int");
 }
 
 TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are valid", "[vscode][lsp]") {
