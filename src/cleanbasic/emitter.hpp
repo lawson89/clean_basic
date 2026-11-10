@@ -74,19 +74,6 @@ class Emitter {
         return out;
     }
 
-    bool isAssertBuiltinCall(const FuncCall& call) const {
-        if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
-            return ident->name == "assert";
-        }
-        return false;
-    }
-
-    bool isErrorBuiltinCall(const FuncCall& call) const {
-        if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
-            return ident->name == "error";
-        }
-        return false;
-    }
 public:
     const AstArena& arena;
     const GlobalSymbolTable& symbols;
@@ -598,10 +585,10 @@ public:
     }
 
     if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-        if (isAssertBuiltinCall(*call)) {
+        if (cb::isAssertBuiltinCall(arena, *call)) {
             return buildAssertCallValue(*call, scope);
         }
-        if (isErrorBuiltinCall(*call)) {
+        if (cb::isErrorBuiltinCall(arena, *call)) {
             return buildErrorCallValue(*call, scope);
         }
         if (call->callee >= arena.exprs.size()) {
@@ -1008,22 +995,28 @@ public:
     }
 }
 
-    void emitExprStmt(uint32_t line, 
+    void emitExprStmt(
+        uint32_t line,
         const FnDecl& fn,
         const ExprStmt& stmt,
-        std::unordered_map<std::string, VarSymbol>& scope,
-        std::unordered_set<std::string>& /*declaredVars*/
+        std::unordered_map<std::string, VarSymbol>& scope
     ) {
         if (const auto* call = arena.getExpr<FuncCall>(stmt.expr)) {
-            if (isAssertBuiltinCall(*call)) {
+            if (cb::isAssertBuiltinCall(arena, *call)) {
                 const auto [discardTmp, errVar] = nextValErrTemps();
                 emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
                 emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
                 return;
             }
-            if (isErrorBuiltinCall(*call)) {
+            if (cb::isErrorBuiltinCall(arena, *call)) {
                 const std::string errVal = buildErrorCallValue(*call, scope);
-                emitLine(buildErrorBubbleReturn(fn, errVal));
+                if (stmt.breaksToCatch && !catchErrStack.empty()) {
+                    const auto [discardTmp, errVar] = nextValErrTemps();
+                    emitLine("auto " + errVar + " = " + errVal + ";");
+                    emitErrorCheck(line, fn, errVar, true);
+                } else {
+                    emitLine(buildErrorBubbleReturn(fn, errVal));
+                }
                 return;
             }
             const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
@@ -1037,85 +1030,84 @@ public:
                     emitLine("auto " + errVar + " = " + callCpp + ";");
                 }
 
-            emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
-            return;
+                emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
+                return;
+            }
         }
+
+        const std::string exprCpp = emitExpr(stmt.expr, scope);
+        emitLine(exprCpp + ";");
     }
 
-    const std::string exprCpp = emitExpr(stmt.expr, scope);
-    emitLine(exprCpp + ";");
-}
-
-    void emitReturn(uint32_t line, 
-    const FnDecl& fn,
-    const ReturnStmt& stmt,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& /*declaredVars*/
-) {
-    if (deferDepth > 0) {
-        emitLine("return;");
-        return;
-    }
-    if (!stmt.hasValue) {
-        if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
-            emitLine(R"(return CbError{"", 0};)");
-        } else {
+    void emitReturn(
+        uint32_t line,
+        const FnDecl& fn,
+        const ReturnStmt& stmt,
+        std::unordered_map<std::string, VarSymbol>& scope
+    ) {
+        if (deferDepth > 0) {
             emitLine("return;");
-        }
-        return;
-    }
-
-    const ExprId firstId = stmt.value;
-    if (const auto* call = arena.getExpr<FuncCall>(firstId)) {
-        if (isAssertBuiltinCall(*call)) {
-            const auto [discardTmp, errVar] = nextValErrTemps();
-            emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
-            emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
             return;
         }
-            if (isErrorBuiltinCall(*call)) {
-            const std::string errVal = buildErrorCallValue(*call, scope);
-            emitLine(buildErrorBubbleReturn(fn, errVal));
-            return;
-        }
-        const auto calleeSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-        if (calleeSym.has_value() && calleeSym->isFallible) {
-            const auto [valTmp, errTmp] = nextValErrTemps();
-            if (calleeSym->returnType == INVALID_ID || arena.isVoid(calleeSym->returnType)) {
-                emitLine("CbError " + errTmp + " = " + emitExpr(stmt.value, scope) + ";");
-                emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
-                if (fn.isFallible) {
-                    emitLine(R"(return CbError{"", 0};)");
-                } else {
-                    emitLine("return;");
-                }
+        if (!stmt.hasValue) {
+            if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
+                emitLine(R"(return CbError{"", 0};)");
             } else {
-                emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
-                emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
-                if (fn.isFallible) {
-                    emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
-                } else {
-                    emitLine("return " + valTmp + ";");
-                }
+                emitLine("return;");
             }
             return;
         }
-    }
 
-    std::string valCpp = emitExpr(stmt.value, scope);
-    if (arena.getExpr<NullLiteral>(stmt.value) != nullptr && fn.returnType != INVALID_ID) {
-        const TypeNode tnode = resolveAliasNode(arena, symbols, currentModuleId, fn.returnType);
-        if (symbols.types.find(tnode.name) != symbols.types.end()) {
-            valCpp = mapTypeNode(currentModuleId, tnode) + "{}";
+        const ExprId firstId = stmt.value;
+        if (const auto* call = arena.getExpr<FuncCall>(firstId)) {
+            if (cb::isAssertBuiltinCall(arena, *call)) {
+                const auto [discardTmp, errVar] = nextValErrTemps();
+                emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
+                emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
+                return;
+            }
+            if (cb::isErrorBuiltinCall(arena, *call)) {
+                const std::string errVal = buildErrorCallValue(*call, scope);
+                if (stmt.breaksToCatch && !catchErrStack.empty()) {
+                    const auto [discardTmp, errVar] = nextValErrTemps();
+                    emitLine("auto " + errVar + " = " + errVal + ";");
+                    emitErrorCheck(line, fn, errVar, true);
+                } else {
+                    emitLine(buildErrorBubbleReturn(fn, errVal));
+                }
+                return;
+            }
+            const auto calleeSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+            if (calleeSym.has_value() && calleeSym->isFallible) {
+                const auto [valTmp, errTmp] = nextValErrTemps();
+                if (calleeSym->returnType == INVALID_ID || arena.isVoid(calleeSym->returnType)) {
+                    emitLine("CbError " + errTmp + " = " + emitExpr(stmt.value, scope) + ";");
+                    emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
+                    if (fn.isFallible) {
+                        emitLine(R"(return CbError{"", 0};)");
+                    } else {
+                        emitLine("return;");
+                    }
+                } else {
+                    emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
+                    emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
+                    if (fn.isFallible) {
+                        emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
+                    } else {
+                        emitLine("return " + valTmp + ";");
+                    }
+                }
+                return;
+            }
+        }
+
+        const std::string valCpp = emitExpr(stmt.value, scope);
+        if (fn.isFallible) {
+            emitLine("return { " + valCpp + R"(, CbError{"", 0} };)");
+        } else {
+            emitLine("return " + valCpp + ";");
         }
     }
-
-    if (fn.isFallible) {
-        emitLine("return { " + valCpp + R"(, CbError{"", 0} };)");
-    } else {
-        emitLine("return " + valCpp + ";");
-    }
-}
 
     void emitStmt(
     const FnDecl& fn,
@@ -1134,7 +1126,7 @@ public:
     }
 
     if (const auto* estmt = arena.getStmt<ExprStmt>(stmtId)) {
-        emitExprStmt(stmtNode.line, fn, *estmt, scope, declaredVars);
+        emitExprStmt(stmtNode.line, fn, *estmt, scope);
         return;
     }
 
@@ -1164,6 +1156,7 @@ public:
         }
 
         emitLine("}");
+        emitCatchBreakIfPending();
         return;
     }
 
@@ -1494,6 +1487,7 @@ public:
             }
             indentLevel -= 1;
             emitLine("}");
+            emitCatchBreakIfPending();
             return;
         }
 
@@ -1537,7 +1531,7 @@ public:
     if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(stmtId)) {
         emitLine("{");
         indentLevel += 1;
-        const std::string catchErr = "_catch_err";
+        const std::string catchErr = nextTemp("_catch_err");
         emitLine("CbError " + catchErr + "{};");
         emitLine("do {");
         indentLevel += 1;
@@ -1585,7 +1579,7 @@ public:
     }
 
     if (const auto* retS = arena.getStmt<ReturnStmt>(stmtId)) {
-        emitReturn(stmtNode.line, fn, *retS, scope, declaredVars);
+        emitReturn(stmtNode.line, fn, *retS, scope);
         return;
     }
 
@@ -1718,7 +1712,7 @@ public:
                     endsWithReturn = true;
                 } else if (const auto* es = arena.getStmt<ExprStmt>(lastSid)) {
                     if (const auto* call = arena.getExpr<FuncCall>(es->expr)) {
-                        if (isErrorBuiltinCall(*call)) {
+                        if (cb::isErrorBuiltinCall(arena, *call)) {
                             endsWithReturn = true;
                         }
                     }
@@ -2087,17 +2081,9 @@ public:
 
     lines.push_back(std::string(CPP_RUNTIME_PREAMBLE));
 
-    std::vector<std::string> emittedHeaders;
-    for (const auto& hdr : symbols.headers) {
-        const auto hmIt = symbols.headerModules.find(hdr);
-        if (hmIt != symbols.headerModules.end() && !isModuleEmitted(symbols, hmIt->second)) {
-            continue;
-        }
-        emittedHeaders.push_back(hdr);
-    }
-    if (!emittedHeaders.empty()) {
+    if (!symbols.headers.empty()) {
         emitLine();
-        for (const auto& hdr : emittedHeaders) {
+        for (const auto& hdr : symbols.headers) {
             emitLine(R"(#include ")" + hdr + R"(")");
         }
     }

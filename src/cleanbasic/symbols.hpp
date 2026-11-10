@@ -176,14 +176,6 @@ inline std::string extractPrecedingDocCommentFromLines(
     return out;
 }
 
-inline std::string extractPrecedingDocComment(
-    std::string_view sourceText,
-    uint32_t declLine1Based
-) {
-    const auto lines = splitSourceLinesView(sourceText);
-    return extractPrecedingDocCommentFromLines(lines, declLine1Based);
-}
-
 inline void attachDocCommentsToDecls(
     AstArena& arena,
     const std::vector<DeclId>& declIds,
@@ -259,11 +251,7 @@ inline TypeNode buildFnTypeNode(const AstArena& arena, const FnSymbol& fn) {
     return node;
 }
 
-inline TypeId getFnTypeId(const AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
-    return arena.findTypeNode(buildFnTypeNode(arena, fn));
-}
-
-inline TypeId addFnTypeId(AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
+inline TypeId addFnTypeId(AstArena& arena, const FnSymbol& fn) {
     return arena.addType(buildFnTypeNode(arena, fn));
 }
 
@@ -922,7 +910,7 @@ inline std::optional<FnSymbol> resolveUfcsFn(
 }
 
 inline std::optional<EnumSymbol> resolveEnumSymbol(
-    const AstArena& /*arena*/,
+    const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
     std::string_view typeName
@@ -941,6 +929,11 @@ inline std::optional<EnumSymbol> resolveEnumSymbol(
     const auto it3 = symbols.enums.find(normKey);
     if (it3 != symbols.enums.end()) {
         return it3->second;
+    }
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(typeName), {}, {}, INVALID_ID, false});
+    const auto it4 = symbols.enums.find(resolved.name);
+    if (it4 != symbols.enums.end()) {
+        return it4->second;
     }
     return std::nullopt;
 }

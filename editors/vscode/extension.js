@@ -58,16 +58,16 @@ function resolveCleanBasicExecutable() {
  * 4. Auto-compiles 'tools/cbfmt.cb' to 'build/cbfmt' using 'cleanbasic' if 'tools/cbfmt.cb' is present.
  * 5. Fallback to 'cbfmt' on system PATH.
  */
-function resolveCbFmtExecutable() {
+function resolveCleanBasicToolExecutable(settingKey, toolName) {
   const config = vscode.workspace.getConfiguration('cleanbasic');
-  const configuredPath = (config.get('formatterPath') || '').trim();
+  const configuredPath = (config.get(settingKey) || '').trim();
   if (configuredPath.length > 0) {
     return configuredPath;
   }
 
-  let exeName = 'cbfmt';
+  let exeName = toolName;
   if (process.platform === 'win32') {
-    exeName = 'cbfmt.exe';
+    exeName = toolName + '.exe';
   }
 
   const folders = vscode.workspace.workspaceFolders;
@@ -95,11 +95,11 @@ function resolveCbFmtExecutable() {
   candidateRoots.push(repoRoot);
 
   for (const rootDir of candidateRoots) {
-    const srcPath = path.join(rootDir, 'tools', 'cbfmt.cb');
+    const srcPath = path.join(rootDir, 'tools', toolName + '.cb');
     if (fs.existsSync(srcPath)) {
       const buildDir = path.join(rootDir, 'build');
       const binPath = path.join(buildDir, exeName);
-      const outCpp = path.join(buildDir, 'cbfmt_build.cpp');
+      const outCpp = path.join(buildDir, toolName + '_build.cpp');
       try {
         if (!fs.existsSync(buildDir)) {
           fs.mkdirSync(buildDir, { recursive: true });
@@ -118,77 +118,15 @@ function resolveCbFmtExecutable() {
     }
   }
 
-  return 'cbfmt';
+  return toolName;
 }
-/**
- * Resolves the path to the 'cbdoc' binary:
- * 1. Explicit 'cleanbasic.docPath' setting if configured.
- * 2. '<workspaceFolder>/build/cbdoc' if present inside the current workspace.
- * 3. '<extensionRoot>/../../build/cbdoc' if built inside the cleanbasic repository.
- * 4. Auto-compiles 'tools/cbdoc.cb' to 'build/cbdoc' using 'cleanbasic' if 'tools/cbdoc.cb' is present.
- * 5. Fallback to 'cbdoc' on system PATH.
- */
+
+function resolveCbFmtExecutable() {
+  return resolveCleanBasicToolExecutable('formatterPath', 'cbfmt');
+}
+
 function resolveCbDocExecutable() {
-  const config = vscode.workspace.getConfiguration('cleanbasic');
-  const configuredPath = (config.get('docPath') || '').trim();
-  if (configuredPath.length > 0) {
-    return configuredPath;
-  }
-
-  let exeName = 'cbdoc';
-  if (process.platform === 'win32') {
-    exeName = 'cbdoc.exe';
-  }
-
-  const folders = vscode.workspace.workspaceFolders;
-  if (folders && folders.length > 0) {
-    for (const folder of folders) {
-      const candidate = path.join(folder.uri.fsPath, 'build', exeName);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  const repoRoot = path.resolve(__dirname, '..', '..');
-  const repoBuildCandidate = path.join(repoRoot, 'build', exeName);
-  if (fs.existsSync(repoBuildCandidate)) {
-    return repoBuildCandidate;
-  }
-
-  const candidateRoots = [];
-  if (folders && folders.length > 0) {
-    for (const folder of folders) {
-      candidateRoots.push(folder.uri.fsPath);
-    }
-  }
-  candidateRoots.push(repoRoot);
-
-  for (const rootDir of candidateRoots) {
-    const srcPath = path.join(rootDir, 'tools', 'cbdoc.cb');
-    if (fs.existsSync(srcPath)) {
-      const buildDir = path.join(rootDir, 'build');
-      const binPath = path.join(buildDir, exeName);
-      const outCpp = path.join(buildDir, 'cbdoc_build.cpp');
-      try {
-        if (!fs.existsSync(buildDir)) {
-          fs.mkdirSync(buildDir, { recursive: true });
-        }
-        const cbExe = resolveCleanBasicExecutable();
-        cp.execFileSync(cbExe, ['build', srcPath, '-o', outCpp, '-b', binPath], {
-          cwd: rootDir,
-          stdio: 'ignore'
-        });
-        if (fs.existsSync(binPath)) {
-          return binPath;
-        }
-      } catch (_err) {
-        // Fall through to PATH lookup if auto-build fails
-      }
-    }
-  }
-
-  return 'cbdoc';
+  return resolveCleanBasicToolExecutable('docPath', 'cbdoc');
 }
 
 class CbDocContentProvider {
@@ -217,6 +155,7 @@ class CbDocContentProvider {
       let cwd = undefined;
       
       if (targetPath === 'workspace') {
+          args.push('.');
           const folders = vscode.workspace.workspaceFolders;
           if (folders && folders.length > 0) {
               cwd = folders[0].uri.fsPath;

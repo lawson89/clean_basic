@@ -520,23 +520,7 @@ inline std::string cbStrSlice(const std::string& s, int64_t start, int64_t stop)
 }
 
 inline std::string cbStrSliceFrom(const std::string& s, int64_t start) {
-    if (s.empty()) {
-        return "";
-    }
-    int64_t clampedStart = start;
-    if (clampedStart < 0) {
-        clampedStart = 0;
-    }
-    size_t bytePos = 0;
-    int64_t cpIdx = 0;
-    while (bytePos < s.size() && cpIdx < clampedStart) {
-        bytePos += cbStrUtf8Step(s, bytePos);
-        cpIdx += 1;
-    }
-    if (bytePos >= s.size()) {
-        return "";
-    }
-    return s.substr(bytePos);
+    return cbStrSlice(s, start, static_cast<int64_t>(s.size()));
 }
 
 inline std::string cbStrLeft(const std::string& s, int64_t n) {
@@ -606,14 +590,6 @@ inline std::string cbStrCharAt(const std::string& s, int64_t idx) {
     }
     const size_t step = cbStrUtf8Step(s, bytePos);
     return s.substr(bytePos, step);
-}
-
-inline int64_t cbStrByteAt(const std::string& s, int64_t idx) {
-    if (idx < 0 || static_cast<size_t>(idx) >= s.size()) {
-        return -1;
-    }
-    const unsigned char b = static_cast<unsigned char>(s[static_cast<size_t>(idx)]);
-    return static_cast<int64_t>(b);
 }
 
 inline std::string cbStrFromChar(int64_t code) {
@@ -733,26 +709,56 @@ inline std::tuple<int64_t, CbError> cbStrToInt(const std::string& s) {
     if (trimmed.empty()) {
         return {0, CbError{"Cannot parse empty string as int", 400}};
     }
+    bool isNeg = false;
     size_t i = 0;
     if (trimmed[0] == '+' || trimmed[0] == '-') {
+        isNeg = (trimmed[0] == '-');
         i = 1;
+    }
+    uint64_t base = 10;
+    if (i + 2 <= trimmed.size() && trimmed[i] == '0') {
+        if (trimmed[i + 1] == 'x' || trimmed[i + 1] == 'X') {
+            base = 16;
+            i += 2;
+        } else if (trimmed[i + 1] == 'b' || trimmed[i + 1] == 'B') {
+            base = 2;
+            i += 2;
+        }
     }
     if (i >= trimmed.size()) {
         return {0, CbError{"Invalid integer literal: '" + s + "'", 400}};
     }
+    uint64_t maxMag = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    if (isNeg) {
+        maxMag += 1ULL;
+    }
+    uint64_t acc = 0;
     while (i < trimmed.size()) {
-        if (!cbStrIsAsciiDigitByte(trimmed[i])) {
+        const char c = trimmed[i];
+        uint64_t digit = base;
+        if (c >= '0' && c <= '9') {
+            digit = static_cast<uint64_t>(c - '0');
+        } else if (base == 16 && c >= 'a' && c <= 'f') {
+            digit = static_cast<uint64_t>(10 + (c - 'a'));
+        } else if (base == 16 && c >= 'A' && c <= 'F') {
+            digit = static_cast<uint64_t>(10 + (c - 'A'));
+        }
+        if (digit >= base) {
             return {0, CbError{"Invalid integer literal: '" + s + "'", 400}};
         }
+        if (acc > (maxMag - digit) / base) {
+            return {0, CbError{"Integer out of range: '" + s + "'", 400}};
+        }
+        acc = acc * base + digit;
         i += 1;
     }
-    std::istringstream iss(trimmed);
-    int64_t val = 0;
-    iss >> val;
-    if (iss.fail() || !iss.eof()) {
-        return {0, CbError{"Integer out of range: '" + s + "'", 400}};
+    if (isNeg) {
+        if (acc == maxMag) {
+            return {std::numeric_limits<int64_t>::min(), CbError{"", 0}};
+        }
+        return {-static_cast<int64_t>(acc), CbError{"", 0}};
     }
-    return {val, CbError{"", 0}};
+    return {static_cast<int64_t>(acc), CbError{"", 0}};
 }
 
 inline std::tuple<double, CbError> cbStrToFloat(const std::string& s) {

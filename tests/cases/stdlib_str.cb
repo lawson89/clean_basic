@@ -9,7 +9,7 @@
 ' EXPECT_OUT: Trim/Pad: trim=[hello] ltrim=[hello  ] rtrim=[  hello] chars=[core] padL=[00042] padR=[hi...]
 ' EXPECT_OUT: Slice: slice=Basic sliceFrom=Basic left=Clean right=Basic mid=eanBa char=B byte=66 fromChar=A
 ' EXPECT_OUT: Transform: rep=a-b-c first=a-b:c lower=cleanbasic upper=CLEANBASIC repeat=ha!ha!ha! rev=dcba
-' EXPECT_OUT: Parse/Class: int=-42 float=3.250000 bool1=true bool0=false digit=true alpha=true space=true alnum=true hex=true builtinStr=99
+' EXPECT_OUT: Parse/Class: int=-42 hexInt=42 binInt=42 float=3.250000 bool1=true bool0=false digit=true alpha=true space=true alnum=true hex=true builtinStr=99
 ' EXPECT_OUT: UTF8: bytes=10 cp=6 valid=true chars=c|a|f|é rev=🚀 éfac left=café right=🚀 mid=fé char3=é rocket=🚀 trim=café padL=««café padR=café»» jpLen=5 jpMid=んに jpFrom=ちは
 ' EXPECT_OUT: Index/Escape: idx0=C idxOut=[] byte0=67 byteOut=-1 escLen=14 unesc=true
 
@@ -93,12 +93,16 @@ fn main() as int
 
     ' 6. Fallible Parsing, ASCII Character Classes & Built-in str(x) Coexistence
     dim parsedI = " -42 ".toInt()
+    dim parsedHex = " 0x2A ".toInt()
+    dim parsedBin = " 0b101010 ".toInt()
     dim parsedF = " 3.25 ".toFloat()
     dim parsedB1 = "TRUE".toBool()
     dim parsedB0 = "0".toBool()
     dim bStr = 99.toStr()
     print(
         "Parse/Class: int=" & parsedI &
+        " hexInt=" & parsedHex &
+        " binInt=" & parsedBin &
         " float=" & parsedF &
         " bool1=" & parsedB1 &
         " bool0=" & parsedB0 &
@@ -130,7 +134,7 @@ fn main() as int
         " padR=" & cafe.padRight(6, "»") &
         " jpLen=" & jp.utf8Len() &
         " jpMid=" & jp.mid(1, 2) &
-        " jpFrom=" & jp.sliceFrom(3)
+        " jpFrom=" & jp.sliceFrom(jp.find("ち"))
     )
 
     ' 8. String Indexing s[i], Built-in .byteAt(i), escapeCpp & unescape

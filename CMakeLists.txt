@@ -109,11 +109,17 @@ catch_discover_tests(cleanbasic_tests
 
 find_program(NPM_EXECUTABLE npm)
 if(NPM_EXECUTABLE)
-    add_custom_target(vscode_extension ALL
-        COMMAND ${NPM_EXECUTABLE} install
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/editors/vscode
+    set(VSCODE_EXT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/editors/vscode")
+    set(VSCODE_EXT_STAMP "${CMAKE_CURRENT_BINARY_DIR}/vscode_ext_npm_install.stamp")
+    add_custom_command(
+        OUTPUT "${VSCODE_EXT_STAMP}"
+        COMMAND "${NPM_EXECUTABLE}" install
+        COMMAND "${CMAKE_COMMAND}" -E touch "${VSCODE_EXT_STAMP}"
+        WORKING_DIRECTORY "${VSCODE_EXT_DIR}"
+        DEPENDS "${VSCODE_EXT_DIR}/package.json" "${VSCODE_EXT_DIR}/package-lock.json"
         COMMENT "Installing VS Code extension dependencies..."
     )
+    add_custom_target(vscode_extension ALL DEPENDS "${VSCODE_EXT_STAMP}")
 endif()
 
 

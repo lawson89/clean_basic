@@ -344,7 +344,6 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
     }
     const TypeId recvTid = resolveAlias(snap.arena, snap.symbols, currentModuleId, varTidOpt.value());
     if (recvTid == INVALID_ID || recvTid >= snap.arena.types.size()) return;
-    const TypeNode& recvNode = snap.arena.types[recvTid];
 
     // Built-in receiver methods from shared table
     const auto builtinMethods = getBuiltinReceiverMethods(snap.arena, snap.symbols, currentModuleId, recvTid);
@@ -354,10 +353,6 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
         }
     }
 
-    if (recvTid == snap.symbols.typeErr || recvNode.name == "err") {
-        if (matchesCompletionPrefix("msg", prefix)) addCompletionEntry(items, seen, "msg", 5, "as str");
-        if (matchesCompletionPrefix("code", prefix)) addCompletionEntry(items, seen, "code", 5, "as int");
-    }
     const auto tsOpt = resolveTypeSymbol(snap.arena, snap.symbols, currentModuleId, recvTid);
     if (tsOpt.has_value()) {
         for (const auto& f : tsOpt->fieldOrder) {

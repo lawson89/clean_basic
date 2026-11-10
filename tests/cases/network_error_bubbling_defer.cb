@@ -9,12 +9,12 @@
 ' EXPECT_CPP: auto conn = _val2;
 ' EXPECT_CPP: auto _defer_1 = cbDefer([&]() {
 ' EXPECT_CPP: closeConnection(conn);
-' EXPECT_CPP: auto [_val3, _err3] = processNetwork();
-' EXPECT_CPP: if (cbHasError(_err3)) {
-' EXPECT_CPP: CbError e = _catch_err;
-' EXPECT_CPP: auto records = _val3;
+' EXPECT_CPP: auto [_val4, _err4] = processNetwork();
+' EXPECT_CPP: if (cbHasError(_err4)) {
+' EXPECT_CPP: CbError e = _catch_err_3;
+' EXPECT_CPP: auto records = _val4;
 ' EXPECT_CPP: do {
-' EXPECT_CPP: _catch_err = _err3;
+' EXPECT_CPP: _catch_err_3 = _err4;
 ' EXPECT_OUT: Closing connection: 1
 ' EXPECT_OUT: Connected and processed 100 records.
 ' EXPECT_OUT: Handled empty IP (code=408): IP cannot be empty

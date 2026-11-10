@@ -236,7 +236,7 @@ end fn
     REQUIRE(fnDeclId < parseRes.arena.decls.size());
 
     REQUIRE(parseRes.arena.getDecl<cb::FnDecl>(fnDeclId) != nullptr);
-    const auto& fnDecl = cb::asDecl<cb::FnDecl>(parseRes.arena, fnDeclId);
+    const auto& fnDecl = *parseRes.arena.getDecl<cb::FnDecl>(fnDeclId);
     CHECK(fnDecl.name == "compute");
     REQUIRE(fnDecl.params.size() == 2);
     CHECK(fnDecl.params[0].isByref);
@@ -255,9 +255,9 @@ end fn
         const auto parseFt = cb::parseTokens(lexFt.tokens, "forTo.cb");
         REQUIRE(parseFt.ok);
         REQUIRE(parseFt.program.declarations.size() == 1);
-        const auto& fnFt = cb::asDecl<cb::FnDecl>(parseFt.arena, parseFt.program.declarations[0]);
+        const auto& fnFt = *parseFt.arena.getDecl<cb::FnDecl>(parseFt.program.declarations[0]);
         REQUIRE(fnFt.body.size() >= 2);
-        const auto& forStmt = cb::asStmt<cb::ForStmt>(parseFt.arena, fnFt.body[1]);
+        const auto& forStmt = *parseFt.arena.getStmt<cb::ForStmt>(fnFt.body[1]);
         CHECK(forStmt.rangeSpec.hasRange);
         CHECK(forStmt.rangeSpec.inclusive);
         CHECK(forStmt.rangeSpec.hasStep);
@@ -288,9 +288,9 @@ end fn
         const auto parseCe = cb::parseTokens(lexCe.tokens, "canErr.cb");
         REQUIRE(parseCe.ok);
         REQUIRE(parseCe.program.declarations.size() == 3);
-        const auto& fn0 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[0]);
-        const auto& fn1 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[1]);
-        const auto& fn2 = cb::asDecl<cb::FnDecl>(parseCe.arena, parseCe.program.declarations[2]);
+        const auto& fn0 = *parseCe.arena.getDecl<cb::FnDecl>(parseCe.program.declarations[0]);
+        const auto& fn1 = *parseCe.arena.getDecl<cb::FnDecl>(parseCe.program.declarations[1]);
+        const auto& fn2 = *parseCe.arena.getDecl<cb::FnDecl>(parseCe.program.declarations[2]);
         CHECK(fn0.isFallible);
         CHECK(fn0.returnType != cb::INVALID_ID);
         CHECK(fn1.isFallible);
@@ -442,11 +442,11 @@ end fn
         INFO("Analyzer diagnostic: " << cb::formatDiagnostic(anaFt.error));
         REQUIRE(anaFt.ok);
 
-        const auto& mainFn = cb::asDecl<cb::FnDecl>(parseFt.arena, parseFt.program.declarations[1]);
+        const auto& mainFn = *parseFt.arena.getDecl<cb::FnDecl>(parseFt.program.declarations[1]);
         REQUIRE(mainFn.body.size() >= 2);
-        const auto& tryCatch = cb::asStmt<cb::TryCatchStmt>(parseFt.arena, mainFn.body[1]);
+        const auto& tryCatch = *parseFt.arena.getStmt<cb::TryCatchStmt>(mainFn.body[1]);
         REQUIRE(!tryCatch.tryBody.empty());
-        const auto& innerAssign = cb::asStmt<cb::VarAssignment>(parseFt.arena, tryCatch.tryBody[0]);
+        const auto& innerAssign = *parseFt.arena.getStmt<cb::VarAssignment>(tryCatch.tryBody[0]);
         CHECK(innerAssign.breaksToCatch);
         CHECK_FALSE(innerAssign.implicitBubble);
     }
@@ -543,10 +543,10 @@ end fn
         CHECK_FALSE(itMain->second.isFallible);
 
         const cb::DeclId middleDeclId = parseGood.program.declarations[1];
-        const auto& middleFn = cb::asDecl<cb::FnDecl>(parseGood.arena, middleDeclId);
+        const auto& middleFn = *parseGood.arena.getDecl<cb::FnDecl>(middleDeclId);
         REQUIRE(!middleFn.body.empty());
         const cb::StmtId valStmtId = middleFn.body[0];
-        const auto& valAssign = cb::asStmt<cb::VarAssignment>(parseGood.arena, valStmtId);
+        const auto& valAssign = *parseGood.arena.getStmt<cb::VarAssignment>(valStmtId);
         CHECK(valAssign.implicitBubble);
     }
 }
@@ -593,15 +593,15 @@ end fn
     CHECK(cpp.find("auto _defer_1 = cbDefer([&]() {") != std::string::npos);
     CHECK(cpp.find("SQL_close(db);") != std::string::npos);
     CHECK(cpp.find(R"raw(return { 100, CbError{"", 0} };)raw") != std::string::npos);
-    CHECK(cpp.find("CbError _catch_err{};") != std::string::npos);
+    CHECK(cpp.find("CbError _catch_err_2{};") != std::string::npos);
     CHECK(cpp.find("do {") != std::string::npos);
-    CHECK(cpp.find("auto [_val2, _err2] = processData();") != std::string::npos);
-    CHECK(cpp.find("if (cbHasError(_err2)) {") != std::string::npos);
-    CHECK(cpp.find("_catch_err = _err2;") != std::string::npos);
+    CHECK(cpp.find("auto [_val3, _err3] = processData();") != std::string::npos);
+    CHECK(cpp.find("if (cbHasError(_err3)) {") != std::string::npos);
+    CHECK(cpp.find("_catch_err_2 = _err3;") != std::string::npos);
     CHECK(cpp.find("break;") != std::string::npos);
     CHECK(cpp.find("} while(false);") != std::string::npos);
-    CHECK(cpp.find("CbError e = _catch_err;") != std::string::npos);
-    CHECK(cpp.find("auto records = _val2;") != std::string::npos);
+    CHECK(cpp.find("CbError e = _catch_err_2;") != std::string::npos);
+    CHECK(cpp.find("auto records = _val3;") != std::string::npos);
 
     SECTION("Emits variadic print, cbToStr auto-coercion on &, and inclusive for..to loop") {
         const std::string ergonomicCode = R"(
@@ -650,8 +650,8 @@ end fn
         REQUIRE(anaIm.ok);
 
         const size_t typesAfterAnalysis = parseIm.arena.types.size();
-        CHECK(cb::findType(parseIm.arena, "int") == anaIm.symbols.typeInt);
-        CHECK(cb::findType(parseIm.arena, "str") == anaIm.symbols.typeStr);
+        CHECK(parseIm.arena.findType("int") == anaIm.symbols.typeInt);
+        CHECK(parseIm.arena.findType("str") == anaIm.symbols.typeStr);
 
         size_t intCount = 0;
         for (const auto& tnode : parseIm.arena.types) {
@@ -3866,8 +3866,8 @@ end fn
         CHECK(res.cppCode.find("return { {}, _err1 };") != std::string::npos);
         CHECK(res.cppCode.find(R"CB(return { _val1, CbError{"", 0} };)CB") != std::string::npos);
         CHECK(res.cppCode.find("auto [_val2, _err2] = cbBytesToUtf8(raw);") != std::string::npos);
-        CHECK(res.cppCode.find("auto [_val3, _err3] = delegateParse(s);") != std::string::npos);
-        CHECK(res.cppCode.find("return _val3;") != std::string::npos);
+        CHECK(res.cppCode.find("auto [_val4, _err4] = delegateParse(s);") != std::string::npos);
+        CHECK(res.cppCode.find("return _val4;") != std::string::npos);
     }
 
     SECTION("Rejects unhandled return fallibleCall() inside infallible function without try / catch") {
@@ -5048,5 +5048,131 @@ end fn
         CHECK(h1.size() == 16);
         CHECK(h1 == h2);
         CHECK(h1 != hOpt3);
+    }
+}
+
+TEST_CASE("Nested try/catch, control-flow error propagation, error() in try/catch, and enum aliases", "[emitter][analyzer][e2e]") {
+    SECTION("Nested try/catch blocks use distinct _catch_err_N temporaries and route errors to the right catch block") {
+        const std::string workDir = "build/testArtifacts/nestedTryCatchTest";
+        std::error_code ec;
+        std::filesystem::create_directories(workDir, ec);
+        REQUIRE(!ec);
+
+        const std::string cbPath = workDir + "/nested_try.cb";
+        const std::string cppPath = workDir + "/build.cpp";
+        const std::string binPath = workDir + "/nested_try_bin";
+        const std::string stdoutPath = workDir + "/stdout.txt";
+
+        const std::string cbSource = R"CB(
+enum Status
+    ok = 10
+    bad = 20
+end enum
+
+alias StatusAlias = Status
+
+fn mightFail(x as int) as int can error
+    if x < 0
+        error("neg:" & x.toStr(), code=400)
+    end if
+    return x * 2
+end fn
+
+fn testControlFlowAndNestedTry() as str
+    dim log = ""
+    ' 1. Nested try/catch where inner catch throws a new error caught by outer catch
+    try
+        try
+            dim a = mightFail(-1)
+            log &= "UNREACHABLE_INNER|"
+        catch innerErr
+            log &= "innerCaught(" & innerErr.msg & ")|"
+            dim b = mightFail(-2)
+            log &= "UNREACHABLE_AFTER_RETHROW|"
+        end try
+        log &= "UNREACHABLE_OUTER|"
+    catch outerErr
+        log &= "outerCaught(" & outerErr.msg & ")|"
+    end try
+
+    ' 2. Fallible call inside string select case inside while loop inside try
+    try
+        dim stepIdx = 0
+        while stepIdx < 3
+            stepIdx += 1
+            select case "mode_" & stepIdx.toStr()
+                case "mode_1"
+                    dim v1 = mightFail(3)
+                    log &= "m1=" & v1.toStr() & "|"
+                case "mode_2"
+                    if stepIdx == 2
+                        dim v2 = mightFail(-5)
+                        log &= "m2=" & v2.toStr() & "|"
+                    end if
+                    log &= "UNREACHABLE_M2|"
+                case else
+                    log &= "UNREACHABLE_M3|"
+            end select
+        end while
+    catch loopErr
+        log &= "loopCaught(" & loopErr.msg & ")|"
+    end try
+
+    ' 3. Calling error(...) directly inside try/catch in an infallible function
+    try
+        if StatusAlias.bad == Status.bad
+            error("directRaise", code=422)
+        end if
+        log &= "UNREACHABLE_DIRECT|"
+    catch directErr
+        log &= "direct(" & directErr.msg & ":" & directErr.code.toStr() & ")"
+    end try
+
+    return log
+end fn
+
+fn main() as int
+    print(testControlFlowAndNestedTry())
+    return 0
+end fn
+)CB";
+        {
+            std::ofstream cbOut(cbPath, std::ios::binary | std::ios::trunc);
+            cbOut << cbSource;
+        }
+
+        const cb::BuildFileResult buildRes = cb::buildFile(cbPath, cppPath, true, binPath, "native", "g++");
+        INFO("nested_try build diagnostic: " << cb::formatDiagnostic(buildRes.error));
+        REQUIRE(buildRes.ok);
+
+        const std::string cppText = cb::testE2E::readFileText(cppPath);
+        CHECK(cppText.find("_catch_err_1") != std::string::npos);
+        CHECK(cppText.find("_catch_err_2") != std::string::npos);
+
+        const int rc = std::system(("./" + binPath + " > " + stdoutPath + " 2>&1").c_str());
+        CHECK(rc == 0);
+        const std::string outText = cb::testE2E::readFileText(stdoutPath);
+        CHECK(outText.find("innerCaught(neg:-1)|outerCaught(neg:-2)|m1=6|loopCaught(neg:-5)|direct(directRaise:422)") != std::string::npos);
+    }
+
+    SECTION("fnScopes preserves outer variable types when inner try/catch scopes declare same-named variables") {
+        const std::string src = R"CB(
+fn demo() as int
+    dim val = 42
+    try
+        dim innerOnly = "hello"
+    catch val
+        print(val.msg)
+    end try
+    return val
+end fn
+)CB";
+        const auto checkRes = cb::checkSource(src, "scope_preserve.cb");
+        REQUIRE(checkRes.ok);
+        const auto fnScopeIt = checkRes.symbols.fnScopes.find("demo");
+        REQUIRE(fnScopeIt != checkRes.symbols.fnScopes.end());
+        const auto valIt = fnScopeIt->second.find("val");
+        REQUIRE(valIt != fnScopeIt->second.end());
+        CHECK(valIt->second.typeId == checkRes.symbols.typeInt);
     }
 }

@@ -89,6 +89,9 @@ public:
             if (isAssertBuiltinCall(arena, *call)) {
                 isFallible = true;
                 calleeName = "assert";
+            } else if (isErrorBuiltinCall(arena, *call) && activeTryDepth > 0) {
+                outBreaksToCatch = true;
+                return;
             } else {
                 const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
                 if (fnSymOpt.has_value()) {
@@ -184,7 +187,7 @@ public:
             }
 
             if (isErrorBuiltinCall(arena, *call)) {
-                if (!fn.isFallible) {
+                if (!fn.isFallible && activeTryDepth <= 0) {
                     std::string msg = "Cannot call 'error(...)' inside infallible function '" + fn.name +
                         "'; add 'can error' to the function signature.";
                     setAnalyzerError(exprNode.line, exprNode.col, msg);
@@ -535,7 +538,10 @@ public:
         VarSymbol sym{name, tid, isByref, isConst, fileName, line, col, line};
         scope[name] = sym;
         if (!currentFnKey.empty()) {
-            symbols.fnScopes[currentFnKey][name] = std::move(sym);
+            auto& fnScope = symbols.fnScopes[currentFnKey];
+            if (fnScope.find(name) == fnScope.end()) {
+                fnScope.emplace(name, std::move(sym));
+            }
         }
     }
 
@@ -926,6 +932,9 @@ public:
                 if (const auto* call = arena.getExpr<FuncCall>(retStmt->value)) {
                     if (isErrorBuiltinCall(arena, *call) || isAssertBuiltinCall(arena, *call)) {
                         isReturnErrorCall = true;
+                        if (activeTryDepth > 0) {
+                            retStmt->breaksToCatch = true;
+                        }
                     } else {
                         const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
                         if (fnSymOpt.has_value() && fnSymOpt->isFallible &&
@@ -998,7 +1007,9 @@ public:
         analyzeBlock(fn, fn.body, scope);
         auto& savedScope = symbols.fnScopes[currentFnKey];
         for (auto& kv : scope) {
-            savedScope[kv.first] = std::move(kv.second);
+            if (savedScope.find(kv.first) == savedScope.end()) {
+                savedScope.emplace(kv.first, std::move(kv.second));
+            }
         }
         currentFnKey.clear();
     }
@@ -1266,7 +1277,7 @@ public:
                 } else {
                     fsym.returnType = symbols.typeVoid;
                 }
-                fsym.fnTypeId = addFnTypeId(arena, symbols, fsym);
+                fsym.fnTypeId = addFnTypeId(arena, fsym);
                 const auto existing = symbols.functions.find(fsym.key);
                 if (existing != symbols.functions.end()) {
                     existing->second.overloads.push_back(std::move(fsym));

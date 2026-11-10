@@ -596,14 +596,6 @@ inline std::string stripModulePrefix(std::string_view name) {
     return std::string(name);
 }
 
-inline TypeId findType(
-    const AstArena& arena,
-    std::string_view name,
-    const std::vector<TypeId>& typeArgs = {}
-) {
-    return arena.findType(name, typeArgs);
-}
-
 inline std::string normalizeRelPath(std::string_view rawPath) {
     std::vector<std::string> parts;
     size_t start = 0;
@@ -872,20 +864,6 @@ inline std::string makeCppConstName(std::string_view moduleId, std::string_view 
         return std::string(name);
     }
     return "cb_" + sanitizeModuleId(moduleId) + "__" + std::string(name);
-}
-
-// ==========================================
-// AST Helpers
-// ==========================================
-
-template <typename T>
-inline const T& asStmt(const AstArena& arena, StmtId id) {
-    return std::get<T>(arena.stmts[id].payload);
-}
-
-template <typename T>
-inline const T& asDecl(const AstArena& arena, DeclId id) {
-    return std::get<T>(arena.decls[id].payload);
 }
 
 }  // namespace cb
