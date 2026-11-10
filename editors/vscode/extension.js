@@ -4,9 +4,12 @@ const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const vscode = require('vscode');
-const {
-  LanguageClient
-} = require('vscode-languageclient/node');
+let LanguageClient = null;
+try {
+  LanguageClient = require('vscode-languageclient/node').LanguageClient;
+} catch (e) {
+  // Ignored. LanguageClient will be null if npm install hasn't been run.
+}
 
 let client = null;
 
@@ -266,16 +269,23 @@ function formatDocumentWithCbFmt(document, options) {
     });
 
     const stdoutChunks = [];
+    const stderrChunks = [];
     child.stdout.on('data', (chunk) => {
       stdoutChunks.push(chunk);
     });
+    child.stderr.on('data', (chunk) => {
+      stderrChunks.push(chunk);
+    });
 
-    child.on('error', () => {
+    child.on('error', (err) => {
+      vscode.window.showErrorMessage(`Failed to start cbfmt formatter: ${err.message}`);
       resolve([]);
     });
 
     child.on('close', (code) => {
       if (code !== 0) {
+        const stderrMsg = Buffer.concat(stderrChunks).toString('utf8').trim();
+        vscode.window.showErrorMessage(`cbfmt failed (exit ${code}): ${stderrMsg}`);
         resolve([]);
         return;
       }
@@ -300,6 +310,9 @@ function formatDocumentWithCbFmt(document, options) {
 }
 
 async function startLanguageClient(context) {
+  if (!LanguageClient) {
+    throw new Error('vscode-languageclient module not found (run npm install in editors/vscode)');
+  }
   const command = resolveCleanBasicExecutable();
 
   const serverOptions = {
@@ -352,7 +365,7 @@ async function activate(context) {
   context.subscriptions.push(restartDisposable);
 
   const formatterDisposable = vscode.languages.registerDocumentFormattingEditProvider(
-    { language: 'cleanbasic' },
+    [{ language: 'cleanbasic', scheme: 'file' }, { language: 'cleanbasic', scheme: 'untitled' }],
     {
       provideDocumentFormattingEdits(document, options) {
         return formatDocumentWithCbFmt(document, options);

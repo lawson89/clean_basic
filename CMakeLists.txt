@@ -107,4 +107,13 @@ catch_discover_tests(cleanbasic_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+find_program(NPM_EXECUTABLE npm)
+if(NPM_EXECUTABLE)
+    add_custom_target(vscode_extension ALL
+        COMMAND ${NPM_EXECUTABLE} install
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/editors/vscode
+        COMMENT "Installing VS Code extension dependencies..."
+    )
+endif()
+
 
