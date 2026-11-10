@@ -41,6 +41,7 @@ extern fn cbFsDir(path as str) as list[str] can error
 extern fn cbFsMkdir(path as str) can error
 extern fn cbFsRemove(path as str) can error
 extern fn cbFsRemoveAll(path as str) as int can error
+extern fn cbFsWalkFiles(path as str) as list[str] can error
 extern fn cbFsAbsPath(path as str) as str can error
 extern fn cbFsTempDir() as str can error
 extern fn cbFsJoinPath(a as str, b as str) as str
@@ -152,6 +153,11 @@ end fn
 '' Returns true if a file or directory exists at path.
 pub fn exists(path as str) as bool
     return cbFsExists(path)
+end fn
+
+'' Recursively collects all regular file paths in the directory tree at path.
+pub fn walkFiles(path as str) as list[str] can error
+    return cbFsWalkFiles(path)
 end fn
 
 '' Returns true if path exists and is a regular file.

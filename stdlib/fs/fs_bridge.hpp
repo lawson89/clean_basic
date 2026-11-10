@@ -454,6 +454,32 @@ inline std::tuple<std::vector<std::string>, CbError> cbFsDir(const std::string& 
     return {std::move(entries), CbError{"", 0}};
 }
 
+inline std::tuple<std::vector<std::string>, CbError> cbFsWalkFiles(const std::string& path) {
+    if (path.empty()) {
+        return {std::vector<std::string>{}, CbError{"Cannot walk empty path", 400}};
+    }
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+        return {std::vector<std::string>{}, CbError{"Path not found: " + path, 404}};
+    }
+    std::vector<std::string> entries;
+    for (auto it = std::filesystem::recursive_directory_iterator(path, std::filesystem::directory_options::skip_permission_denied, ec);
+         it != std::filesystem::recursive_directory_iterator();
+         it.increment(ec)) {
+        if (ec) break;
+        const auto& entry = *it;
+        std::error_code isFileEc;
+        if (entry.is_regular_file(isFileEc) && !isFileEc) {
+            entries.push_back(entry.path().generic_string());
+        }
+    }
+    if (ec) {
+        return {std::vector<std::string>{}, CbError{"Error while walking path '" + path + "': " + ec.message(), 500}};
+    }
+    std::sort(entries.begin(), entries.end());
+    return {std::move(entries), CbError{"", 0}};
+}
+
 inline CbError cbFsMkdir(const std::string& path) {
     if (path.empty()) {
         return CbError{"Cannot create directory with empty path", 400};

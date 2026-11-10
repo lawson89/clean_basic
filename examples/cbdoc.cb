@@ -1,22 +1,24 @@
 ' CleanBasic Example: cbdoc
-' Markdown API documentation generator for CleanBasic (.cb) source files and directories
-' Extracts '' doc-comments paired with pub declarations using std/cli, std/fs, and std/str
+'' Markdown API documentation generator for CleanBasic (.cb) source files and directories
+'' Extracts '' doc-comments paired with pub declarations using std/cli, std/fs, and std/str
 '
-' Usage:
-'   cbdoc [-o <output.md>] [-t <title>] [-p] <target>
+'' Usage:
+''   cbdoc [-o <output.md>] [-t <title>] [-p] <target>
 
 import "std/cli"
 import "std/fs"
 import "std/os"
 import "std/str"
 
-type DocEntry
+'' Represents a documented declaration extracted from a source file.
+pub type DocEntry
     name as str
     kind as str
     signature as str
     doc as str
 end type
 
+'' Extracts the declaration header if it is public or includePrivate is true.
 fn extractDeclHeader(line as str, includePrivate as bool) as str
     const t = line.trim()
     if t.startsWith("pub ")
@@ -30,6 +32,7 @@ fn extractDeclHeader(line as str, includePrivate as bool) as str
     return ""
 end fn
 
+'' Parses the declaration kind (e.g., "fn") and identifier name from a header line.
 fn parseDeclKindAndName(header as str) as list[str]
     dim work = header
     if work.startsWith("pub ")
@@ -47,7 +50,7 @@ fn parseDeclKindAndName(header as str) as list[str]
             dim endIdx = 0
             while endIdx < rest.len()
                 const ch = rest.charAt(endIdx)
-                if ch == "(" or ch == " " or ch == "=" or ch == "\t"
+                if ch == "(" or ch == " " or ch == "=" or ch == "	"
                     break
                 end if
                 endIdx += 1
@@ -59,6 +62,7 @@ fn parseDeclKindAndName(header as str) as list[str]
     return ["", ""]
 end fn
 
+'' Returns true if the declaration kind represents a multi-line block (e.g., type...end type).
 fn isBlockDeclKind(header as str, kind as str) as bool
     if kind == "enum" or kind == "union"
         return true
@@ -72,6 +76,7 @@ fn isBlockDeclKind(header as str, kind as str) as bool
     return false
 end fn
 
+'' Parses all documented declarations from a .cb file.
 fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can error
     const lines = fs.lines(filePath)
     dim entries as list[DocEntry] = []
@@ -131,27 +136,31 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
     return entries
 end fn
 
-fn collectCbFiles(targetPath as str, byref outFiles as list[str]) can error
+'' Recursively collects all .cb files within targetPath.
+fn collectCbFiles(targetPath as str) as list[str] can error
     if fs.isFile(targetPath)
-        outFiles.push(targetPath)
-        return
+        dim res as list[str] = []
+        if fs.ext(targetPath) == ".cb"
+            res.push(targetPath)
+        end if
+        return res
     end if
-    if fs.isDir(targetPath)
-        const names = fs.dir(targetPath)
-        for name in names
-            if name.startsWith(".")
-                continue
-            end if
-            const child = fs.joinPath(targetPath, name)
-            if fs.isDir(child)
-                collectCbFiles(child, outFiles)
-            else if fs.isFile(child) and fs.ext(child) == ".cb"
-                outFiles.push(child)
-            end if
-        end for
-    end if
+    
+    dim outFiles as list[str] = []
+    const files = fs.walkFiles(targetPath)
+    for path in files
+        ' Skip hidden files or files in hidden directories
+        if path.contains("/.") or fs.fileName(path).startsWith(".")
+            continue
+        end if
+        if fs.ext(path) == ".cb"
+            outFiles.push(path)
+        end if
+    end for
+    return outFiles
 end fn
 
+'' Renders a module section in Markdown format.
 fn renderFileSection(filePath as str, entries as list[DocEntry]) as str
     const tick = str.fromChar(96)
     const fence = tick.repeat(3)
@@ -173,6 +182,7 @@ fn renderFileSection(filePath as str, entries as list[DocEntry]) as str
     return str.join(out, "\n")
 end fn
 
+'' Configures the CLI parser for cbdoc.
 fn buildParser() as cli.Parser
     dim p = cli.newParser(
         name="cbdoc",
@@ -186,8 +196,9 @@ fn buildParser() as cli.Parser
     return p
 end fn
 
+'' Entry point for cbdoc.
 fn main() as int
-    const p = buildParser()
+    dim p = buildParser()
 
     on error e
         os.eprint($"cbdoc: {e.msg}")
@@ -211,8 +222,7 @@ fn main() as int
         return 1
     end if
 
-    dim files as list[str] = []
-    collectCbFiles(target, files)
+    const files = collectCbFiles(target)
 
     const title = args.get("title", "CleanBasic API Reference")
     const includePrivate = args.has("include-private")

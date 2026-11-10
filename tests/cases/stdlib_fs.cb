@@ -10,7 +10,8 @@
 ' EXPECT_OUT: Path helpers: dir=build/testArtifacts/stdlibFsSandbox, file=notes.txt, ext=.txt
 ' EXPECT_OUT: Whole-file lines=3, first=alpha, copiedSize=18, renamedExists=true
 ' EXPECT_OUT: Streamed lines=3: [L1] [L2] [L3], eofAfter=true
-' EXPECT_OUT: Directory entries=2: renamed.txt, stream.log
+' EXPECT_OUT: WalkFiles count=3, first=build/testArtifacts/stdlibFsSandbox/nested/deep.txt
+' EXPECT_OUT: Directory entries=3: nested, renamed.txt
 ' EXPECT_OUT: AbsPath leaf=stdlibFsSandbox, tempDirValid=true
 ' EXPECT_OUT: Caught missing file (code=404)
 ' EXPECT_OUT: Cleanup complete: removedAll=true, exists=false
@@ -75,6 +76,16 @@ fn testStreamingFile(baseDir as str) can error
     print("Streamed lines=" & count & ":" & summary & ", eofAfter=" & atEof)
 end fn
 
+fn testWalkFiles(baseDir as str) can error
+    dim nestedDir = fs.joinPath(baseDir, "nested")
+    fs.mkdir(nestedDir)
+    fs.write(fs.joinPath(nestedDir, "deep.txt"), "deep")
+    
+    dim files = fs.walkFiles(baseDir)
+    ' We expect: renamed.txt, stream.log, nested/deep.txt
+    print("WalkFiles count=" & files.len() & ", first=" & files[0])
+end fn
+
 fn testMissingFile(baseDir as str)
     on error e
         print("Caught missing file (code=" & e.code & ")")
@@ -100,6 +111,7 @@ fn main() as int
 
     testWholeFileAndCopy(baseDir)
     testStreamingFile(baseDir)
+    testWalkFiles(baseDir)
 
     if fs.isDir(baseDir)
         dim entries = fs.dir(baseDir)
