@@ -46,7 +46,34 @@ inline std::string sanitizeCppIdent(std::string_view name) {
     return std::string(name);
 }
 
+/**
+ * CleanBasic Unity C++17 Emitter
+ * 
+ * Generates a single self-contained C++17 file (build.cpp) in 7 ordered stages:
+ * 1. Linker Flags Header (// CleanBasic Linker Flags: ...)
+ * 2. C++17 Runtime Preamble (CbError, cbToStr, cbDefer, etc.)
+ * 3. External C/C++ Headers (import header "...")
+ * 4. Forward Declarations (Structs, Enums, Union shells)
+ * 5. Early Constants (POD primitives and enums)
+ * 6. POD Struct/Union Definitions & Function Forward Declarations
+ * 7. Function Definitions & Entry Point Wrapper (int main() -> cbMain())
+ * 
+ * Constants are partitioned to ensure they are defined before use in struct default initializers.
+ * 'asLvalue' controls whether expressions (like list/dict indexing) emit bounds-safe read-only 
+ * helper calls (cbListGet) vs. mutable C++ reference indexing (v[i]) for assignments.
+ */
 class Emitter {
+    std::string escapeFileName(std::string_view path) const {
+        std::string out = "\"";
+        for (char c : path) {
+            if (c == '\\') { out += '\\'; out += '\\'; }
+            else if (c == '"') { out += '\\'; out += '"'; }
+            else out += c;
+        }
+        out += "\"";
+        return out;
+    }
+
     bool isAssertBuiltinCall(const FuncCall& call) const {
         if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
             return ident->name == "assert";
@@ -99,31 +126,26 @@ public:
         return {"_val" + suffix, "_err" + suffix};
     }
 
-    std::string lookupTypeCppName(std::string_view modId, std::string_view name) const {
+    template <typename Map>
+    std::string lookupSymbolCppName(const Map& table, std::string_view modId, std::string_view name) const {
         const std::string key = resolveSymbolKey(symbols, modId, name);
-        const auto it = symbols.types.find(key);
-        if (it != symbols.types.end()) {
+        const auto it = table.find(key);
+        if (it != table.end()) {
             return it->second.cppName;
         }
         return std::string(name);
+    }
+
+    std::string lookupTypeCppName(std::string_view modId, std::string_view name) const {
+        return lookupSymbolCppName(symbols.types, modId, name);
     }
 
     std::string lookupEnumCppName(std::string_view modId, std::string_view name) const {
-        const std::string key = resolveSymbolKey(symbols, modId, name);
-        const auto it = symbols.enums.find(key);
-        if (it != symbols.enums.end()) {
-            return it->second.cppName;
-        }
-        return std::string(name);
+        return lookupSymbolCppName(symbols.enums, modId, name);
     }
 
     std::string lookupUnionCppName(std::string_view modId, std::string_view name) const {
-        const std::string key = resolveSymbolKey(symbols, modId, name);
-        const auto it = symbols.unions.find(key);
-        if (it != symbols.unions.end()) {
-            return it->second.cppName;
-        }
-        return std::string(name);
+        return lookupSymbolCppName(symbols.unions, modId, name);
     }
 
     std::string unionDataVariantCppType(const UnionSymbol& usym) const {
@@ -139,12 +161,7 @@ public:
     }
 
     std::string lookupAliasCppName(std::string_view modId, std::string_view name) const {
-        const std::string key = resolveSymbolKey(symbols, modId, name);
-        const auto it = symbols.aliases.find(key);
-        if (it != symbols.aliases.end()) {
-            return it->second.cppName;
-        }
-        return std::string(name);
+        return lookupSymbolCppName(symbols.aliases, modId, name);
     }
 
     std::string mapBaseType(std::string_view modId, const TypeNode& t) const {
@@ -763,7 +780,7 @@ public:
             }
         }
         const auto& calleeNode = arena.exprs[call.callee];
-        return "CbError{" + msgCpp + ", " + codeCpp + ", std::string(\"" + currentFileName + "\"), " + std::to_string(calleeNode.line) + "}";
+        return "CbError{" + msgCpp + ", " + codeCpp + ", std::string(" + escapeFileName(currentFileName) + "), " + std::to_string(calleeNode.line) + "}";
     }
 
     std::string buildAssertCallValue(
@@ -780,8 +797,8 @@ public:
                     const std::string rightCpp = emitExpr(bop->right, scope);
                     const std::string opLabel = "left " + bop->op + " right";
                     return "[&]() -> CbError { const auto _lhs = " + leftCpp + "; const auto _rhs = " + rightCpp +
-                        "; return cbAssertCmp((_lhs " + bop->op + " _rhs), " + q + opLabel + q + ", _lhs, _rhs, " + q +
-                        currentFileName + q + ", " + lineStr + "); }()";
+                        "; return cbAssertCmp((_lhs " + bop->op + " _rhs), " + q + opLabel + q + ", _lhs, _rhs, " +
+                        escapeFileName(currentFileName) + ", " + lineStr + "); }()";
                 }
             }
         }
@@ -790,7 +807,7 @@ public:
         if (call.args.size() > 1) {
             msgCpp = emitAsStrExpr(call.args[1], scope);
         }
-        return "cbAssertCond(" + condCpp + ", " + msgCpp + ", " + q + currentFileName + q + ", " + lineStr + ")";
+        return "cbAssertCond(" + condCpp + ", " + msgCpp + ", " + escapeFileName(currentFileName) + ", " + lineStr + ")";
     }
     std::string buildErrorBubbleReturn(
     const FnDecl& fn,
@@ -850,7 +867,7 @@ public:
             const std::string earlyRet = buildErrorBubbleReturn(fn, errTmp);
             emitLine("if (cbHasError(" + errTmp + ")) {");
             indentLevel += 1;
-            emitLine("cbStampError(" + errTmp + ", \"" + currentFileName + "\", " + std::to_string(line) + ");");
+            emitLine("cbStampError(" + errTmp + ", " + escapeFileName(currentFileName) + ", " + std::to_string(line) + ");");
             emitLine(earlyRet);
             indentLevel -= 1;
             emitLine("}");
@@ -1049,15 +1066,25 @@ public:
             emitLine(buildErrorBubbleReturn(fn, errVal));
             return;
         }
-        const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-        if (fnSym.has_value() && fnSym->isFallible) {
+        const auto calleeSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+        if (calleeSym.has_value() && calleeSym->isFallible) {
             const auto [valTmp, errTmp] = nextValErrTemps();
-            emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
-            emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
-            if (fn.isFallible) {
-                emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
+            if (calleeSym->returnType == INVALID_ID || arena.isVoid(calleeSym->returnType)) {
+                emitLine("CbError " + errTmp + " = " + emitExpr(stmt.value, scope) + ";");
+                emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
+                if (fn.isFallible) {
+                    emitLine(R"(return CbError{"", 0};)");
+                } else {
+                    emitLine("return;");
+                }
             } else {
-                emitLine("return " + valTmp + ";");
+                emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
+                emitActiveErrorHandlerOrBubble(line, fn, errTmp, scope, declaredVars);
+                if (fn.isFallible) {
+                    emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
+                } else {
+                    emitLine("return " + valTmp + ";");
+                }
             }
             return;
         }
@@ -1611,11 +1638,9 @@ public:
         emitLine(fnSignature(currentModuleId, fn) + " {");
         indentLevel += 1;
 
+        // Seed scope strictly from fn.params to avoid cross-overload type collisions in symbols.fnScopes.
+        // Local variables will be added to this scope as they are encountered in emitStmtList -> emitVarAssignment.
         std::unordered_map<std::string, VarSymbol> scope;
-        const auto fnScopeIt = symbols.fnScopes.find(symbolKey(currentModuleId, fn.name));
-        if (fnScopeIt != symbols.fnScopes.end()) {
-            scope = fnScopeIt->second;
-        }
         std::unordered_set<std::string> declaredVars;
         for (const auto& p : fn.params) {
             const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);

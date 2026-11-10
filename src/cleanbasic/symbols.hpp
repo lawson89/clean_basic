@@ -245,7 +245,7 @@ struct AnalysisResult {
     DiagnosticError error;
 };
 
-inline TypeId getFnTypeId(const AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
+inline TypeNode buildFnTypeNode(const AstArena& arena, const FnSymbol& fn) {
     TypeNode node{};
     node.name = "fn";
     node.isFallible = fn.isFallible;
@@ -256,21 +256,15 @@ inline TypeId getFnTypeId(const AstArena& arena, const GlobalSymbolTable& /*symb
         node.typeArgs.push_back(p.typeId);
         node.paramByref.push_back(p.isByref);
     }
-    return arena.findTypeNode(node);
+    return node;
+}
+
+inline TypeId getFnTypeId(const AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
+    return arena.findTypeNode(buildFnTypeNode(arena, fn));
 }
 
 inline TypeId addFnTypeId(AstArena& arena, const GlobalSymbolTable& /*symbols*/, const FnSymbol& fn) {
-    TypeNode node{};
-    node.name = "fn";
-    node.isFallible = fn.isFallible;
-    if (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType)) {
-        node.returnType = fn.returnType;
-    }
-    for (const auto& p : fn.params) {
-        node.typeArgs.push_back(p.typeId);
-        node.paramByref.push_back(p.isByref);
-    }
-    return arena.addType(std::move(node));
+    return arena.addType(buildFnTypeNode(arena, fn));
 }
 
 inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
@@ -328,6 +322,20 @@ inline bool isBuiltinTypeName(std::string_view name) {
 
 inline bool isBuiltinSymbolName(std::string_view name) {
     return name == "err" || name == "print" || name == "error" || name == "assert";
+}
+
+inline bool isAssertBuiltinCall(const AstArena& arena, const FuncCall& call) {
+    if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
+        return ident->name == "assert";
+    }
+    return false;
+}
+
+inline bool isErrorBuiltinCall(const AstArena& arena, const FuncCall& call) {
+    if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
+        return ident->name == "error";
+    }
+    return false;
 }
 
 inline bool isModuleAliasInScope(
@@ -466,6 +474,8 @@ inline TypeNode resolveAliasNode(
     return resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
 }
 
+// Read-only alias resolution used during Pass 2, Emission, and LSP queries where AstArena is const.
+// Looks up the already-interned canonical TypeId without mutating arena.types.
 inline TypeId resolveAlias(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -483,6 +493,9 @@ inline TypeId resolveAlias(
     return tid;
 }
 
+// Mutating type canonicalization used during Pass 1b declaration registration.
+// Recursively unwraps aliases in type arguments/return types and interns the canonical TypeNode
+// (plus list[T]) into arena.types so subsequent read-only resolveAlias() lookups always succeed.
 inline TypeId canonicalizeType(
     AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -828,6 +841,11 @@ inline std::optional<FnSymbol> selectMatchingUfcsOverload(
     return *candidates.front();
 }
 
+// Resolves a UFCS method call 'recv.method(args...)' across 4 priority tiers:
+// 0. Built-in receiver methods (list/dict/str/bytes/int/union intrinsics).
+// 1. Free functions in the caller's current module (pub or private).
+// 2. Public free functions in the receiver type's defining module (or 'std/str' for 'str').
+// 3. Public free functions in any module directly imported by currentModuleId.
 inline std::optional<FnSymbol> resolveUfcsFn(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
@@ -1189,6 +1207,11 @@ inline FnSymbol makeFnSymbolFromTypeNode(
     return fs;
 }
 
+// Disambiguates whether 'target.name(args...)' is a UFCS receiver call vs:
+// - a module-qualified call ('modAlias.fn(...)'),
+// - a static built-in constructor ('bytes.fromHex(...)'),
+// - a tagged union variant constructor ('Shape.Circle(5.0)'), or
+// - a call through a struct field of function type ('holder.callback(...)').
 inline bool isUfcsCallExpr(
     const AstArena& arena,
     const FuncCall& call,

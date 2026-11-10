@@ -522,53 +522,33 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
         if (callCtx.calleeName == "print") return SignatureHelpData{"fn print(values...)", "", {"values..."}, 0};
     } else {
         // Built-in receiver methods
-        if (callCtx.calleeName == "len") return SignatureHelpData{"fn .len() as int", "", {}, 0};
-        if (callCtx.calleeName == "toStr") return SignatureHelpData{"fn .toStr() as str", "", {}, 0};
-        if (callCtx.calleeName == "toInt" && (callCtx.receiverName.empty() || callCtx.receiverName.front() != '"')) {
-            const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
-            if (!vOpt.has_value() || vOpt.value() != snap.symbols.typeStr) {
-                return SignatureHelpData{"fn .toInt() as int", "", {}, 0};
+        const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
+        if (vOpt.has_value()) {
+            const auto builtinMethods = getBuiltinReceiverMethods(snap.arena, snap.symbols, currentModuleId, vOpt.value());
+            for (const auto& fn : builtinMethods) {
+                if (fn.name == callCtx.calleeName) {
+                    SignatureHelpData sig{};
+                    std::vector<Param> visibleParams;
+                    for (size_t i = 1; i < fn.params.size(); ++i) {
+                        visibleParams.push_back(fn.params[i]);
+                    }
+                    sig.label = "fn ." + fn.name + formatFnDetailSignature(snap.arena, visibleParams, fn.returnType, fn.isFallible);
+                    const auto docOpt = formatBuiltinHoverMarkdown(fn.name);
+                    if (docOpt.has_value()) sig.documentation = docOpt.value();
+
+                    for (const auto& p : visibleParams) {
+                        std::string pLabel = p.name + " as " + formatCleanbasicType(snap.arena, p.typeId);
+                        if (p.isByref) pLabel = "byref " + pLabel;
+                        sig.paramLabels.push_back(pLabel);
+                    }
+                    sig.activeParameter = callCtx.activeParam;
+                    if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) {
+                        sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
+                    }
+                    return sig;
+                }
             }
         }
-        if (callCtx.calleeName == "toFloat" && (callCtx.receiverName.empty() || callCtx.receiverName.front() != '"')) {
-            const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
-            if (!vOpt.has_value() || vOpt.value() != snap.symbols.typeStr) {
-                return SignatureHelpData{"fn .toFloat() as float", "", {}, 0};
-            }
-        }
-        if (callCtx.calleeName == "push") return SignatureHelpData{"fn .push(item as T)", "", {"item as T"}, 0};
-        if (callCtx.calleeName == "get") {
-            uint32_t activeIdx = callCtx.activeParam;
-            if (activeIdx > 1) {
-                activeIdx = 1;
-            }
-            return SignatureHelpData{"fn .get(key as K, defaultValue as V) as V", "", {"key as K", "defaultValue as V"}, activeIdx};
-        }
-        if (callCtx.calleeName == "fromHex") {
-            if (callCtx.receiverName == "bytes") {
-                return SignatureHelpData{"fn bytes.fromHex(hex as str) as bytes can error", "", {"hex as str"}, 0};
-            }
-            return SignatureHelpData{"fn .fromHex() as bytes can error", "", {}, 0};
-        }
-        if (callCtx.calleeName == "slice") {
-            uint32_t activeIdx = callCtx.activeParam;
-            if (activeIdx > 1) {
-                activeIdx = 1;
-            }
-            return SignatureHelpData{"fn .slice(start as int, stop as int)", "", {"start as int", "stop as int"}, activeIdx};
-        }
-        if (callCtx.calleeName == "sliceFrom") return SignatureHelpData{"fn .sliceFrom(start as int)", "", {"start as int"}, 0};
-        if (callCtx.calleeName == "contains") return SignatureHelpData{"fn .contains(val as T) as bool", "", {"val as T"}, 0};
-        if (callCtx.calleeName == "sort") return SignatureHelpData{"fn .sort()", "", {}, 0};
-        if (callCtx.calleeName == "removeAt") return SignatureHelpData{"fn .removeAt(idx as int) as T", "", {"idx as int"}, 0};
-        if (callCtx.calleeName == "keys") return SignatureHelpData{"fn .keys() as list[K]", "", {}, 0};
-        if (callCtx.calleeName == "bitAnd") return SignatureHelpData{"fn .bitAnd(y as int) as int", "", {"y as int"}, 0};
-        if (callCtx.calleeName == "bitOr") return SignatureHelpData{"fn .bitOr(y as int) as int", "", {"y as int"}, 0};
-        if (callCtx.calleeName == "bitXor") return SignatureHelpData{"fn .bitXor(y as int) as int", "", {"y as int"}, 0};
-        if (callCtx.calleeName == "bitNot") return SignatureHelpData{"fn .bitNot() as int", "", {}, 0};
-        if (callCtx.calleeName == "shl") return SignatureHelpData{"fn .shl(bits as int) as int", "", {"bits as int"}, 0};
-        if (callCtx.calleeName == "shr") return SignatureHelpData{"fn .shr(bits as int) as int", "", {"bits as int"}, 0};
-        if (callCtx.calleeName == "kind") return SignatureHelpData{"fn .kind() as str", "", {}, 0};
     }
     if (!snap.valid) return std::nullopt;
     if (callCtx.hasReceiver && !resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName).has_value()) {

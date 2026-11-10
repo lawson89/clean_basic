@@ -242,6 +242,17 @@ struct ModuleLoaderState {
     DiagnosticError error;
     bool hasError = false;
 };
+/**
+ * Module Loading and Pipeline Orchestration
+ * 
+ * loadModuleDeclarationsRecursive performs a topological DFS of the module graph,
+ * deduplicating diamond dependencies via loader.loadedModules and detecting
+ * circular imports via loader.loadingStack and loader.loadingPathStack.
+ * 
+ * loadAndParseModuleFile encapsulates the candidate resolution (relative to 
+ * importer vs. root), in-memory overlay check, file I/O, tokenization, 
+ * and arena-based parsing.
+ */
 
 inline bool isInStack(const std::vector<std::string>& stack, std::string_view item) {
     for (const auto& s : stack) {
@@ -300,6 +311,60 @@ inline std::optional<std::string> findInMemorySource(
     return std::nullopt;
 }
 
+struct ModuleLoadResult {
+    bool found = false;
+    size_t candidateIndex = 0;
+    std::string source;
+    std::string candidatePath;
+    Program program;
+    DiagnosticError error;
+    bool parseOk = false;
+};
+
+inline ModuleLoadResult loadAndParseModuleFile(
+    AstArena& arena,
+    const std::vector<std::string>& candidates,
+    const std::unordered_map<std::string, std::string>& openBuffers
+) {
+    ModuleLoadResult res;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        res.candidatePath = candidates[i];
+        auto memSource = findInMemorySource(openBuffers, res.candidatePath);
+        std::ifstream modIn;
+        if (!memSource.has_value()) {
+            modIn.open(res.candidatePath);
+        }
+        if (memSource.has_value() || modIn.is_open()) {
+            res.found = true;
+            res.candidateIndex = i;
+            if (memSource.has_value()) {
+                res.source = *memSource;
+            } else {
+                std::ostringstream ss;
+                ss << modIn.rdbuf();
+                res.source = ss.str();
+            }
+            if (modIn.is_open()) modIn.close();
+
+            const auto lex = tokenize(res.source, res.candidatePath);
+            if (!lex.ok) {
+                res.error = lex.error;
+                return res;
+            }
+            auto parse = parseTokensWithArena(lex.tokens, std::move(arena), res.candidatePath);
+            arena = std::move(parse.arena);
+            if (!parse.ok) {
+                res.error = parse.error;
+                return res;
+            }
+            res.parseOk = true;
+            res.program = parse.program;
+            return res;
+        }
+    }
+    return res;
+}
+
 inline void loadModuleDeclarationsRecursive(
     AstArena& arena,
     const std::vector<DeclId>& declIds,
@@ -326,102 +391,45 @@ inline void loadModuleDeclarationsRecursive(
             const bool isStdMod = isStdImportTarget(impTarget);
             if (imp->kind == "module" && (isCbFile || isStdMod)) {
                 std::string targetModuleId = resolveModuleId(currentModuleId, impTarget);
-                const std::vector<std::string> candidates = buildModuleCandidatePaths(
-                    currentDir,
-                    loader.rootBaseDir,
-                    impTarget
-                );
+                const std::vector<std::string> candidates = buildModuleCandidatePaths(currentDir, loader.rootBaseDir, impTarget);
+                
+                // Check for existence and circularity before parsing to avoid redundant work
                 std::string candidatePath = candidates.front();
-                std::optional<std::string> memSource;
-                std::ifstream modIn;
-
+                bool found = false;
                 for (size_t cIdx = 0; cIdx < candidates.size(); ++cIdx) {
-                    candidatePath = candidates[cIdx];
-                    memSource = findInMemorySource(loader.openBuffers, candidatePath);
-                    if (!memSource.has_value()) {
-                        modIn.open(candidatePath);
-                    }
-                    if (memSource.has_value() || modIn.is_open()) {
-                        if (!isStdMod && cIdx > 0) {
-                            targetModuleId = resolveModuleId("", impTarget);
-                        }
+                    if (findInMemorySource(loader.openBuffers, candidates[cIdx]).has_value() || std::ifstream(candidates[cIdx]).is_open()) {
+                        candidatePath = candidates[cIdx];
+                        if (!isStdMod && cIdx > 0) targetModuleId = resolveModuleId("", impTarget);
+                        found = true;
                         break;
                     }
                 }
-
                 imp->resolvedModuleId = targetModuleId;
-
-                const bool hasModuleSource = memSource.has_value() || modIn.is_open();
                 const std::string normCandidate = normalizeRelPath(candidatePath);
-                if (isInStack(loader.loadingStack, targetModuleId) ||
-                    (hasModuleSource && isInStack(loader.loadingPathStack, normCandidate))) {
+
+                if (found && (isInStack(loader.loadingStack, targetModuleId) || isInStack(loader.loadingPathStack, normCandidate))) {
                     loader.hasError = true;
-                    loader.error = makeError(
-                        "ImportError",
-                        "Circular module import detected when importing '" + impTarget + "' (module '" + targetModuleId + "').",
-                        std::string(currentFilePath),
-                        arena.decls[did].line,
-                        arena.decls[did].col
-                    );
-                    if (modIn.is_open()) {
-                        modIn.close();
-                    }
+                    loader.error = makeError("ImportError", "Circular module import detected when importing '" + impTarget + "' (module '" + targetModuleId + "').",
+                        std::string(currentFilePath), arena.decls[did].line, arena.decls[did].col);
                     return;
                 }
 
-                if (hasModuleSource) {
-                    if (loader.loadedModules.find(targetModuleId) == loader.loadedModules.end()) {
-                        std::string modSource;
-                        if (memSource.has_value()) {
-                            modSource = memSource.value();
-                            if (modIn.is_open()) {
-                                modIn.close();
-                            }
-                        } else {
-                            std::ostringstream modSs;
-                            modSs << modIn.rdbuf();
-                            modIn.close();
-                            modSource = modSs.str();
-                        }
-
-                        const auto modLex = tokenize(modSource, candidatePath);
-                        if (!modLex.ok) {
-                            loader.hasError = true;
-                            loader.error = modLex.error;
-                            return;
-                        }
-                        auto modParse = parseTokensWithArena(
-                            modLex.tokens,
-                            std::move(arena),
-                            candidatePath
-                        );
-                        if (!modParse.ok) {
-                            arena = std::move(modParse.arena);
-                            loader.hasError = true;
-                            loader.error = modParse.error;
-                            return;
-                        }
-                        arena = std::move(modParse.arena);
-                        attachDocCommentsToDecls(arena, modParse.program.declarations, modSource);
-
-                        loader.loadingStack.push_back(targetModuleId);
-                        loader.loadingPathStack.push_back(normCandidate);
-                        loadModuleDeclarationsRecursive(
-                            arena,
-                            modParse.program.declarations,
-                            targetModuleId,
-                            candidatePath,
-                            loader
-                        );
-                        loader.loadingPathStack.pop_back();
-                        loader.loadingStack.pop_back();
-                        if (loader.hasError) {
-                            return;
-                        }
-                        loader.loadedModules.insert(targetModuleId);
-                    } else if (modIn.is_open()) {
-                        modIn.close();
+                if (found && loader.loadedModules.find(targetModuleId) == loader.loadedModules.end()) {
+                    auto loadRes = loadAndParseModuleFile(arena, candidates, loader.openBuffers);
+                    if (!loadRes.found) return; // Should not happen given 'found' check
+                    if (!loadRes.parseOk) {
+                        loader.hasError = true;
+                        loader.error = loadRes.error;
+                        return;
                     }
+                    attachDocCommentsToDecls(arena, loadRes.program.declarations, loadRes.source);
+                    loader.loadingStack.push_back(targetModuleId);
+                    loader.loadingPathStack.push_back(normCandidate);
+                    loadModuleDeclarationsRecursive(arena, loadRes.program.declarations, targetModuleId, loadRes.candidatePath, loader);
+                    loader.loadingPathStack.pop_back();
+                    loader.loadingStack.pop_back();
+                    if (loader.hasError) return;
+                    loader.loadedModules.insert(targetModuleId);
                 }
             }
         }
@@ -443,69 +451,19 @@ inline void preloadStdStrPrelude(
     if (loader.loadedModules.find(targetModuleId) != loader.loadedModules.end()) {
         return;
     }
-    const std::vector<std::string> candidates = buildModuleCandidatePaths(
-        loader.rootBaseDir,
-        loader.rootBaseDir,
-        targetModuleId
-    );
-    std::string candidatePath = candidates.front();
-    std::optional<std::string> memSource;
-    std::ifstream modIn;
-    for (size_t cIdx = 0; cIdx < candidates.size(); ++cIdx) {
-        candidatePath = candidates[cIdx];
-        memSource = findInMemorySource(loader.openBuffers, candidatePath);
-        if (!memSource.has_value()) {
-            modIn.open(candidatePath);
-        }
-        if (memSource.has_value() || modIn.is_open()) {
-            break;
-        }
-    }
-    const bool hasModuleSource = memSource.has_value() || modIn.is_open();
-    if (!hasModuleSource) {
-        return;
-    }
-    std::string modSource;
-    if (memSource.has_value()) {
-        modSource = memSource.value();
-        if (modIn.is_open()) {
-            modIn.close();
-        }
-    } else {
-        std::ostringstream modSs;
-        modSs << modIn.rdbuf();
-        modIn.close();
-        modSource = modSs.str();
-    }
-    const auto modLex = tokenize(modSource, candidatePath);
-    if (!modLex.ok) {
+    const std::vector<std::string> candidates = buildModuleCandidatePaths(loader.rootBaseDir, loader.rootBaseDir, targetModuleId);
+    auto loadRes = loadAndParseModuleFile(arena, candidates, loader.openBuffers);
+    if (!loadRes.found) return;
+    if (!loadRes.parseOk) {
         loader.hasError = true;
-        loader.error = modLex.error;
+        loader.error = loadRes.error;
         return;
     }
-    auto modParse = parseTokensWithArena(
-        modLex.tokens,
-        std::move(arena),
-        candidatePath
-    );
-    if (!modParse.ok) {
-        arena = std::move(modParse.arena);
-        loader.hasError = true;
-        loader.error = modParse.error;
-        return;
-    }
-    arena = std::move(modParse.arena);
-    attachDocCommentsToDecls(arena, modParse.program.declarations, modSource);
-    const std::string normCandidate = normalizeRelPath(candidatePath);
+    attachDocCommentsToDecls(arena, loadRes.program.declarations, loadRes.source);
+    const std::string normCandidate = normalizeRelPath(loadRes.candidatePath);
     loader.loadingStack.push_back(targetModuleId);
     loader.loadingPathStack.push_back(normCandidate);
-    loadModuleDeclarationsRecursive(
-        arena,
-        modParse.program.declarations,
-        targetModuleId,
-        candidatePath,
-        loader
-    );
+    loadModuleDeclarationsRecursive(arena, loadRes.program.declarations, targetModuleId, loadRes.candidatePath, loader);
     loader.loadingPathStack.pop_back();
     loader.loadingStack.pop_back();
     if (!loader.hasError) {

@@ -118,6 +118,12 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
     std::size_t i = 0;
     const std::size_t n = code.size();
 
+    // String interpolation desugaring state machine:
+    // Rewrites $"Hello {user.name}!" directly in the token stream into parenthesized
+    // '&' concatenation expressions: ("Hello " & (user.name) & "!").
+    // Each active '{ ... }' interpolation hole pushes an InterpState recording the
+    // bracketDepth at its opening '(' so nested '{' (such as dict literals) inside the
+    // interpolated expression do not prematurely close the interpolation hole.
     struct InterpState {
         uint32_t braceDepth = 0;
         uint32_t openLine = 1;
@@ -211,7 +217,10 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             continue;
         }
 
-        // 3. Consecutive newlines collapsed into a single NEWLINE token (suppressed inside open brackets)
+        // 3. Consecutive newlines collapsed into a single NEWLINE token.
+        // When bracketDepth > 0 (inside '()', '[]', or '{}'), NEWLINE token emission is suppressed
+        // to allow implicit multiline expressions/lists/dicts/parameter lists while still advancing
+        // lineNum and lineStart for exact diagnostic coordinates.
         if (ch == nlCh) {
             uint32_t nlCount = 0;
             while (i < n && code[i] == nlCh) {

@@ -4393,3 +4393,50 @@ end fn
         cb::testE2E::runE2EFixture("selfhost_constructs", "tests/cases/selfhost_constructs.cb");
     }
 }
+
+TEST_CASE("Transpiler and LSP regression fixes for edge-case defects", "[regression][lsp][emitter][analyzer]") {
+    SECTION("LSP Built-in Hover Fixes") {
+        auto assertHover = cb::formatBuiltinHoverMarkdown("assert");
+        REQUIRE(assertHover.has_value());
+        CHECK(assertHover->find("fn assert") != std::string::npos);
+        CHECK(assertHover->find("Asserts that cond is true") != std::string::npos);
+        // Check newline after code block
+        CHECK(assertHover->find("```\n") != std::string::npos);
+
+        auto toStrHover = cb::formatBuiltinHoverMarkdown("toStr");
+        REQUIRE(toStrHover.has_value());
+        CHECK(toStrHover->find("fn .toStr()") != std::string::npos);
+
+        auto lenHover = cb::formatBuiltinHoverMarkdown("len");
+        REQUIRE(lenHover.has_value());
+        CHECK(lenHover->find("```\n") != std::string::npos);
+    }
+
+    SECTION("LSP Signature Help for Built-in Receiver Methods") {
+        std::string source = "fn main()\n  dim l = [1]\n  l.push(0)\nend fn";
+        auto checkRes = cb::checkSource(source, "main.cb");
+        REQUIRE(checkRes.ok);
+        cb::LspDocumentSnapshot snap{};
+        snap.valid = true;
+        snap.arena = std::move(checkRes.arena);
+        snap.symbols = std::move(checkRes.symbols);
+        snap.program = std::move(checkRes.program);
+        
+        cb::CallSiteContext ctx;
+        ctx.insideCall = true;
+        ctx.hasReceiver = true;
+        ctx.receiverName = "l";
+        ctx.calleeName = "push";
+        ctx.activeParam = 0;
+
+        auto help = cb::resolveSignatureHelp(snap, "", std::string("main"), ctx);
+        REQUIRE(help.has_value());
+        CHECK(help->label.find(".push(item as int)") != std::string::npos);
+        CHECK(help->paramLabels.size() == 1);
+        CHECK(help->paramLabels[0] == "item as int");
+    }
+
+    SECTION("E2E Regression: Fallible void return, overloaded scope, and enum assignments") {
+        cb::testE2E::runE2EFixture("regression_fixes", "tests/cases/regression_fixes.cb");
+    }
+}

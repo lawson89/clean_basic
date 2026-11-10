@@ -10,20 +10,6 @@
 
 namespace cb {
 
-inline bool isAssertBuiltinCall(const AstArena& arena, const FuncCall& call) {
-    if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
-        return ident->name == "assert";
-    }
-    return false;
-}
-
-inline bool isErrorBuiltinCall(const AstArena& arena, const FuncCall& call) {
-    if (const auto* ident = arena.getExpr<Identifier>(call.callee)) {
-        return ident->name == "error";
-    }
-    return false;
-}
-
 inline bool stmtListHasExit(const AstArena& arena, const std::vector<StmtId>& stmts) {
     if (stmts.empty()) {
         return false;
@@ -147,6 +133,10 @@ public:
         }
     }
 
+    // Validates function/constructor/method calls within an expression tree.
+    // allowTopLevelFallible is true ONLY at the root expression of a VarAssignment ('x = f()'),
+    // ExprStmt ('f()'), or ReturnStmt ('return f()'). Any nested sub-expression recursive call passes
+    // allowTopLevelFallible = false to enforce CleanBasic's statement-root error-bubbling invariant.
     void validateExprCalls(
         const FnDecl& fn,
         ExprId exprId,
@@ -645,7 +635,11 @@ public:
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
                 const auto& tgtNode = arena.exprs[vassign->target];
                 if (vassign->isDim || vassign->isConst) {
-                    validateEmptyContainerInference(stmtNode.line, stmtNode.col, "dim", ident->name, vassign->hasDeclaredType, vassign->value);
+                    std::string_view declKw = "dim";
+                    if (vassign->isConst) {
+                        declKw = "const";
+                    }
+                    validateEmptyContainerInference(stmtNode.line, stmtNode.col, declKw, ident->name, vassign->hasDeclaredType, vassign->value);
                     TypeId varTid = symbols.typeInt;
                     if (vassign->hasDeclaredType) {
                         varTid = resolveAlias(arena, symbols, moduleId, vassign->declaredType);
@@ -690,6 +684,11 @@ public:
                 }
                 const TypeId lhsTid = inferExprType(arena, vassign->target, symbols, scope, moduleId);
                 validateNonNullTarget(tgtNode.line, tgtNode.col, lhsTid, vassign->value);
+                std::string targetLabel = root.name;
+                if (const auto* fa = arena.getExpr<FieldAccess>(vassign->target)) {
+                    targetLabel = fa->fieldName;
+                }
+                validateEnumAssignment(tgtNode.line, tgtNode.col, targetLabel, lhsTid, valType);
                 validateExprCalls(fn, vassign->target, scope, false);
             }
 
@@ -889,10 +888,17 @@ public:
 
         if (const auto* retStmt = arena.getStmt<ReturnStmt>(stmtId)) {
             bool isReturnErrorCall = false;
+            bool isReturnVoidFallibleCall = false;
             if (retStmt->hasValue) {
                 if (const auto* call = arena.getExpr<FuncCall>(retStmt->value)) {
                     if (isErrorBuiltinCall(arena, *call) || isAssertBuiltinCall(arena, *call)) {
                         isReturnErrorCall = true;
+                    } else {
+                        const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
+                        if (fnSymOpt.has_value() && fnSymOpt->isFallible &&
+                            (fnSymOpt->returnType == INVALID_ID || arena.isVoid(fnSymOpt->returnType))) {
+                            isReturnVoidFallibleCall = true;
+                        }
                     }
                 }
                 if (!isReturnErrorCall) {
@@ -903,7 +909,12 @@ public:
             }
             if (!isReturnErrorCall) {
                 const bool expectedHasValue = (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType));
-                if (retStmt->hasValue && !expectedHasValue) {
+                if (isReturnVoidFallibleCall) {
+                    if (expectedHasValue) {
+                        std::string msg = "Function '" + fn.name + "' expects a return value, but none was provided.";
+                        setAnalyzerError(stmtNode.line, stmtNode.col, msg);
+                    }
+                } else if (retStmt->hasValue && !expectedHasValue) {
                     std::string msg = "Function '" + fn.name + "' returns void, but a value was returned.";
                     setAnalyzerError(stmtNode.line, stmtNode.col, msg);
                 } else if (!retStmt->hasValue && expectedHasValue) {
@@ -965,7 +976,13 @@ public:
         std::unordered_set<std::string> knownModules;
         knownModules.insert("");
 
-        // Pass 1a: Register module imports, aliases, and type declarations
+        // Two-Pass Semantic Analysis:
+        // - Pass 1a: Register module imports, type aliases, and type/enum/union shell declarations so
+        //   out-of-order and cross-module type references are visible before inspecting fields/signatures.
+        // - Pass 1b: Canonicalize struct fields, union variants, enum values, module constants, and
+        //   function signatures (including overload sets).
+        // - Pass 2: Type-check function bodies, infer local variable types, enforce const/byref mutability,
+        //   and verify static 'can error' / 'on error' handling.
         for (const DeclId did : program.declarations) {
             if (did >= arena.decls.size()) continue;
             const auto& declNode = arena.decls[did];
@@ -1166,18 +1183,8 @@ public:
                 if (symbols.constants.count(key) > 0) {
                     throw makeError("AnalyzerError", "Duplicate constant declaration '" + cdecl->name + "'.", declNode.fileName, declNode.line, declNode.col);
                 }
-                if (!cdecl->hasDeclaredType) {
-                    if (const auto* llit = arena.getExpr<ListLiteral>(cdecl->value)) {
-                        if (llit->elements.empty()) {
-                            throw makeError("AnalyzerError", "Cannot infer element type of empty list '[]'; specify an explicit type such as 'const " + cdecl->name + " as list[int] = []'.", declNode.fileName, declNode.line, declNode.col);
-                        }
-                    }
-                    if (const auto* dlit = arena.getExpr<DictLiteral>(cdecl->value)) {
-                        if (dlit->entries.empty()) {
-                            throw makeError("AnalyzerError", "Cannot infer key/value types of empty dict '{}'; specify an explicit type such as 'const " + cdecl->name + " as dict[str, int] = {}'.", declNode.fileName, declNode.line, declNode.col);
-                        }
-                    }
-                }
+                fileName = declNode.fileName;
+                validateEmptyContainerInference(declNode.line, declNode.col, "const", cdecl->name, cdecl->hasDeclaredType, cdecl->value);
                 std::unordered_map<std::string, VarSymbol> emptyScope;
                 const TypeId inferredTid = inferExprType(arena, cdecl->value, symbols, emptyScope, declNode.moduleId);
                 TypeId constTid = inferredTid;

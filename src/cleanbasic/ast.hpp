@@ -34,6 +34,12 @@ constexpr uint32_t INVALID_ID = UINT32_MAX;
 // Types
 // ==========================================
 
+// Unified representation for primitive, container, user-defined, and function types.
+// - For generic containers (list[T], dict[K, V]), typeArgs stores the element/key/value TypeIds.
+// - For function reference types (fn(p1, ...) [as Ret] [can error]), name == "fn", typeArgs stores
+//   parameter TypeIds, paramByref tracks per-parameter 'byref' flags, returnType stores the return
+//   TypeId (or INVALID_ID for void), and isFallible records 'can error'. Sharing a single TypeNode
+//   layout enables O(1) structural type interning in AstArena.
 struct TypeNode {
     uint32_t line = 1;
     uint32_t col = 1;
@@ -362,6 +368,10 @@ using DeclVariant = std::variant<
     FnDecl
 >;
 
+// Top-level declaration wrapper storing three distinct source coordinate anchors for diagnostics & LSP:
+// - line / col: Start of the declaration (e.g., leading 'pub', 'extern', or keyword token).
+// - nameLine / nameCol: Exact 1-based position of the declared identifier for LSP Go-to-Definition.
+// - endLine: Closing line of multi-line declarations ('end fn', 'end type', etc.) for LSP DocumentSymbols.
 struct DeclNode {
     uint32_t line = 1;
     uint32_t col = 1;

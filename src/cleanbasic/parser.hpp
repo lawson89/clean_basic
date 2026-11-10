@@ -155,6 +155,9 @@ public:
         return true;
     }
 
+    // Permits TYPE_KW (e.g. 'str', 'bytes', 'list') and 'error' in identifier positions so
+    // static/module calls like 'bytes.fromHex(...)', 'str.join(...)', 'error(...)', and struct
+    // fields or methods named after built-in types parse seamlessly.
     bool checkAnyIdentOrType() const {
         const Token& tok = current();
         return tok.kind == "IDENT" || tok.kind == "TYPE_KW" || (tok.kind == "KEYWORD" && tok.value == "error");
@@ -504,6 +507,8 @@ public:
             match("COMMA");
             typeArgs.push_back(parseType());
             match("RBRACKET");
+            // Pre-intern list[K] whenever dict[K, V] is parsed so read-only type inference
+            // (inferExprType / getBuiltinReceiverMethods) can always resolve dict.keys() -> list[K].
             arena.findOrAddType("list", {keyTid}, start.line, start.col);
         }
 

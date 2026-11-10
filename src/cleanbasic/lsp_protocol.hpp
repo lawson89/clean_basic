@@ -390,14 +390,14 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     if (name == "error") {
         return wrapVbCodeBlock("fn error(msg as str, [code=1]) as err") + "\nRaises and returns a structured err value from a can error function.";
     }
+    if (name == "assert") {
+        return wrapVbCodeBlock("fn assert(cond as bool, [msg as str]) can error") + "\nAsserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false.";
+    }
     if (name == "len") {
         return wrapVbCodeBlock("fn .len() as int") + "\nReturns the number of elements in a list, dict, or str.";
-    if (name == "error") {
-        return wrapVbCodeBlock("fn error(msg as str, [code=1]) as err") + "Raises and returns a structured err value from a can error function.";
     }
-    if (name == "assert") {
-        return wrapVbCodeBlock("fn assert(cond as bool, [msg as str]) can error") + "Asserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false.";
-    }
+    if (name == "toStr") {
+        return wrapVbCodeBlock("fn .toStr() as str") + "\nReturns a string representation of the value.";
     }
     if (name == "toInt") {
         return wrapVbCodeBlock("fn .toInt() as int") + "\nConverts a numeric or boolean value to an int.";
@@ -433,49 +433,49 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
         return wrapVbCodeBlock("fn .toBytes() as bytes") + "\nEncodes a str into a UTF-8 bytes buffer.";
     }
     if (name == "toHex") {
-        return wrapVbCodeBlock("fn .toHex() as str") + "Encodes a bytes buffer as a lowercase hexadecimal string.";
+        return wrapVbCodeBlock("fn .toHex() as str") + "\nEncodes a bytes buffer as a lowercase hexadecimal string.";
     }
     if (name == "toUtf8") {
-        return wrapVbCodeBlock("fn .toUtf8() as str can error") + "Validates and decodes a bytes buffer into a UTF-8 str.";
+        return wrapVbCodeBlock("fn .toUtf8() as str can error") + "\nValidates and decodes a bytes buffer into a UTF-8 str.";
     }
     if (name == "slice") {
-        return wrapVbCodeBlock("fn .slice(start as int, stop as int)") + "Returns a bounds-clamped sub-slice [start, stop) of a list or bytes buffer.";
+        return wrapVbCodeBlock("fn .slice(start as int, stop as int)") + "\nReturns a bounds-clamped sub-slice [start, stop) of a list or bytes buffer.";
     }
     if (name == "sliceFrom") {
-        return wrapVbCodeBlock("fn .sliceFrom(start as int)") + "Returns a bounds-clamped sub-slice from start to the end of a list or bytes buffer.";
+        return wrapVbCodeBlock("fn .sliceFrom(start as int)") + "\nReturns a bounds-clamped sub-slice from start to the end of a list or bytes buffer.";
     }
     if (name == "contains") {
-        return wrapVbCodeBlock("fn .contains(val as T) as bool") + "Returns true if the list contains val.";
+        return wrapVbCodeBlock("fn .contains(val as T) as bool") + "\nReturns true if the list contains val.";
     }
     if (name == "sort") {
-        return wrapVbCodeBlock("fn .sort()") + "Sorts the elements of a list in ascending order in place.";
+        return wrapVbCodeBlock("fn .sort()") + "\nSorts the elements of a list in ascending order in place.";
     }
     if (name == "removeAt") {
-        return wrapVbCodeBlock("fn .removeAt(idx as int) as T") + "Removes and returns the element at index idx in a list (or default T{} if out of bounds).";
+        return wrapVbCodeBlock("fn .removeAt(idx as int) as T") + "\nRemoves and returns the element at index idx in a list (or default T{} if out of bounds).";
     }
     if (name == "keys") {
-        return wrapVbCodeBlock("fn .keys() as list[K]") + "Returns a list of all keys in a dict (sorted deterministically when K is orderable).";
+        return wrapVbCodeBlock("fn .keys() as list[K]") + "\nReturns a list of all keys in a dict (sorted deterministically when K is orderable).";
     }
     if (name == "bitAnd") {
-        return wrapVbCodeBlock("fn .bitAnd(y as int) as int") + "Returns the bitwise AND of two 64-bit integers.";
+        return wrapVbCodeBlock("fn .bitAnd(y as int) as int") + "\nReturns the bitwise AND of two 64-bit integers.";
     }
     if (name == "bitOr") {
-        return wrapVbCodeBlock("fn .bitOr(y as int) as int") + "Returns the bitwise OR of two 64-bit integers.";
+        return wrapVbCodeBlock("fn .bitOr(y as int) as int") + "\nReturns the bitwise OR of two 64-bit integers.";
     }
     if (name == "bitXor") {
-        return wrapVbCodeBlock("fn .bitXor(y as int) as int") + "Returns the bitwise XOR of two 64-bit integers.";
+        return wrapVbCodeBlock("fn .bitXor(y as int) as int") + "\nReturns the bitwise XOR of two 64-bit integers.";
     }
     if (name == "bitNot") {
-        return wrapVbCodeBlock("fn .bitNot() as int") + "Returns the bitwise NOT (~x) of a 64-bit integer.";
+        return wrapVbCodeBlock("fn .bitNot() as int") + "\nReturns the bitwise NOT (~x) of a 64-bit integer.";
     }
     if (name == "shl") {
-        return wrapVbCodeBlock("fn .shl(bits as int) as int") + "Shifts a 64-bit integer left by bits (0..63), returning 0 if bits is out of range.";
+        return wrapVbCodeBlock("fn .shl(bits as int) as int") + "\nShifts a 64-bit integer left by bits (0..63), returning 0 if bits is out of range.";
     }
     if (name == "shr") {
-        return wrapVbCodeBlock("fn .shr(bits as int) as int") + "Performs a logical unsigned 64-bit right shift by bits (0..63), returning 0 if bits is out of range.";
+        return wrapVbCodeBlock("fn .shr(bits as int) as int") + "\nPerforms a logical unsigned 64-bit right shift by bits (0..63), returning 0 if bits is out of range.";
     }
     if (name == "kind") {
-        return wrapVbCodeBlock("fn .kind() as str") + "Returns the active variant name of a tagged union as a str.";
+        return wrapVbCodeBlock("fn .kind() as str") + "\nReturns the active variant name of a tagged union as a str.";
     }
     return std::nullopt;
 }
