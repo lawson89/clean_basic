@@ -41,11 +41,37 @@ target_compile_options(cleanbasic_core INTERFACE
     -Werror
 )
 
+set(CLEANBASIC_PCH_HEADERS
+    <algorithm>
+    <chrono>
+    <cstdint>
+    <cstdlib>
+    <filesystem>
+    <fstream>
+    <functional>
+    <iomanip>
+    <iostream>
+    <memory>
+    <mutex>
+    <optional>
+    <sstream>
+    <string>
+    <string_view>
+    <tuple>
+    <type_traits>
+    <unordered_map>
+    <unordered_set>
+    <utility>
+    <variant>
+    <vector>
+)
+
 # CleanBasic transpiler CLI executable
 add_executable(cleanbasic
     src/cleanbasic/cli_main.cpp
 )
 target_link_libraries(cleanbasic PRIVATE cleanbasic_core)
+target_precompile_headers(cleanbasic PRIVATE ${CLEANBASIC_PCH_HEADERS})
 
 # CleanBasic test executor executable (Catch2)
 add_executable(cleanbasic_tests
@@ -55,6 +81,7 @@ target_link_libraries(cleanbasic_tests PRIVATE
     cleanbasic_core
     Catch2::Catch2WithMain
 )
+target_precompile_headers(cleanbasic_tests PRIVATE ${CLEANBASIC_PCH_HEADERS})
 
 # CTest integration
 include(CTest)

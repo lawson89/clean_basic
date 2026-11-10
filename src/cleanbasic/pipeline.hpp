@@ -9,7 +9,9 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -26,8 +28,11 @@ struct BuildTimings {
     double analyzeMs = 0.0;
     double emitMs = 0.0;
     double transpileTotalMs = 0.0;
+    double pchBuildMs = 0.0;
     double cppCompileMs = 0.0;
     double totalMs = 0.0;
+    bool pchUsed = false;
+    bool pchCacheHit = false;
 };
 
 inline double elapsedMillis(
@@ -72,6 +77,8 @@ struct BuildOptions {
     std::string compiler;
     std::string optLevel = "0";
     bool isRelease = false;
+    bool usePch = true;
+    bool rebuildPch = false;
 };
 
 struct BuildFileResult {
@@ -233,6 +240,193 @@ inline std::string resolveCompilerCommand(
 #endif
 }
 
+inline uint64_t fnv1aUpdate64(uint64_t hash, std::string_view data) {
+    constexpr uint64_t fnvPrime = 1099511628211ULL;
+    uint64_t h = hash;
+    for (unsigned char c : data) {
+        h ^= static_cast<uint64_t>(c);
+        h *= fnvPrime;
+    }
+    return h;
+}
+
+inline std::string formatHex64(uint64_t val) {
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0') << std::setw(16) << val;
+    return oss.str();
+}
+
+inline bool supportsBackendPch(std::string_view compilerCmd, const TargetSpec& targetSpec) {
+    if (targetSpec.isCross) {
+        return false;
+    }
+    if (compilerCmd.find("zig") != std::string_view::npos) {
+        return false;
+    }
+    return true;
+}
+
+inline std::string buildBackendPchHeaderSource() {
+    std::string content;
+    content.reserve(CPP_RUNTIME_PREAMBLE.size() + 256);
+    content += R"(// CleanBasic Auto-Generated Backend Precompiled Header
+)";
+    content += CPP_RUNTIME_PREAMBLE;
+    content += R"(
+#include "str/str_bridge.hpp"
+#include "os/os_bridge.hpp"
+#include "fs/fs_bridge.hpp"
+#include "json/json_bridge.hpp"
+)";
+    return content;
+}
+
+inline std::string computeBackendPchHash(
+    std::string_view compilerCmd,
+    const TargetSpec& targetSpec,
+    std::string_view optLevel,
+    std::string_view cbRoot
+) {
+    uint64_t hash = 14695981039346656037ULL;
+    hash = fnv1aUpdate64(hash, compilerCmd);
+    hash = fnv1aUpdate64(hash, "|");
+    hash = fnv1aUpdate64(hash, targetSpec.canonicalName);
+    hash = fnv1aUpdate64(hash, "|");
+    hash = fnv1aUpdate64(hash, optLevel);
+    hash = fnv1aUpdate64(hash, "|");
+    hash = fnv1aUpdate64(hash, CPP_RUNTIME_PREAMBLE);
+
+    const std::vector<std::string> bridgeRelPaths = {
+        "/stdlib/str/str_bridge.hpp",
+        "/stdlib/os/os_bridge.hpp",
+        "/stdlib/fs/fs_bridge.hpp",
+        "/stdlib/json/json_bridge.hpp",
+        "/vendor/json.hpp"
+    };
+    for (const auto& rel : bridgeRelPaths) {
+        const std::string fullPath = std::string(cbRoot) + rel;
+        std::ifstream in(fullPath, std::ios::in | std::ios::binary);
+        if (in.is_open()) {
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            hash = fnv1aUpdate64(hash, "|");
+            hash = fnv1aUpdate64(hash, ss.str());
+        }
+    }
+    return formatHex64(hash);
+}
+
+inline std::string resolveBackendPchDir(std::string_view cbRoot) {
+    std::error_code ec;
+    const std::filesystem::path primaryDir = std::filesystem::path(std::string(cbRoot)) / "build" / "pch";
+    std::filesystem::create_directories(primaryDir, ec);
+    if (!ec && std::filesystem::exists(primaryDir, ec)) {
+        return primaryDir.string();
+    }
+    const std::filesystem::path fallbackDir = std::filesystem::temp_directory_path(ec) / "cleanbasic_pch";
+    std::filesystem::create_directories(fallbackDir, ec);
+    return fallbackDir.string();
+}
+
+struct PchPrepareResult {
+    bool used = false;
+    bool cacheHit = false;
+    double buildMs = 0.0;
+    std::string headerPath;
+};
+
+inline PchPrepareResult ensureBackendPch(
+    std::string_view compilerCmd,
+    const TargetSpec& targetSpec,
+    std::string_view optLevel,
+    std::string_view cbRoot,
+    bool usePch,
+    bool rebuildPch
+) {
+    PchPrepareResult res{};
+    if (!usePch || !supportsBackendPch(compilerCmd, targetSpec)) {
+        return res;
+    }
+
+    std::string resolvedOpt = "0";
+    if (!optLevel.empty()) {
+        resolvedOpt = std::string(optLevel);
+    }
+
+    const std::string pchDir = resolveBackendPchDir(cbRoot);
+    const std::string hashHex = computeBackendPchHash(compilerCmd, targetSpec, resolvedOpt, cbRoot);
+    const std::string sanitizedCc = sanitizeModuleId(compilerCmd);
+    const std::string baseName = "cb_pch_" + sanitizedCc + "_O" + resolvedOpt + "_" + hashHex + ".hpp";
+    const std::filesystem::path headerPath = std::filesystem::path(pchDir) / baseName;
+    const std::filesystem::path gchPath = std::filesystem::path(headerPath.string() + ".gch");
+
+    std::error_code ec;
+    if (!rebuildPch && std::filesystem::exists(headerPath, ec) && std::filesystem::exists(gchPath, ec)) {
+        res.used = true;
+        res.cacheHit = true;
+        res.headerPath = headerPath.string();
+        return res;
+    }
+
+    const auto nowTicks = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::string uniqueSuffix = std::to_string(nowTicks);
+    const std::filesystem::path tmpHeaderPath = std::filesystem::path(headerPath.string() + ".tmp." + uniqueSuffix);
+    {
+        std::ofstream outHeader(tmpHeaderPath, std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!outHeader.is_open()) {
+            return res;
+        }
+        outHeader << buildBackendPchHeaderSource();
+        outHeader.close();
+    }
+
+    std::filesystem::rename(tmpHeaderPath, headerPath, ec);
+    if (ec) {
+        std::filesystem::remove(headerPath, ec);
+        ec.clear();
+        std::filesystem::rename(tmpHeaderPath, headerPath, ec);
+        if (ec) {
+            std::filesystem::remove(tmpHeaderPath, ec);
+            return res;
+        }
+    }
+
+    const std::filesystem::path tmpGchPath = std::filesystem::path(gchPath.string() + ".tmp." + uniqueSuffix);
+    const std::string q(1, '"');
+    const std::string pchCmd = std::string(compilerCmd) +
+        " -x c++-header -O" + resolvedOpt + " -std=c++17 -pthread" +
+        " -I" + q + std::string(cbRoot) + "/vendor" + q +
+        " -I" + q + std::string(cbRoot) + "/stdlib" + q +
+        " " + q + headerPath.string() + q +
+        " -o " + q + tmpGchPath.string() + q;
+
+    const auto tStart = std::chrono::steady_clock::now();
+    const int ret = std::system(pchCmd.c_str());
+    const auto tEnd = std::chrono::steady_clock::now();
+    res.buildMs = elapsedMillis(tStart, tEnd);
+
+    if (ret != 0 || !std::filesystem::exists(tmpGchPath, ec)) {
+        std::filesystem::remove(tmpGchPath, ec);
+        return res;
+    }
+
+    std::filesystem::rename(tmpGchPath, gchPath, ec);
+    if (ec) {
+        std::filesystem::remove(gchPath, ec);
+        ec.clear();
+        std::filesystem::rename(tmpGchPath, gchPath, ec);
+        if (ec) {
+            std::filesystem::remove(tmpGchPath, ec);
+            return res;
+        }
+    }
+
+    res.used = true;
+    res.cacheHit = false;
+    res.headerPath = headerPath.string();
+    return res;
+}
+
 inline std::string buildCompileCommand(
     std::string_view compilerCmd,
     std::string_view cbRoot,
@@ -240,15 +434,21 @@ inline std::string buildCompileCommand(
     std::string_view outCppPath,
     std::string_view binPath,
     const std::vector<std::string>& linkerFlags,
-    std::string_view optLevel = "0"
+    std::string_view optLevel = "0",
+    std::string_view pchHeaderPath = ""
 ) {
     std::string resolvedOpt = "0";
     if (!optLevel.empty()) {
         resolvedOpt = std::string(optLevel);
     }
     const std::string q(1, '"');
+    std::string pchFlags;
+    if (!pchHeaderPath.empty()) {
+        pchFlags = " -Winvalid-pch -include " + q + std::string(pchHeaderPath) + q;
+    }
     std::string cmd = std::string(compilerCmd) +
         " -O" + resolvedOpt + " -std=c++17 -pthread" +
+        pchFlags +
         " -I" + q + std::string(cbRoot) + "/vendor" + q +
         " -I" + q + std::string(cbRoot) + "/stdlib" + q +
         " -I" + q + std::string(inputParentDir) + q +
@@ -675,6 +875,18 @@ inline BuildFileResult buildFileWithOptions(
         binPath = resolveBinaryOutputPath(parentDir, options.binaryOutput, targetSpec);
         const std::string cbRoot = cleanbasicRootDir();
         const std::string compilerCmd = resolveCompilerCommand(targetSpec, options.compiler);
+        const PchPrepareResult pchRes = ensureBackendPch(
+            compilerCmd,
+            targetSpec,
+            optLevel,
+            cbRoot,
+            options.usePch,
+            options.rebuildPch
+        );
+        timings.pchBuildMs = pchRes.buildMs;
+        timings.pchUsed = pchRes.used;
+        timings.pchCacheHit = pchRes.cacheHit;
+
         compileCmd = buildCompileCommand(
             compilerCmd,
             cbRoot,
@@ -682,13 +894,36 @@ inline BuildFileResult buildFileWithOptions(
             outCpp,
             binPath,
             linkerFlags,
-            optLevel
+            optLevel,
+            pchRes.headerPath
         );
         const auto tCompileStart = std::chrono::steady_clock::now();
-        const int ret = std::system(compileCmd.c_str());
+        int ret = std::system(compileCmd.c_str());
         const auto tCompileEnd = std::chrono::steady_clock::now();
         timings.cppCompileMs = elapsedMillis(tCompileStart, tCompileEnd);
-        timings.totalMs = timings.transpileTotalMs + timings.cppCompileMs;
+
+        if (ret != 0 && pchRes.used) {
+            std::error_code ec;
+            std::filesystem::remove(pchRes.headerPath + ".gch", ec);
+            timings.pchUsed = false;
+            timings.pchCacheHit = false;
+            compileCmd = buildCompileCommand(
+                compilerCmd,
+                cbRoot,
+                parentDir,
+                outCpp,
+                binPath,
+                linkerFlags,
+                optLevel,
+                ""
+            );
+            const auto tRetryStart = std::chrono::steady_clock::now();
+            ret = std::system(compileCmd.c_str());
+            const auto tRetryEnd = std::chrono::steady_clock::now();
+            timings.cppCompileMs += elapsedMillis(tRetryStart, tRetryEnd);
+        }
+
+        timings.totalMs = timings.transpileTotalMs + timings.pchBuildMs + timings.cppCompileMs;
         if (ret != 0) {
             BuildFileResult res{};
             res.ok = false;
@@ -726,7 +961,9 @@ inline BuildFileResult buildFile(
     const std::string& target = "",
     const std::string& compiler = "",
     const std::string& optLevel = "0",
-    bool isRelease = false
+    bool isRelease = false,
+    bool usePch = true,
+    bool rebuildPch = false
 ) {
     BuildOptions opts{};
     opts.outputCppPath = outputPath;
@@ -736,6 +973,8 @@ inline BuildFileResult buildFile(
     opts.compiler = compiler;
     opts.optLevel = optLevel;
     opts.isRelease = isRelease;
+    opts.usePch = usePch;
+    opts.rebuildPch = rebuildPch;
     return buildFileWithOptions(inputPath, opts);
 }
 

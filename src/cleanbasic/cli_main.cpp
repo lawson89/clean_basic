@@ -25,6 +25,8 @@ struct CliArgs {
     std::string compiler;
     std::string optLevel = "0";
     bool isRelease = false;
+    bool usePch = true;
+    bool rebuildPch = false;
     bool showTimings = false;
     std::string errorMessage;
 };
@@ -49,6 +51,8 @@ inline void printUsage(std::string_view progName) {
               << "  -r, --release         Compile with full optimizations (-O3)" << std::endl
               << "  --debug               Compile in debug mode (-O0, default)" << std::endl
               << "  --opt, -O <0|1|2|3|s> Set C++ optimization level (default: 0)" << std::endl
+              << "  --no-pch              Disable precompiled headers during C++ compilation" << std::endl
+              << "  --rebuild-pch         Force regeneration of cached C++ precompiled header" << std::endl
               << "  --time                Display detailed transpiler and compiler timing breakdown" << std::endl
               << "  -h, --help            Show this help message" << std::endl;
 }
@@ -168,6 +172,13 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
             args.optLevel = std::string(level);
             args.isRelease = (level == "3");
             idx += 1;
+        } else if (arg == "--no-pch") {
+            args.usePch = false;
+            idx += 1;
+        } else if (arg == "--rebuild-pch") {
+            args.rebuildPch = true;
+            args.usePch = true;
+            idx += 1;
         } else if (arg == "--time" || arg == "--timing") {
             args.showTimings = true;
             idx += 1;
@@ -203,8 +214,18 @@ inline void printBuildTimings(const BuildTimings& t, bool compiledBinary) {
         << "    - C++ Emission:       " << t.emitMs << " ms" << std::endl
         << "    Total Transpilation: " << t.transpileTotalMs << " ms (" << transpilePct << "%)" << std::endl;
     if (compiledBinary) {
-        oss << "  Backend (C++ Compiler):" << std::endl
-            << "    - C++ Compile & Link: " << t.cppCompileMs << " ms (" << compilePct << "%)" << std::endl;
+        oss << "  Backend (C++ Compiler):" << std::endl;
+        if (t.pchUsed) {
+            if (t.pchCacheHit) {
+                oss << "    - Precompiled Header: 0.0 ms (cache hit)" << std::endl;
+            } else {
+                const double pchPct = (t.pchBuildMs / total) * 100.0;
+                oss << "    - Precompiled Header: " << t.pchBuildMs << " ms (" << pchPct << "%, built)" << std::endl;
+            }
+        } else {
+            oss << "    - Precompiled Header: disabled" << std::endl;
+        }
+        oss << "    - C++ Compile & Link: " << t.cppCompileMs << " ms (" << compilePct << "%)" << std::endl;
     }
     oss << "  Total Build Time:       " << t.totalMs << " ms";
     std::cout << oss.str() << std::endl;
@@ -229,16 +250,18 @@ inline int runCli(std::string_view progName, const std::vector<std::string_view>
         return runLspServer(std::cin, std::cout);
     }
 
-    const BuildFileResult res = buildFile(
-        args.inputFile,
-        args.outputFile,
-        args.compileBinary,
-        args.binaryOutput,
-        args.target,
-        args.compiler,
-        args.optLevel,
-        args.isRelease
-    );
+    BuildOptions buildOpts{};
+    buildOpts.outputCppPath = args.outputFile;
+    buildOpts.compileBinary = args.compileBinary;
+    buildOpts.binaryOutput = args.binaryOutput;
+    buildOpts.target = args.target;
+    buildOpts.compiler = args.compiler;
+    buildOpts.optLevel = args.optLevel;
+    buildOpts.isRelease = args.isRelease;
+    buildOpts.usePch = args.usePch;
+    buildOpts.rebuildPch = args.rebuildPch;
+
+    const BuildFileResult res = buildFileWithOptions(args.inputFile, buildOpts);
 
     if (!res.ok) {
         std::cerr << "Error: " << formatDiagnostic(res.error) << std::endl;

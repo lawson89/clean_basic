@@ -231,7 +231,7 @@ The `cleanbasic` command-line executable (`cli_main.cpp`) parses arguments into 
 
 ### Usage Synopsis
 ```bash
-cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [-r|--release] [--opt level] [--time]
+cleanbasic build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [-r|--release] [--opt level] [--no-pch] [--rebuild-pch] [--time]
 cleanbasic <file.cb> [-o output.cpp] [-c]
 cleanbasic lsp
 ```
@@ -249,7 +249,9 @@ cleanbasic lsp
 | `-r, --release` | Compiles the generated C++ with full optimizations (`-O3`). | Off (defaults to debug mode `-O0`). |
 | `--debug` | Explicitly compiles in debug mode (`-O0`). | On (`-O0`). |
 | `--opt, -O <0\|1\|2\|3\|s\|z>` | Sets the C++ optimization level explicitly. | `0` (`-O0`). |
-| `--time` | Prints a detailed stopwatch timing breakdown of transpilation and C++ compilation stages. | Off |
+| `--no-pch` | Disables precompiled headers during C++ backend compilation. | Off (PCH is enabled by default). |
+| `--rebuild-pch` | Forces regeneration of the cached C++ precompiled header before compiling. | Off |
+| `--time` | Prints a detailed stopwatch timing breakdown of transpilation, PCH, and C++ compilation stages. | Off |
 | `-h, --help` | Prints CLI usage instructions and exits with code `0`. | Off |
 
 ### Portable SDK Root Discovery & Compilation Command (`cb::buildFile`)

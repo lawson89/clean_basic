@@ -5,7 +5,9 @@
 
 namespace cb {
 
-constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#include <cstdint>
+constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#ifndef CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
+#define CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -465,6 +467,7 @@ inline std::vector<std::string>& cbRuntimeArgs() {
 
 template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };
 template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }
+#endif // CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 )";
 
 } // namespace cb

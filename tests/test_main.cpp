@@ -2456,6 +2456,18 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "3"
         );
         CHECK(releaseCmd.find("zig c++ -target x86_64-windows-gnu -O3 -std=c++17 -pthread") != std::string::npos);
+
+        const std::string pchCmd = cb::buildCompileCommand(
+            "g++",
+            "/opt/cleanbasic-sdk",
+            "projects/demo",
+            "projects/demo/build.cpp",
+            "projects/demo/app",
+            {},
+            "0",
+            "/opt/cleanbasic-sdk/build/pch/cb_pch.hpp"
+        );
+        CHECK(pchCmd.find(R"(-Winvalid-pch -include "/opt/cleanbasic-sdk/build/pch/cb_pch.hpp")") != std::string::npos);
     }
 
     SECTION("parseCliArgs parses --target, --bin, and --cc and buildFile compiles with custom options") {
@@ -2512,6 +2524,18 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         const cb::CliArgs timeArgs = cb::parseCliArgs({"main.cb", "-c", "--time"});
         CHECK(timeArgs.ok);
         CHECK(timeArgs.showTimings);
+        CHECK(timeArgs.usePch);
+        CHECK_FALSE(timeArgs.rebuildPch);
+
+        const cb::CliArgs noPchArgs = cb::parseCliArgs({"main.cb", "-c", "--no-pch"});
+        CHECK(noPchArgs.ok);
+        CHECK_FALSE(noPchArgs.usePch);
+        CHECK_FALSE(noPchArgs.rebuildPch);
+
+        const cb::CliArgs rebuildPchArgs = cb::parseCliArgs({"main.cb", "-c", "--rebuild-pch"});
+        CHECK(rebuildPchArgs.ok);
+        CHECK(rebuildPchArgs.usePch);
+        CHECK(rebuildPchArgs.rebuildPch);
 
         const cb::CliArgs badOptArgs = cb::parseCliArgs({"main.cb", "-c", "--opt", "9"});
         CHECK_FALSE(badOptArgs.ok);
@@ -2550,6 +2574,58 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         std::error_code ec;
         CHECK(std::filesystem::exists(outBin, ec));
 
+        // Verify PCH rebuild (--rebuild-pch) followed by PCH cache hit and --no-pch fallback
+        const cb::BuildFileResult rebuildRes = cb::buildFile(
+            "tests/cases/fibonacci.cb",
+            outCpp,
+            true,
+            outBin,
+            "native",
+            "g++",
+            "0",
+            false,
+            true,
+            true
+        );
+        REQUIRE(rebuildRes.ok);
+        CHECK(rebuildRes.timings.pchUsed);
+        CHECK_FALSE(rebuildRes.timings.pchCacheHit);
+        CHECK(rebuildRes.timings.pchBuildMs > 0.0);
+        CHECK(rebuildRes.compileCommand.find("-Winvalid-pch -include") != std::string::npos);
+
+        const cb::BuildFileResult cachedRes = cb::buildFile(
+            "tests/cases/fibonacci.cb",
+            outCpp,
+            true,
+            outBin,
+            "native",
+            "g++",
+            "0",
+            false,
+            true,
+            false
+        );
+        REQUIRE(cachedRes.ok);
+        CHECK(cachedRes.timings.pchUsed);
+        CHECK(cachedRes.timings.pchCacheHit);
+        CHECK(cachedRes.timings.pchBuildMs == 0.0);
+
+        const cb::BuildFileResult noPchRes = cb::buildFile(
+            "tests/cases/fibonacci.cb",
+            outCpp,
+            true,
+            outBin,
+            "native",
+            "g++",
+            "0",
+            false,
+            false,
+            false
+        );
+        REQUIRE(noPchRes.ok);
+        CHECK_FALSE(noPchRes.timings.pchUsed);
+        CHECK(noPchRes.compileCommand.find("-include") == std::string::npos);
+
         // Verify runCli with --release and --time outputs timing breakdown and compiles with -O3
         std::ostringstream capturedCout;
         std::streambuf* origCout = std::cout.rdbuf(capturedCout.rdbuf());
@@ -2562,6 +2638,7 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         const std::string cliOut = capturedCout.str();
         CHECK(cliOut.find("Build Timing Breakdown:") != std::string::npos);
         CHECK(cliOut.find("Total Transpilation:") != std::string::npos);
+        CHECK(cliOut.find("Precompiled Header:") != std::string::npos);
         CHECK(cliOut.find("C++ Compile & Link:") != std::string::npos);
         CHECK(cliOut.find("Total Build Time:") != std::string::npos);
     }
