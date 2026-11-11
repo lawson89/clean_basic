@@ -349,16 +349,7 @@ public:
         return emitExprList(posArgs, scope);
     }
     if (namedArgs.empty() && posArgs.empty()) {
-        bool anyDefault = false;
-        for (const auto& fdecl : it->second.fieldOrder) {
-            if (fdecl.hasDefault) {
-                anyDefault = true;
-                break;
-            }
-        }
-        if (!anyDefault) {
-            return {};
-        }
+        return {};
     }
 
     std::unordered_map<std::string, ExprId> namedMap;
@@ -376,12 +367,6 @@ public:
             const auto fit = namedMap.find(fdecl.name);
             if (fit != namedMap.end()) {
                 ordered.push_back(emitExpr(fit->second, scope));
-            } else if (fdecl.hasDefault && fdecl.defaultValue != INVALID_ID) {
-                const std::string savedMod = currentModuleId;
-                currentModuleId = it->second.moduleId;
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                ordered.push_back(emitExpr(fdecl.defaultValue, emptyScope));
-                currentModuleId = savedMod;
             } else {
                 ordered.push_back(defaultValueForType(it->second.moduleId, fdecl.typeId));
             }
@@ -730,18 +715,6 @@ public:
         const auto& calleeNode = arena.exprs[call.callee];
         const std::string lineStr = std::to_string(calleeNode.line);
         const std::string q(1, '"');
-        if (call.args.size() == 1) {
-            if (const auto* bop = arena.getExpr<BinaryOp>(call.args[0])) {
-                if (bop->op == "==" || bop->op == "!=" || bop->op == "<" || bop->op == ">" || bop->op == "<=" || bop->op == ">=") {
-                    const std::string leftCpp = emitExpr(bop->left, scope);
-                    const std::string rightCpp = emitExpr(bop->right, scope);
-                    const std::string opLabel = "left " + bop->op + " right";
-                    return "[&]() -> CbError { const auto _lhs = " + leftCpp + "; const auto _rhs = " + rightCpp +
-                        "; return cbAssertCmp((_lhs " + bop->op + " _rhs), " + q + opLabel + q + ", _lhs, _rhs, " +
-                        escapeFileName(currentFileName) + ", " + lineStr + "); }()";
-                }
-            }
-        }
         const std::string condCpp = emitExpr(call.args[0], scope);
         std::string msgCpp = "std::string(" + q + "Assertion failed" + q + ")";
         if (call.args.size() > 1) {
@@ -1147,10 +1120,7 @@ public:
         }
 
         if (forS->iterable != INVALID_ID) {
-            std::string iterCpp = emitExpr(forS->iterable, scope);
-            if (forS->implicitBubble || forS->breaksToCatch) {
-                iterCpp = emitFallibleCallUnpack(stmtNode.line, fn, iterCpp, true, forS->breaksToCatch);
-            }
+            const std::string iterCpp = emitExpr(forS->iterable, scope);
             const TypeId iterTid = exprType(forS->iterable, scope);
             const TypeNode iterType = resolveAliasNode(arena, symbols, currentModuleId, iterTid);
 
@@ -1183,23 +1153,12 @@ public:
     if (const auto* whileS = arena.getStmt<WhileStmt>(stmtId)) {
         auto whileScope = scope;
         auto whileDecls = declaredVars;
-        if (whileS->implicitBubble || whileS->breaksToCatch) {
-            emitLine("while (true) {");
-            indentLevel += 1;
-            const std::string callCpp = emitExpr(whileS->condition, whileScope);
-            const std::string valTmp = emitFallibleCallUnpack(stmtNode.line, fn, callCpp, true, whileS->breaksToCatch);
-            emitLine("if (!" + valTmp + ") { break; }");
-            emitStmtList(fn, whileS->body, whileScope, whileDecls);
-            indentLevel -= 1;
-            emitLine("}");
-        } else {
-            const std::string condCpp = emitExpr(whileS->condition, scope);
-            emitLine("while (" + condCpp + ") {");
-            indentLevel += 1;
-            emitStmtList(fn, whileS->body, whileScope, whileDecls);
-            indentLevel -= 1;
-            emitLine("}");
-        }
+        const std::string condCpp = emitExpr(whileS->condition, scope);
+        emitLine("while (" + condCpp + ") {");
+        indentLevel += 1;
+        emitStmtList(fn, whileS->body, whileScope, whileDecls);
+        indentLevel -= 1;
+        emitLine("}");
         emitCatchBreakIfPending();
         return;
     }
@@ -1453,12 +1412,7 @@ public:
         indentLevel += 1;
         for (const auto& f : td.fields) {
             const std::string fldCppName = sanitizeCppIdent(f.name);
-            if (f.hasDefault && f.defaultValue != INVALID_ID) {
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                emitLine(mapType(currentModuleId, f.typeId) + " " + fldCppName + " = " + emitExpr(f.defaultValue, emptyScope) + ";");
-            } else {
-                emitLine(mapType(currentModuleId, f.typeId) + " " + fldCppName + "{};");
-            }
+            emitLine(mapType(currentModuleId, f.typeId) + " " + fldCppName + "{};");
         }
         indentLevel -= 1;
         emitLine("};");
@@ -1615,8 +1569,7 @@ public:
     std::vector<std::pair<std::string, UnionDecl>> unionDecls;
     std::vector<std::pair<std::string, DeclId>> orderedCompositeDecls;
     std::vector<std::pair<std::string, AliasDecl>> aliasDecls;
-    std::vector<std::pair<std::string, ConstDecl>> earlyConstDecls;
-    std::vector<std::pair<std::string, ConstDecl>> structConstDecls;
+    std::vector<std::pair<std::string, ConstDecl>> constDecls;
     struct EmittedFnEntry {
         std::string moduleId;
         std::string fileName;
@@ -1642,19 +1595,7 @@ public:
         } else if (const auto* ad = arena.getDecl<AliasDecl>(did)) {
             aliasDecls.push_back({declNode.moduleId, *ad});
         } else if (const auto* cd = arena.getDecl<ConstDecl>(did)) {
-            const std::string cKey = symbolKey(declNode.moduleId, cd->name);
-            bool isStructConst = false;
-            if (symbols.constants.count(cKey) > 0) {
-                const TypeNode tnode = resolveAliasNode(arena, symbols, declNode.moduleId, symbols.constants.at(cKey).typeId);
-                if ((symbols.types.count(tnode.name) > 0 && tnode.name != "err") || symbols.unions.count(tnode.name) > 0) {
-                    isStructConst = true;
-                }
-            }
-            if (isStructConst) {
-                structConstDecls.push_back({declNode.moduleId, *cd});
-            } else {
-                earlyConstDecls.push_back({declNode.moduleId, *cd});
-            }
+            constDecls.push_back({declNode.moduleId, *cd});
         } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
             if (!fd->isExtern) {
                 const std::string fnKey = symbolKey(declNode.moduleId, fd->name);
@@ -1692,14 +1633,6 @@ public:
         for (const auto& pair : aliasDecls) {
             currentModuleId = pair.first;
             emitLine("using " + lookupSymbolCppName(symbols.aliases, currentModuleId, pair.second.name) + " = " + mapType(currentModuleId, pair.second.targetType) + ";");
-        }
-    }
-
-    if (!earlyConstDecls.empty()) {
-        emitLine();
-        for (const auto& pair : earlyConstDecls) {
-            currentModuleId = pair.first;
-            emitConstDecl(pair.second);
         }
     }
 
@@ -1756,9 +1689,9 @@ public:
         }
     }
 
-    if (!structConstDecls.empty()) {
+    if (!constDecls.empty()) {
         emitLine();
-        for (const auto& pair : structConstDecls) {
+        for (const auto& pair : constDecls) {
             currentModuleId = pair.first;
             emitConstDecl(pair.second);
         }

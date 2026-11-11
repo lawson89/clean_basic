@@ -334,10 +334,6 @@ public:
             } else {
                 const auto structOpt = resolveStructConstructor(arena, *call, symbols, moduleId, scope);
                 if (structOpt.has_value()) {
-                    const std::string structDefaultEdgeKey = "__type__" + symbolKey(structOpt->moduleId, structOpt->name);
-                    if (!currentFnKey.empty()) {
-                        symbols.callGraphEdges[currentFnKey].insert(structDefaultEdgeKey);
-                    }
                     if (!structOpt->moduleId.empty() && structOpt->moduleId != moduleId) {
                         symbols.referencedModules.insert(structOpt->moduleId);
                     }
@@ -652,24 +648,6 @@ public:
             currentFnKey = "__top__" + declNode.moduleId;
             validateExprCalls(dummyFn, cdecl->value, emptyScope, false);
             currentFnKey.clear();
-        } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
-            FnDecl dummyFn{};
-            dummyFn.name = tdecl->name;
-            dummyFn.isFallible = false;
-            const std::string typeDefaultKey = "__type__" + symbolKey(declNode.moduleId, tdecl->name);
-            currentFnKey = typeDefaultKey;
-            for (const auto& fld : tdecl->fields) {
-                if (fld.hasDefault && fld.defaultValue != INVALID_ID) {
-                    validateDefaultValueExpr(dummyFn, fld.line, fld.col, fld.name, fld.typeId, fld.defaultValue, emptyScope);
-                }
-            }
-            currentFnKey.clear();
-            const auto edgeIt = symbols.callGraphEdges.find(typeDefaultKey);
-            if (edgeIt != symbols.callGraphEdges.end()) {
-                for (const auto& callee : edgeIt->second) {
-                    symbols.callGraphEdges["__top__" + declNode.moduleId].insert(callee);
-                }
-            }
         } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
             FnDecl dummyFn{};
             dummyFn.name = fdecl->name;
@@ -809,8 +787,7 @@ public:
                     bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
                 }
             } else if (forStmt->iterable != INVALID_ID) {
-                checkFallibleUsage(fn, forStmt->iterable, scope, forStmt->implicitBubble, forStmt->breaksToCatch);
-                validateExprCalls(fn, forStmt->iterable, scope, true);
+                validateExprCalls(fn, forStmt->iterable, scope, false);
                 std::string loopErr;
                 const auto bindings = resolveForInLoopVars(arena, symbols, moduleId, *forStmt, scope, &loopErr);
                 if (!loopErr.empty()) {
@@ -825,21 +802,9 @@ public:
             return;
         }
 
-        if (auto* whileStmt = arena.getStmtMut<WhileStmt>(stmtId)) {
+        if (const auto* whileStmt = arena.getStmt<WhileStmt>(stmtId)) {
             loopDepth += 1;
-            bool isFallibleCond = false;
-            if (const auto* call = arena.getExpr<FuncCall>(whileStmt->condition)) {
-                const auto fnOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
-                if (fnOpt.has_value() && fnOpt->isFallible) {
-                    isFallibleCond = true;
-                }
-            }
-            if (isFallibleCond) {
-                checkFallibleUsage(fn, whileStmt->condition, scope, whileStmt->implicitBubble, whileStmt->breaksToCatch);
-                validateExprCalls(fn, whileStmt->condition, scope, true);
-            } else {
-                validateExprCalls(fn, whileStmt->condition, scope, false);
-            }
+            validateExprCalls(fn, whileStmt->condition, scope, false);
             analyzeBlock(fn, whileStmt->body, scope);
             loopDepth -= 1;
             return;

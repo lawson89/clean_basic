@@ -3294,22 +3294,47 @@ end fn
         CHECK(resComp.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 
-    SECTION("Rejects unhandled fallible iterable in for-in loops and fallible calls on RHS of compound assignments") {
-        const std::string unhandledFor = R"CB(
+    SECTION("Rejects fallible calls inside for-in iterables, while conditions, struct field defaults, and RHS of compound assignments") {
+        const std::string fallibleFor = R"CB(
 fn loadItems() as list[str] can error
     return ["a"]
 end fn
 
-fn badCaller()
+fn badCaller() can error
     for item in loadItems()
         print(item)
     end for
 end fn
 )CB";
-        const auto badForRes = cb::transpileSource(unhandledFor, "unhandledFor.cb");
+        const auto badForRes = cb::transpileSource(fallibleFor, "fallibleFor.cb");
         CHECK_FALSE(badForRes.ok);
         CHECK(badForRes.error.kind == "AnalyzerError");
-        CHECK(badForRes.error.message.find("Unhandled error") != std::string::npos);
+        CHECK(badForRes.error.message.find("Fallible call to 'loadItems' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+
+        const std::string fallibleWhile = R"CB(
+fn nextStep() as bool can error
+    return false
+end fn
+
+fn badCaller() can error
+    while nextStep()
+        print("step")
+    end while
+end fn
+)CB";
+        const auto badWhileRes = cb::transpileSource(fallibleWhile, "fallibleWhile.cb");
+        CHECK_FALSE(badWhileRes.ok);
+        CHECK(badWhileRes.error.kind == "AnalyzerError");
+        CHECK(badWhileRes.error.message.find("Fallible call to 'nextStep' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
+
+        const std::string structFieldDefault = R"CB(
+type BadConfig
+    port as int = 8080
+end type
+)CB";
+        const auto badStructRes = cb::transpileSource(structFieldDefault, "badStruct.cb");
+        CHECK_FALSE(badStructRes.ok);
+        CHECK(badStructRes.error.kind == "ParseError");
 
         const std::string compoundFallible = R"CB(
 fn stepOne() as int can error
@@ -4093,7 +4118,7 @@ TEST_CASE("Private struct fields, recursive value type cycle detection, topologi
         std::unordered_map<std::string, std::string> memFiles;
         memFiles["vault.cb"] = R"CB(
 public type Account
-    private secretPin as int = 1234
+    private secretPin as int
     owner as str
 end type
 
@@ -4271,7 +4296,7 @@ type Engine
 end type
 
 type CylinderSpec
-    count as int = 8
+    count as int
 end type
 
 fn main() as int
@@ -4327,10 +4352,10 @@ end fn
     SECTION("Sanitizes non-extern struct field names that collide with C++ keywords or macros") {
         const std::string structKwSrc = R"CB(
 type Config
-    default as int = 42
-    class as str = "worker"
-    template as int = 7
-    delete as bool = false
+    default as int
+    class as str
+    template as int
+    delete as bool
 end type
 
 fn main() as int
@@ -4344,10 +4369,10 @@ end fn
 )CB";
         const auto tp = cb::transpileSource(structKwSrc, "struct_kw.cb");
         REQUIRE(tp.ok);
-        CHECK(tp.cppCode.find("int64_t default_ = 42;") != std::string::npos);
-        CHECK(tp.cppCode.find(R"(std::string class_ = std::string("worker");)") != std::string::npos);
-        CHECK(tp.cppCode.find("int64_t template_ = 7;") != std::string::npos);
-        CHECK(tp.cppCode.find("bool delete_ = false;") != std::string::npos);
+        CHECK(tp.cppCode.find("int64_t default_{};") != std::string::npos);
+        CHECK(tp.cppCode.find("std::string class_{};") != std::string::npos);
+        CHECK(tp.cppCode.find("int64_t template_{};") != std::string::npos);
+        CHECK(tp.cppCode.find("bool delete_{};") != std::string::npos);
         CHECK(tp.cppCode.find("c.default_") != std::string::npos);
         CHECK(tp.cppCode.find("c.template_") != std::string::npos);
     }

@@ -57,7 +57,7 @@ end type
 type VarSym
     name as str
     val as int
-    isConst as bool = false
+    isConst as bool
 end type
 
 type MiniArena

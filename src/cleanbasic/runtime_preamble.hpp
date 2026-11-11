@@ -86,19 +86,6 @@ inline CbError cbAssertCond(bool ok, const std::string& msg, const char* file, i
     return CbError{msg, 1, std::string(file), line};
 }
 
-template <typename L, typename R>
-inline CbError cbAssertCmp(bool ok, const char* opText, const L& lhs, const R& rhs, const char* file, int64_t line) {
-    if (ok) {
-        return CbError{"", 0};
-    }
-    return CbError{
-        std::string("Assertion failed (") + opText + "): got " + cbToStr(lhs) + ", expected " + cbToStr(rhs),
-        1,
-        std::string(file),
-        line
-    };
-}
-
 inline size_t cbStrUtf8SeqLen(const std::string& s, size_t idx) {
     if (idx >= s.size()) {
         return 0;

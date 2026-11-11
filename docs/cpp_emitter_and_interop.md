@@ -20,14 +20,13 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
    Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`, `<variant>`, `<algorithm>`, `<type_traits>`) plus `CbError`, `cbToStr`, `cbHasError`, `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`.
 3. **External C/C++ Headers** (from `import header "..."`):
    Deduplicated `#include "<header>"` directives for reachable modules.
-4. **Enums, Struct & Union Forward Declarations, Type Aliases & Early Module Constants**:
+4. **Enums, Struct & Union Forward Declarations & Type Aliases**:
    * `enum class <cppName> : int64_t;` forward declarations, `enum class <cppName> : int64_t { ... };` definitions, and `cbToStr` stringifier helpers for every `EnumDecl`.
    * `struct <cppName>;` forward declarations for every non-`extern` `TypeDecl` and `UnionDecl`.
    * `using <cppName> = <mappedTargetType>;` for every `AliasDecl`.
-   * Early module constants (`ConstDecl` of primitive/enum/container types) so struct default field initializers can reference them.
-5. **Topological POD Struct & Tagged Union Definitions + Struct Constants**:
+5. **Topological POD Struct & Tagged Union Definitions + Module Constants**:
    * Full `struct <cppName> { <Type> <field>{}; ... };` and tagged union `std::variant` wrapper definitions ordered topologically by value-type dependencies.
-   * Struct/union-typed module constants (`ConstDecl`) once all composite types are complete.
+   * Module constants (`ConstDecl`) once all composite types are complete.
 6. **Function Forward Declarations (with Call-Graph Tree-Shaking)**:
    * `computeReachableFunctions()` traverses the call-graph edges (`symbols.rootReferencedFunctions` and `symbols.callGraphEdges`) recorded during `Analyzer` Pass 2 to prune unreferenced functions and headers from non-explicitly-imported prelude modules (such as `std/str`).
    * Forward declarations `<retType> <cppFnName>(<params...>);` are emitted for all reachable non-`extern` functions across modules.
@@ -49,7 +48,7 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
 
 ## 2. Emitted C++17 Runtime Preamble (`CPP_RUNTIME_PREAMBLE`)
 
-Every generated `build.cpp` begins with a lightweight, self-contained C++17 runtime preamble (`src/cleanbasic/runtime_preamble.hpp`), providing `CbError`, `cbToStr`, `cbHasError`, `cbStampError`, `cbAssertCond` / `cbAssertCmp`, RFC 3629 UTF-8 string helpers (`cbStrUtf8SeqLen`, `cbStrUtf8Step`, `cbStrUtf8Chars`), bounds-safe container helpers (`cbListGet`, `cbDictAt`, `cbDictGet`, `cbDictKeys`), `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`:
+Every generated `build.cpp` begins with a lightweight, self-contained C++17 runtime preamble (`src/cleanbasic/runtime_preamble.hpp`), providing `CbError`, `cbToStr`, `cbHasError`, `cbStampError`, `cbAssertCond`, RFC 3629 UTF-8 string helpers (`cbStrUtf8SeqLen`, `cbStrUtf8Step`, `cbStrUtf8Chars`), bounds-safe container helpers (`cbListGet`, `cbDictAt`, `cbDictGet`, `cbDictKeys`), `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`:
 
 ```cpp
 #include <cstdint>

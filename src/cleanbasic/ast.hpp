@@ -59,8 +59,6 @@ struct FieldDecl {
     std::string name;
     TypeId typeId = INVALID_ID;
     bool isPrivate = false;
-    bool hasDefault = false;
-    ExprId defaultValue = INVALID_ID;
 };
 
 // ==========================================
@@ -221,8 +219,6 @@ struct ForStmt {
     RangeSpec rangeSpec;
     ExprId iterable = INVALID_ID;
     std::vector<StmtId> body;
-    bool implicitBubble = false;
-    bool breaksToCatch = false;
 };
 
 struct SelectCase {
@@ -247,8 +243,6 @@ struct DeferStmt {
 struct WhileStmt {
     ExprId condition = INVALID_ID;
     std::vector<StmtId> body;
-    bool implicitBubble = false;
-    bool breaksToCatch = false;
 };
 
 struct ReturnStmt {

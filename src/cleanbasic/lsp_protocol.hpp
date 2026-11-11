@@ -387,7 +387,7 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     static constexpr BuiltinHoverEntry entries[] = {
         {"print", "fn print(values...)", "Writes one or more values to standard output followed by a newline."},
         {"error", "fn error(msg as str, [code=1]) as err", "Raises and returns a structured err value from a can error function."},
-        {"assert", "fn assert(cond as bool, [msg as str]) can error", "Asserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false."},
+        {"assert", "fn assert(cond as bool, [msg as str]) can error", "Asserts that cond is true; raises an err (with .file and .line) if cond is false."},
         {"len", "fn .len() as int", "Returns the number of elements in a list, dict, or str."},
         {"toStr", "fn .toStr() as str", "Returns a string representation of the value."},
         {"toInt", "fn .toInt() as int", "Converts a numeric, boolean, or enum value to an int."},

@@ -147,7 +147,7 @@ At the top level of a `.cb` file, seven declaration families are supported:
 2. **Type Aliases (`AliasDecl`)**:
    * `[public] alias Name = Type` (Applying `extern` to an `alias` is rejected with a `ParseError`).
 3. **Struct / Extern Types (`TypeDecl`)**:
-   * `[public] [extern] type Name ... end type` for struct definitions with `[private] field as Type [= defaultExpr]` declarations.
+   * `[public] [extern] type Name ... end type` for struct definitions with `[private] field as Type` declarations.
    * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `enum`, `union`, `const`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
 4. **Enums (`EnumDecl`)**:
    * `[public] enum Name ... end enum` for 64-bit integer-backed enumeration types.

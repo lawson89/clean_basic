@@ -4,9 +4,9 @@
 ' EXPECT_CPP: x = (x / 6);
 ' EXPECT_CPP: x = (x % 5);
 ' EXPECT_CPP: msg = (msg + cbToStr(x));
-' EXPECT_CPP: std::string host = defaultHost;
-' EXPECT_CPP: int64_t port = 8080;
-' EXPECT_CPP: ServerConfig{defaultHost, 9090, false}
+' EXPECT_CPP: std::string host{};
+' EXPECT_CPP: int64_t port{};
+' EXPECT_CPP: ServerConfig{std::string(), 9090, false}
 ' EXPECT_CPP: connectEndpoint(std::string("localhost"), 8080, 5000)
 ' EXPECT_CPP: connectEndpoint(std::string("10.0.0.1"), 8080, 1500)
 ' EXPECT_CPP: void* h = nullptr;
@@ -23,7 +23,7 @@
 ' EXPECT_CPP: [[nodiscard]] CbError testZeroImportStdStrPrelude()
 ' EXPECT_CPP: int64_t sumReadOnly(const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& d)
 ' EXPECT_OUT: compound: count=3
-' EXPECT_OUT: defaults: 127.0.0.1 | 9090 | localhost:8080 (t=5000) | 10.0.0.1:8080 (t=1500)
+' EXPECT_OUT: defaults:  | 9090 | localhost:8080 (t=5000) | 10.0.0.1:8080 (t=1500)
 ' EXPECT_OUT: cptrNull: true
 ' EXPECT_OUT: safeContainers: sum=160, zeroCopyTotal=12
 ' EXPECT_OUT: zeroImportPrelude: alpha-beta:42
@@ -32,9 +32,9 @@
 const defaultHost = "127.0.0.1"
 
 type ServerConfig
-    host as str = defaultHost
-    port as int = 8080
-    tls as bool = false
+    host as str
+    port as int
+    tls as bool
 end type
 
 type Item

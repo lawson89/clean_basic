@@ -72,7 +72,11 @@ fn testStreamingFile(baseDir as str) can error
     dim count = 0
     dim summary = ""
     dim line = ""
-    while reader.readLine(line)
+    while true
+        dim hasLine = reader.readLine(line)
+        if not hasLine
+            break
+        end if
         count = count + 1
         summary = summary & " [" & line & "]"
     end while
@@ -95,7 +99,8 @@ fn testWalkFiles(baseDir as str) can error
     dim visibleCount = 0
     dim totalVisibleBytes = 0
     dim firstVisible = ""
-    for path in fs.walkFiles(baseDir)
+    dim walkedPaths = fs.walkFiles(baseDir)
+    for path in walkedPaths
         if visibleCount == 0
             firstVisible = path
         end if

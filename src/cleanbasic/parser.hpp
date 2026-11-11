@@ -996,14 +996,6 @@ public:
             fd.name = fieldTok.value;
             fd.typeId = fieldType;
             fd.isPrivate = isPrivateField;
-            if (check("ASSIGN")) {
-                if (isExtern) {
-                    setParseError(current(), "Default field values are not allowed on 'extern type' declarations");
-                }
-                match("ASSIGN");
-                fd.hasDefault = true;
-                fd.defaultValue = parseExpr();
-            }
             fields.push_back(std::move(fd));
             expectNewlineOrEof();
         }

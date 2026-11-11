@@ -199,7 +199,8 @@ fn collectCbFiles(targetPath as str) as list[str] can error
     end if
 
     dim outFiles as list[str] = []
-    for path in fs.walkFiles(targetPath)
+    dim walkedPaths = fs.walkFiles(targetPath)
+    for path in walkedPaths
         if fs.ext(path) == ".cb"
             outFiles.push(path)
         end if

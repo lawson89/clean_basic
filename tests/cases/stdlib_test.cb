@@ -1,5 +1,5 @@
 ' EXPECT_CPP: cbStampError
-' EXPECT_CPP: cbAssertCmp
+' EXPECT_CPP: cbAssertCond
 ' EXPECT_CPP: std::function<
 ' EXPECT_OUT: Running suite: Standard Library Tests
 ' EXPECT_OUT:   [PASS] assert & fn types
@@ -47,7 +47,7 @@ fn testAssertFail() can error
     try
         assert(1 == 2)
     catch e
-        assert(e.msg.contains("Assertion failed (left == right): got 1, expected 2"))
+        assert(e.msg == "Assertion failed")
         assert(e.file.contains("stdlib_test.cb"))
         assert(e.line > 0)
         return

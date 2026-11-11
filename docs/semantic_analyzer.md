@@ -82,7 +82,7 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 ### 2.2 Built-in Functions (`isBuiltinSymbolName`)
 * **`print(...)`**: Variadic standard output function (infallible, lowered to `(std::cout << ... << std::endl)` in the emitter).
 * **`error(msg..., [code=N])`**: Special built-in intrinsic validated by `isErrorBuiltinCall()`. Raises and returns a `CbError{msg, code, file, line}` value from a `can error` function (default `code = 1`).
-* **`assert(cond, [msg])`**: Fallible built-in intrinsic validated by `isAssertBuiltinCall()`. Evaluates `cond as bool` and raises a `CbError` with `.file`, `.line`, and automatic runtime comparison values when `cond` is a comparison operator.
+* **`assert(cond, [msg])`**: Fallible built-in intrinsic validated by `isAssertBuiltinCall()`. Evaluates `cond as bool` and raises a `CbError` with `.file` and `.line` when `cond` is `false`.
 
 ### 2.3 Built-in Receiver Methods
 
@@ -315,7 +315,7 @@ When function `caller` invokes a fallible function `callee` (`callee.isFallible 
   Compilation fails immediately with an `AnalyzerError`:
   `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '<caller>' calls fallible function '<callee>').`
 * **Top-Level Statement Rule for Fallible Calls:**
-  Every fallible function call (such as `str.toInt()` or `fs.read()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if` conditions) is rejected with:
+  Every fallible function call (such as `str.toInt()` or `fs.read()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, or a standalone expression statement (`fallible()`). Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if` / `while` / `for ... in` headers) is rejected with:
   `AnalyzerError: Fallible call to '<name>' must be assigned to a variable, returned directly, or called as a standalone statement.`
 
 ### 7.3 `try / catch` Block Scoping (`TryCatchStmt`)

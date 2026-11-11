@@ -41,7 +41,7 @@ UnionVariant    ::= Identifier "as" Type NEWLINE
 
 TypeDecl        ::= ("public" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
                   | ["public"] "extern" "type" Identifier NEWLINE
-FieldDecl       ::= ["private"] Identifier "as" Type ["=" Expr] NEWLINE
+FieldDecl       ::= ["private"] Identifier "as" Type NEWLINE
 
 FnDecl          ::= ("public" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
                     Statement*

@@ -27,7 +27,11 @@ fn search(path as str, args as cli.Args) as int can error
     dim lineNum = 0
     dim matchCount = 0
     dim line = ""
-    while f.readLine(line)
+    while true
+        dim hasLine = f.readLine(line)
+        if not hasLine
+            break
+        end if
         lineNum += 1
         dim matched = false
         if ignoreCase
@@ -84,7 +88,8 @@ fn main() as int
         for target in targets
             try
                 if fs.isDir(target)
-                    for path in fs.walkFiles(target)
+                    dim paths = fs.walkFiles(target)
+                    for path in paths
                         try
                             dim matches = search(path, args)
                             totalMatches += matches

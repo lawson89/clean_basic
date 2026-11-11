@@ -7,31 +7,31 @@ import "std/str"
 '' Specification for a boolean command-line flag (e.g., --verbose / -v).
 public type FlagSpec
     name as str
-    shortName as str = ""
-    help as str = ""
+    shortName as str
+    help as str
 end type
 
 '' Specification for a key-value command-line option (e.g., --output <val> / -o <val>).
 public type OptionSpec
     name as str
-    shortName as str = ""
-    help as str = ""
-    defaultVal as str = ""
-    required as bool = false
+    shortName as str
+    help as str
+    defaultVal as str
+    required as bool
 end type
 
 '' Specification for a positional command-line argument (e.g., <pattern>).
 public type ArgSpec
     name as str
-    help as str = ""
-    required as bool = true
+    help as str
+    required as bool
 end type
 
 '' Declarative command-line parser definition holding flags, options, and positional argument specs.
 public type Parser
     name as str
-    version as str = ""
-    description as str = ""
+    version as str
+    description as str
     flags as list[FlagSpec]
     options as list[OptionSpec]
     args as list[ArgSpec]
@@ -43,8 +43,8 @@ public type Args
     options as dict[str, str]
     positional as dict[str, str]
     rest as list[str]
-    helpRequested as bool = false
-    versionRequested as bool = false
+    helpRequested as bool
+    versionRequested as bool
 end type
 
 '' Creates a new declarative command-line Parser with the given program name, optional version, and optional description.
