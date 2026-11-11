@@ -29,7 +29,7 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
    * Full `struct <cppName> { <Type> <field>{}; ... };` and tagged union `std::variant` wrapper definitions ordered topologically by value-type dependencies.
    * Struct/union-typed module constants (`ConstDecl`) once all composite types are complete.
 6. **Function Forward Declarations (with Call-Graph Tree-Shaking)**:
-   * `computeReachableFunctions(program)` performs a call-graph traversal from the root module's declarations to prune unreferenced functions and headers from non-explicitly-imported prelude modules (such as `std/str`).
+   * `computeReachableFunctions()` traverses the call-graph edges (`symbols.rootReferencedFunctions` and `symbols.callGraphEdges`) recorded during `Analyzer` Pass 2 to prune unreferenced functions and headers from non-explicitly-imported prelude modules (such as `std/str`).
    * Forward declarations `<retType> <cppFnName>(<params...>);` are emitted for all reachable non-`extern` functions across modules.
 7. **Function Definitions & Entry Point Wrapper**:
    * Full function bodies for all reachable non-`extern` functions across modules.
@@ -227,7 +227,7 @@ void startServer() {
 * **Integral, Boolean & Enum Targets (`int`, `bool`, `enum`):** Emitted as a native C++ `switch` statement. Multi-value clauses (`case 1, 2:`) emit stacked case labels (`case 1:
 case 2: {`) sharing a scoped compound block with an implicit `break;`.
 * **String Targets (`str`):** Emitted inside a scoped compound block by evaluating `target` once into a temporary variable (`const auto _sel_1 = <target>;`) followed by an `if (_sel_1 == <m1> || _sel_1 == <m2>) { ... } else if (...) { ... } else { ... }` equality chain.
-* **Tagged Union Targets (`union`):** Evaluates `target` once into `const auto _sel_1 = <target>;` and switches on `static_cast<int64_t>(_sel_1._data.index())`, binding `auto <binding> = std::get<Idx>(_sel_1._data);` when `case <variant> as <binding>` is used.
+* **Tagged Union Targets (`union`):** Binds `target` by `const` reference (`const auto& _sel_1 = <target>;`) and switches on `static_cast<int64_t>(_sel_1._data.index())`, binding `const auto& <binding> = std::get<Idx>(_sel_1._data);` when `<binding>` is not mutated in the case body (or `auto <binding> = std::get<Idx>(_sel_1._data);` when mutated).
 
 **CleanBasic Source:**
 ```vb

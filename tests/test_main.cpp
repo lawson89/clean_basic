@@ -4558,4 +4558,52 @@ end fn
         REQUIRE(fromHexSig->paramLabels.size() == 1);
         CHECK(fromHexSig->paramLabels[0] == "hex as str");
     }
+
+    SECTION("Zero-copy const auto& union select case binding, pre-cached built-in receiver methods, and Analyzer call-graph edges") {
+        const std::string unionSelectSrc = R"CB(
+type Payload
+    count as int
+end type
+
+union Event
+    readOnly as Payload
+    mutated as Payload
+end union
+
+fn bump(byref p as Payload)
+    p.count += 1
+end fn
+
+fn inspectEvent(ev as Event) as int
+    select case ev
+        case Event.readOnly as ro
+            return ro.count
+        case Event.mutated as m
+            bump(m)
+            return m.count
+    end select
+    return 0
+end fn
+
+fn main() as int
+    dim e1 = Event.readOnly(Payload(count=10))
+    dim e2 = Event.mutated(Payload(count=20))
+    return inspectEvent(e1) + inspectEvent(e2)
+end fn
+)CB";
+        const auto checkRes = cb::checkSource(unionSelectSrc, "union_zero_copy.cb");
+        REQUIRE(checkRes.ok);
+        CHECK(checkRes.symbols.builtinReceiverCache.count("int") == 1);
+        CHECK(checkRes.symbols.builtinReceiverCache.count("str") == 1);
+        CHECK(checkRes.symbols.builtinReceiverCache.count("bytes") == 1);
+        CHECK(checkRes.symbols.rootReferencedFunctions.count("main") == 1);
+        CHECK(checkRes.symbols.callGraphEdges.at("main").count("inspectEvent") == 1);
+        CHECK(checkRes.symbols.callGraphEdges.at("inspectEvent").count("bump") == 1);
+
+        const auto tpRes = cb::transpileSource(unionSelectSrc, "union_zero_copy.cb");
+        REQUIRE(tpRes.ok);
+        CHECK(tpRes.cppCode.find("const auto& _sel_1 = ev;") != std::string::npos);
+        CHECK(tpRes.cppCode.find("const auto& ro = std::get<0>(_sel_1._data);") != std::string::npos);
+        CHECK(tpRes.cppCode.find("auto m = std::get<1>(_sel_1._data);") != std::string::npos);
+    }
 }

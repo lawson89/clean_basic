@@ -856,6 +856,23 @@ public:
         }
     }
 
+    std::string emitFallibleCallUnpack(
+        uint32_t line,
+        const FnDecl& fn,
+        const std::string& callCpp,
+        bool hasReturnValue,
+        bool breaksToCatch
+    ) {
+        const auto [valTmp, errVar] = nextValErrTemps();
+        if (hasReturnValue) {
+            emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
+        } else {
+            emitLine("auto " + errVar + " = " + callCpp + ";");
+        }
+        emitErrorCheck(line, fn, errVar, breaksToCatch);
+        return valTmp;
+    }
+
     void emitFallibleAssignment(uint32_t line, 
         const FnDecl& fn,
         const VarAssignment& stmt,
@@ -868,16 +885,8 @@ public:
             callExprId = stmt.compoundRhs;
         }
         const std::string callCpp = emitExpr(callExprId, scope);
-        const auto [valTmp, errVar] = nextValErrTemps();
         const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
-
-    if (hasValue) {
-        emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
-    } else {
-        emitLine("auto " + errVar + " = " + callCpp + ";");
-    }
-
-    emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
+        const std::string valTmp = emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
 
     if (stmt.target != INVALID_ID) {
         const ExprId tid = stmt.target;
@@ -1036,15 +1045,8 @@ public:
             const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
             if (fnSym.has_value() && fnSym->isFallible) {
                 const std::string callCpp = emitExpr(stmt.expr, scope);
-                const auto [discardTmp, errVar] = nextValErrTemps();
-
-                if (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType)) {
-                    emitLine("auto [" + discardTmp + ", " + errVar + "] = " + callCpp + ";");
-                } else {
-                    emitLine("auto " + errVar + " = " + callCpp + ";");
-                }
-
-                emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
+                const bool hasValue = (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType));
+                emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
                 return;
             }
         }
@@ -1079,18 +1081,15 @@ public:
             }
             const auto calleeSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
             if (calleeSym.has_value() && calleeSym->isFallible) {
-                const auto [valTmp, errTmp] = nextValErrTemps();
-                if (calleeSym->returnType == INVALID_ID || arena.isVoid(calleeSym->returnType)) {
-                    emitLine("CbError " + errTmp + " = " + emitExpr(stmt.value, scope) + ";");
-                    emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
+                const bool hasValue = (calleeSym->returnType != INVALID_ID && !arena.isVoid(calleeSym->returnType));
+                const std::string valTmp = emitFallibleCallUnpack(line, fn, emitExpr(stmt.value, scope), hasValue, stmt.breaksToCatch);
+                if (!hasValue) {
                     if (fn.isFallible) {
                         emitLine(R"(return CbError{"", 0};)");
                     } else {
                         emitLine("return;");
                     }
                 } else {
-                    emitLine("auto [" + valTmp + ", " + errTmp + "] = " + emitExpr(stmt.value, scope) + ";");
-                    emitErrorCheck(line, fn, errTmp, stmt.breaksToCatch);
                     if (fn.isFallible) {
                         emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
                     } else {
@@ -1223,10 +1222,7 @@ public:
         if (forS->iterable != INVALID_ID) {
             std::string iterCpp = emitExpr(forS->iterable, scope);
             if (forS->implicitBubble || forS->breaksToCatch) {
-                const auto [valTmp, errVar] = nextValErrTemps();
-                emitLine("auto [" + valTmp + ", " + errVar + "] = " + iterCpp + ";");
-                emitErrorCheck(stmtNode.line, fn, errVar, forS->breaksToCatch);
-                iterCpp = valTmp;
+                iterCpp = emitFallibleCallUnpack(stmtNode.line, fn, iterCpp, true, forS->breaksToCatch);
             }
             const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, currentModuleId);
             const TypeNode iterType = resolveAliasNode(arena, symbols, currentModuleId, iterTid);
@@ -1311,9 +1307,7 @@ public:
             emitLine("while (true) {");
             indentLevel += 1;
             const std::string callCpp = emitExpr(whileS->condition, whileScope);
-            const auto [valTmp, errVar] = nextValErrTemps();
-            emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
-            emitErrorCheck(stmtNode.line, fn, errVar, whileS->breaksToCatch);
+            const std::string valTmp = emitFallibleCallUnpack(stmtNode.line, fn, callCpp, true, whileS->breaksToCatch);
             emitLine("if (!" + valTmp + ") { break; }");
             emitStmtList(fn, whileS->body, whileScope, whileDecls);
             indentLevel -= 1;
@@ -1339,7 +1333,7 @@ public:
             emitLine("{");
             indentLevel += 1;
             const std::string selVar = nextTemp("_sel");
-            emitLine("const auto " + selVar + " = " + targetCpp + ";");
+            emitLine("const auto& " + selVar + " = " + targetCpp + ";");
             emitLine("switch (static_cast<int64_t>(" + selVar + "._data.index())) {");
             indentLevel += 1;
             for (size_t idx = 0; idx < selS->cases.size(); ++idx) {
@@ -1361,9 +1355,14 @@ public:
                 auto caseScope = scope;
                 auto cDecls = declaredVars;
                 if (!c.bindingName.empty()) {
-                    emitLine("auto " + sanitizeCppIdent(c.bindingName) + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
                     caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, false};
                     cDecls.insert(c.bindingName);
+                    const bool isMutated = isVarReassignedInStmts(c.body, c.bindingName, caseScope);
+                    std::string bindPrefix = "const auto& ";
+                    if (isMutated) {
+                        bindPrefix = "auto ";
+                    }
+                    emitLine(bindPrefix + sanitizeCppIdent(c.bindingName) + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
                 }
                 emitStmtList(fn, c.body, caseScope, cDecls);
                 emitLine("break;");
@@ -1683,239 +1682,195 @@ public:
         emitLine("}");
     }
 
-    void scanReachableExpr(
+    bool isRootExprOfVar(ExprId exprId, std::string_view varName) const {
+        if (exprId >= arena.exprs.size()) {
+            return false;
+        }
+        if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
+            return ident->name == varName;
+        }
+        if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
+            return isRootExprOfVar(fa->target, varName);
+        }
+        if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
+            return isRootExprOfVar(ia->target, varName);
+        }
+        return false;
+    }
+
+    bool isVarMutatedInExpr(
         ExprId exprId,
-        const std::string& modId,
-        const std::unordered_map<std::string, VarSymbol>& scope,
-        std::unordered_set<std::string>& reachable,
-        std::vector<std::string>& worklist
+        std::string_view varName,
+        const std::unordered_map<std::string, VarSymbol>& scope
     ) const {
         if (exprId >= arena.exprs.size()) {
-            return;
+            return false;
         }
-
-        auto markReachable = [&](const std::string& key) {
-            if (key.empty() || reachable.find(key) != reachable.end()) {
-                return;
-            }
-            reachable.insert(key);
-            worklist.push_back(key);
-        };
-
-        if (arena.getExpr<Identifier>(exprId) != nullptr) {
-            const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, modId);
-            if (bareFnOpt.has_value() && !bareFnOpt->isBuiltinReceiver && !bareFnOpt->isFnValueCall) {
-                markReachable(symbolKey(bareFnOpt->moduleId, bareFnOpt->name));
-            }
-            return;
-        }
-
         if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
-            scanReachableExpr(uop->operand, modId, scope, reachable, worklist);
-            return;
+            return isVarMutatedInExpr(uop->operand, varName, scope);
         }
-
         if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
-            scanReachableExpr(bop->left, modId, scope, reachable, worklist);
-            scanReachableExpr(bop->right, modId, scope, reachable, worklist);
-            return;
+            return isVarMutatedInExpr(bop->left, varName, scope) || isVarMutatedInExpr(bop->right, varName, scope);
         }
-
-        if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
-            const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, modId);
-            if (bareFnOpt.has_value() && !bareFnOpt->isBuiltinReceiver && !bareFnOpt->isFnValueCall) {
-                markReachable(symbolKey(bareFnOpt->moduleId, bareFnOpt->name));
-            }
-            scanReachableExpr(faccess->target, modId, scope, reachable, worklist);
-            return;
+        if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
+            return isVarMutatedInExpr(fa->target, varName, scope);
         }
-
-        if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
-            scanReachableExpr(iaccess->target, modId, scope, reachable, worklist);
-            scanReachableExpr(iaccess->index, modId, scope, reachable, worklist);
-            return;
+        if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
+            return isVarMutatedInExpr(ia->target, varName, scope) || isVarMutatedInExpr(ia->index, varName, scope);
         }
-
         if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
             for (const ExprId elem : llit->elements) {
-                scanReachableExpr(elem, modId, scope, reachable, worklist);
+                if (isVarMutatedInExpr(elem, varName, scope)) {
+                    return true;
+                }
             }
-            return;
+            return false;
         }
-
         if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
             for (const auto& ent : dlit->entries) {
-                scanReachableExpr(ent.key, modId, scope, reachable, worklist);
-                scanReachableExpr(ent.value, modId, scope, reachable, worklist);
+                if (isVarMutatedInExpr(ent.key, varName, scope) || isVarMutatedInExpr(ent.value, varName, scope)) {
+                    return true;
+                }
             }
-            return;
+            return false;
         }
-
         if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-            scanReachableExpr(call->callee, modId, scope, reachable, worklist);
+            if (isVarMutatedInExpr(call->callee, varName, scope)) {
+                return true;
+            }
             for (const ExprId argId : call->args) {
-                scanReachableExpr(argId, modId, scope, reachable, worklist);
+                if (isVarMutatedInExpr(argId, varName, scope)) {
+                    return true;
+                }
             }
             for (const auto& na : call->namedArgs) {
-                scanReachableExpr(na.value, modId, scope, reachable, worklist);
-            }
-
-            const auto structOpt = resolveStructConstructor(arena, *call, symbols, modId, scope);
-            if (structOpt.has_value()) {
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                for (const auto& fdecl : structOpt->fieldOrder) {
-                    if (fdecl.hasDefault && fdecl.defaultValue != INVALID_ID) {
-                        scanReachableExpr(fdecl.defaultValue, structOpt->moduleId, emptyScope, reachable, worklist);
-                    }
-                }
-                return;
-            }
-
-            const auto fnOpt = resolveFuncCall(arena, *call, symbols, modId, scope);
-            if (fnOpt.has_value() && !fnOpt->isBuiltinReceiver && !fnOpt->isFnValueCall) {
-                markReachable(symbolKey(fnOpt->moduleId, fnOpt->name));
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                for (const auto& p : fnOpt->params) {
-                    if (p.hasDefault && p.defaultValue != INVALID_ID) {
-                        scanReachableExpr(p.defaultValue, fnOpt->moduleId, emptyScope, reachable, worklist);
-                    }
+                if (isVarMutatedInExpr(na.value, varName, scope)) {
+                    return true;
                 }
             }
-            return;
+            const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+            if (fnSymOpt.has_value()) {
+                ExprId ufcsRecv = INVALID_ID;
+                const bool isUfcs = isUfcsCallExpr(arena, *call, symbols, currentModuleId, scope, &ufcsRecv);
+                if (isUfcs && !fnSymOpt->params.empty() && fnSymOpt->params[0].isByref && isRootExprOfVar(ufcsRecv, varName)) {
+                    return true;
+                }
+                size_t paramOffset = 0;
+                if (isUfcs) {
+                    paramOffset = 1;
+                }
+                for (size_t aIdx = 0; aIdx < call->args.size(); ++aIdx) {
+                    const size_t pIdx = paramOffset + aIdx;
+                    if (pIdx < fnSymOpt->params.size() && fnSymOpt->params[pIdx].isByref && isRootExprOfVar(call->args[aIdx], varName)) {
+                        return true;
+                    }
+                }
+                for (const auto& na : call->namedArgs) {
+                    for (const auto& p : fnSymOpt->params) {
+                        if (p.name == na.name && p.isByref && isRootExprOfVar(na.value, varName)) {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
+        return false;
     }
 
-    void scanReachableStmtList(
+    bool isVarReassignedInStmts(
         const std::vector<StmtId>& stmts,
-        const std::string& modId,
-        std::unordered_map<std::string, VarSymbol>& scope,
-        std::unordered_set<std::string>& reachable,
-        std::vector<std::string>& worklist
+        std::string_view varName,
+        const std::unordered_map<std::string, VarSymbol>& scope
     ) const {
-        for (const StmtId stmtId : stmts) {
-            if (stmtId >= arena.stmts.size()) {
+        for (const StmtId sid : stmts) {
+            if (sid >= arena.stmts.size()) {
                 continue;
             }
-
-            if (const auto* vassign = arena.getStmt<VarAssignment>(stmtId)) {
-                scanReachableExpr(vassign->value, modId, scope, reachable, worklist);
-                if (vassign->target != INVALID_ID) {
-                    if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
-                        TypeId varTid = symbols.typeAuto;
-                        if (vassign->hasDeclaredType) {
-                            varTid = resolveAlias(arena, symbols, modId, vassign->declaredType);
-                        } else {
-                            varTid = inferExprType(arena, vassign->value, symbols, scope, modId);
-                        }
-                        if (vassign->isDim || vassign->isConst || scope.find(ident->name) == scope.end()) {
-                            scope[ident->name] = VarSymbol{ident->name, varTid, false, vassign->isConst};
-                        }
-                    } else {
-                        scanReachableExpr(vassign->target, modId, scope, reachable, worklist);
-                    }
+            if (const auto* vassign = arena.getStmt<VarAssignment>(sid)) {
+                if (isRootExprOfVar(vassign->target, varName) || isVarMutatedInExpr(vassign->value, varName, scope)) {
+                    return true;
                 }
                 continue;
             }
-
-            if (const auto* estmt = arena.getStmt<ExprStmt>(stmtId)) {
-                scanReachableExpr(estmt->expr, modId, scope, reachable, worklist);
+            if (const auto* estmt = arena.getStmt<ExprStmt>(sid)) {
+                if (isVarMutatedInExpr(estmt->expr, varName, scope)) {
+                    return true;
+                }
                 continue;
             }
-
-            if (const auto* ifS = arena.getStmt<IfStmt>(stmtId)) {
-                scanReachableExpr(ifS->condition, modId, scope, reachable, worklist);
-                auto thenScope = scope;
-                scanReachableStmtList(ifS->thenBody, modId, thenScope, reachable, worklist);
+            if (const auto* ifS = arena.getStmt<IfStmt>(sid)) {
+                if (isVarMutatedInExpr(ifS->condition, varName, scope) || isVarReassignedInStmts(ifS->thenBody, varName, scope)) {
+                    return true;
+                }
                 for (const auto& branch : ifS->elifBranches) {
-                    scanReachableExpr(branch.condition, modId, scope, reachable, worklist);
-                    auto elifScope = scope;
-                    scanReachableStmtList(branch.body, modId, elifScope, reachable, worklist);
+                    if (isVarMutatedInExpr(branch.condition, varName, scope) || isVarReassignedInStmts(branch.body, varName, scope)) {
+                        return true;
+                    }
                 }
-                if (ifS->hasElse) {
-                    auto elseScope = scope;
-                    scanReachableStmtList(ifS->elseBody, modId, elseScope, reachable, worklist);
+                if (ifS->hasElse && isVarReassignedInStmts(ifS->elseBody, varName, scope)) {
+                    return true;
                 }
                 continue;
             }
-
-            if (const auto* forS = arena.getStmt<ForStmt>(stmtId)) {
-                auto loopScope = scope;
+            if (const auto* forS = arena.getStmt<ForStmt>(sid)) {
                 if (forS->rangeSpec.hasRange) {
-                    scanReachableExpr(forS->rangeSpec.start, modId, scope, reachable, worklist);
-                    scanReachableExpr(forS->rangeSpec.end, modId, scope, reachable, worklist);
-                    if (forS->rangeSpec.hasStep) {
-                        scanReachableExpr(forS->rangeSpec.step, modId, scope, reachable, worklist);
+                    if (isVarMutatedInExpr(forS->rangeSpec.start, varName, scope) ||
+                        isVarMutatedInExpr(forS->rangeSpec.end, varName, scope) ||
+                        (forS->rangeSpec.hasStep && isVarMutatedInExpr(forS->rangeSpec.step, varName, scope))) {
+                        return true;
                     }
-                    if (!forS->loopVars.empty()) {
-                        loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, false};
-                    }
-                } else if (forS->iterable != INVALID_ID) {
-                    scanReachableExpr(forS->iterable, modId, scope, reachable, worklist);
-                    bindForInLoopVars(arena, symbols, modId, *forS, loopScope);
+                } else if (forS->iterable != INVALID_ID && isVarMutatedInExpr(forS->iterable, varName, scope)) {
+                    return true;
                 }
-                scanReachableStmtList(forS->body, modId, loopScope, reachable, worklist);
+                if (isVarReassignedInStmts(forS->body, varName, scope)) {
+                    return true;
+                }
                 continue;
             }
-
-            if (const auto* whileS = arena.getStmt<WhileStmt>(stmtId)) {
-                scanReachableExpr(whileS->condition, modId, scope, reachable, worklist);
-                auto whileScope = scope;
-                scanReachableStmtList(whileS->body, modId, whileScope, reachable, worklist);
+            if (const auto* whileS = arena.getStmt<WhileStmt>(sid)) {
+                if (isVarMutatedInExpr(whileS->condition, varName, scope) || isVarReassignedInStmts(whileS->body, varName, scope)) {
+                    return true;
+                }
                 continue;
             }
-
-            if (const auto* selS = arena.getStmt<SelectStmt>(stmtId)) {
-                scanReachableExpr(selS->target, modId, scope, reachable, worklist);
-                const TypeId targetTid = inferExprType(arena, selS->target, symbols, scope, modId);
-                const auto unionTargetOpt = resolveUnionSymbol(arena, symbols, modId, targetTid);
+            if (const auto* selS = arena.getStmt<SelectStmt>(sid)) {
+                if (isVarMutatedInExpr(selS->target, varName, scope)) {
+                    return true;
+                }
                 for (const auto& c : selS->cases) {
-                    TypeId lastPayloadTid = INVALID_ID;
-                    for (const ExprId mExpr : c.matchExprs) {
-                        scanReachableExpr(mExpr, modId, scope, reachable, worklist);
-                        if (unionTargetOpt.has_value()) {
-                            if (const auto varOpt = resolveUnionSelectCaseVariant(arena, *unionTargetOpt, mExpr)) {
-                                lastPayloadTid = varOpt->payloadType;
-                            }
-                        }
+                    if (c.bindingName != varName && isVarReassignedInStmts(c.body, varName, scope)) {
+                        return true;
                     }
-                    auto caseScope = scope;
-                    if (!c.bindingName.empty() && lastPayloadTid != INVALID_ID) {
-                        caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, false};
-                    }
-                    scanReachableStmtList(c.body, modId, caseScope, reachable, worklist);
                 }
-                if (selS->hasCaseElse) {
-                    auto elseScope = scope;
-                    scanReachableStmtList(selS->caseElse, modId, elseScope, reachable, worklist);
+                if (selS->hasCaseElse && isVarReassignedInStmts(selS->caseElse, varName, scope)) {
+                    return true;
                 }
                 continue;
             }
-
-            if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(stmtId)) {
-                scanReachableStmtList(tryCatch->tryBody, modId, scope, reachable, worklist);
-                auto errScope = scope;
-                errScope[tryCatch->catchVarName] = VarSymbol{tryCatch->catchVarName, symbols.typeErr, false, false};
-                scanReachableStmtList(tryCatch->catchBody, modId, errScope, reachable, worklist);
+            if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(sid)) {
+                if (isVarReassignedInStmts(tryCatch->tryBody, varName, scope) ||
+                    (tryCatch->catchVarName != varName && isVarReassignedInStmts(tryCatch->catchBody, varName, scope))) {
+                    return true;
+                }
                 continue;
             }
-
-            if (const auto* defS = arena.getStmt<DeferStmt>(stmtId)) {
-                auto defScope = scope;
-                scanReachableStmtList(defS->body, modId, defScope, reachable, worklist);
+            if (const auto* defS = arena.getStmt<DeferStmt>(sid)) {
+                if (isVarReassignedInStmts(defS->body, varName, scope)) {
+                    return true;
+                }
                 continue;
             }
-
-            if (const auto* retS = arena.getStmt<ReturnStmt>(stmtId)) {
-                if (retS->hasValue) {
-                    scanReachableExpr(retS->value, modId, scope, reachable, worklist);
+            if (const auto* retS = arena.getStmt<ReturnStmt>(sid)) {
+                if (retS->hasValue && isVarMutatedInExpr(retS->value, varName, scope)) {
+                    return true;
                 }
                 continue;
             }
         }
+        return false;
     }
 
-    std::unordered_set<std::string> computeReachableFunctions(const Program& program) const {
-        std::unordered_map<std::string, std::vector<std::pair<std::string, FnDecl>>> fnDeclsByKey;
+    std::unordered_set<std::string> computeReachableFunctions() const {
         std::unordered_set<std::string> reachable;
         std::vector<std::string> worklist;
 
@@ -1927,53 +1882,19 @@ public:
             worklist.push_back(key);
         };
 
-        std::unordered_map<std::string, VarSymbol> emptyScope;
-        for (const DeclId did : program.declarations) {
-            if (did >= arena.decls.size()) {
-                continue;
-            }
-            const auto& declNode = arena.decls[did];
-            if (!isModuleEmitted(symbols, declNode.moduleId)) {
-                continue;
-            }
-            if (const auto* td = arena.getDecl<TypeDecl>(did)) {
-                if (!td->isExtern) {
-                    for (const auto& f : td->fields) {
-                        if (f.hasDefault && f.defaultValue != INVALID_ID) {
-                            scanReachableExpr(f.defaultValue, declNode.moduleId, emptyScope, reachable, worklist);
-                        }
-                    }
-                }
-            } else if (const auto* cd = arena.getDecl<ConstDecl>(did)) {
-                scanReachableExpr(cd->value, declNode.moduleId, emptyScope, reachable, worklist);
-            } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
-                if (!fd->isExtern) {
-                    const std::string key = symbolKey(declNode.moduleId, fd->name);
-                    fnDeclsByKey[key].push_back({declNode.moduleId, *fd});
-                    if (declNode.moduleId.empty()) {
-                        markReachable(key);
-                    }
-                }
-            }
+        for (const auto& rootKey : symbols.rootReferencedFunctions) {
+            markReachable(rootKey);
         }
 
         while (!worklist.empty()) {
             const std::string key = worklist.back();
             worklist.pop_back();
-            const auto it = fnDeclsByKey.find(key);
-            if (it == fnDeclsByKey.end()) {
+            const auto edgeIt = symbols.callGraphEdges.find(key);
+            if (edgeIt == symbols.callGraphEdges.end()) {
                 continue;
             }
-            for (const auto& [fnModId, fnDecl] : it->second) {
-                std::unordered_map<std::string, VarSymbol> scope;
-                for (const auto& p : fnDecl.params) {
-                    if (p.hasDefault && p.defaultValue != INVALID_ID) {
-                        scanReachableExpr(p.defaultValue, fnModId, emptyScope, reachable, worklist);
-                    }
-                    const TypeId resolvedT = resolveAlias(arena, symbols, fnModId, p.typeId);
-                    scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
-                }
-                scanReachableStmtList(fnDecl.body, fnModId, scope, reachable, worklist);
+            for (const auto& calleeKey : edgeIt->second) {
+                markReachable(calleeKey);
             }
         }
 
@@ -2015,7 +1936,7 @@ public:
         FnDecl fn;
     };
     std::vector<EmittedFnEntry> fnDecls;
-    const std::unordered_set<std::string> reachableFns = computeReachableFunctions(program);
+    const std::unordered_set<std::string> reachableFns = computeReachableFunctions();
 
     for (const DeclId did : program.declarations) {
         if (did >= arena.decls.size()) continue;

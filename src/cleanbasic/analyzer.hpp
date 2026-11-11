@@ -27,6 +27,19 @@ public:
         throw makeError("AnalyzerError", std::string(msg), fileName, line, col);
     }
 
+    void recordCalleeEdge(const FnSymbol& fnSym) {
+        if (fnSym.isBuiltinReceiver || fnSym.isFnValueCall) {
+            return;
+        }
+        const std::string calleeKey = symbolKey(fnSym.moduleId, fnSym.name);
+        if (calleeKey.empty()) {
+            return;
+        }
+        if (!currentFnKey.empty()) {
+            symbols.callGraphEdges[currentFnKey].insert(calleeKey);
+        }
+    }
+
     struct RootVarInfo {
         std::string name;
         bool isConst = false;
@@ -136,6 +149,7 @@ public:
         if (arena.getExpr<Identifier>(exprId) != nullptr) {
             const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, moduleId);
             if (bareFnOpt.has_value()) {
+                recordCalleeEdge(*bareFnOpt);
                 if (!bareFnOpt->moduleId.empty() && bareFnOpt->moduleId != moduleId) {
                     symbols.referencedModules.insert(bareFnOpt->moduleId);
                 }
@@ -206,6 +220,7 @@ public:
             const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
             if (fnSymOpt.has_value()) {
                 const auto& fnSym = fnSymOpt.value();
+                recordCalleeEdge(fnSym);
 
                 ExprId ufcsRecv = INVALID_ID;
                 const bool isUfcs = isUfcsCallExpr(arena, *call, symbols, moduleId, scope, &ufcsRecv);
@@ -314,6 +329,10 @@ public:
             } else {
                 const auto structOpt = resolveStructConstructor(arena, *call, symbols, moduleId, scope);
                 if (structOpt.has_value()) {
+                    const std::string structDefaultEdgeKey = "__type__" + symbolKey(structOpt->moduleId, structOpt->name);
+                    if (!currentFnKey.empty()) {
+                        symbols.callGraphEdges[currentFnKey].insert(structDefaultEdgeKey);
+                    }
                     if (!structOpt->moduleId.empty() && structOpt->moduleId != moduleId) {
                         symbols.referencedModules.insert(structOpt->moduleId);
                     }
@@ -455,6 +474,7 @@ public:
             }
             const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, moduleId);
             if (bareFnOpt.has_value()) {
+                recordCalleeEdge(*bareFnOpt);
                 if (!bareFnOpt->moduleId.empty() && bareFnOpt->moduleId != moduleId) {
                     symbols.referencedModules.insert(bareFnOpt->moduleId);
                 }
@@ -633,25 +653,38 @@ public:
             FnDecl dummyFn{};
             dummyFn.name = cdecl->name;
             dummyFn.isFallible = false;
+            currentFnKey = "__top__" + declNode.moduleId;
             validateExprCalls(dummyFn, cdecl->value, emptyScope, false);
+            currentFnKey.clear();
         } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
             FnDecl dummyFn{};
             dummyFn.name = tdecl->name;
             dummyFn.isFallible = false;
+            const std::string typeDefaultKey = "__type__" + symbolKey(declNode.moduleId, tdecl->name);
+            currentFnKey = typeDefaultKey;
             for (const auto& fld : tdecl->fields) {
                 if (fld.hasDefault && fld.defaultValue != INVALID_ID) {
                     validateDefaultValueExpr(dummyFn, fld.line, fld.col, fld.name, fld.typeId, fld.defaultValue, emptyScope);
+                }
+            }
+            currentFnKey.clear();
+            const auto edgeIt = symbols.callGraphEdges.find(typeDefaultKey);
+            if (edgeIt != symbols.callGraphEdges.end()) {
+                for (const auto& callee : edgeIt->second) {
+                    symbols.callGraphEdges["__top__" + declNode.moduleId].insert(callee);
                 }
             }
         } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
             FnDecl dummyFn{};
             dummyFn.name = fdecl->name;
             dummyFn.isFallible = false;
+            currentFnKey = symbolKey(declNode.moduleId, fdecl->name);
             for (const auto& p : fdecl->params) {
                 if (p.hasDefault && p.defaultValue != INVALID_ID) {
                     validateDefaultValueExpr(dummyFn, p.line, p.col, p.name, p.typeId, p.defaultValue, emptyScope);
                 }
             }
+            currentFnKey.clear();
         }
     }
 
@@ -1334,7 +1367,24 @@ public:
             validateDeclDefaults(did, declNode);
             if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 if (!fdecl->isExtern) {
+                    if (declNode.moduleId.empty()) {
+                        symbols.rootReferencedFunctions.insert(symbolKey(declNode.moduleId, fdecl->name));
+                    }
                     analyzeFn(*fdecl);
+                }
+            }
+        }
+
+        for (const DeclId did : program.declarations) {
+            if (did >= arena.decls.size()) continue;
+            const auto& declNode = arena.decls[did];
+            if (!isModuleEmitted(symbols, declNode.moduleId)) {
+                continue;
+            }
+            const auto topIt = symbols.callGraphEdges.find("__top__" + declNode.moduleId);
+            if (topIt != symbols.callGraphEdges.end()) {
+                for (const auto& calleeKey : topIt->second) {
+                    symbols.rootReferencedFunctions.insert(calleeKey);
                 }
             }
         }

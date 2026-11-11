@@ -218,6 +218,9 @@ struct GlobalSymbolTable {
     std::unordered_set<std::string> explicitlyImportedModules;
     std::unordered_set<std::string> referencedModules;
     std::unordered_map<std::string, std::string> headerModules;
+    std::unordered_map<std::string, std::vector<FnSymbol>> builtinReceiverCache;
+    std::unordered_map<std::string, std::unordered_set<std::string>> callGraphEdges;
+    std::unordered_set<std::string> rootReferencedFunctions;
     bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
@@ -299,6 +302,77 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     printFn.isFallible = false;
     printFn.cppName = "cbPrint";
     symbols.functions[printFn.key] = std::move(printFn);
+
+    auto makeParam = [](std::string_view name, TypeId tid, bool isByref = false) {
+        Param p{};
+        p.name = std::string(name);
+        p.typeId = tid;
+        p.isByref = isByref;
+        return p;
+    };
+    auto makeMethod = [&](std::string_view name, TypeId recvTid, bool mutatesRecv, TypeId returnType, std::vector<Param> extraParams = {}, bool isFallible = false) {
+        FnSymbol fs{};
+        fs.name = std::string(name);
+        fs.returnType = returnType;
+        fs.isFallible = isFallible;
+        fs.isBuiltinReceiver = true;
+        fs.params.reserve(1 + extraParams.size());
+        fs.params.push_back(makeParam("self", recvTid, mutatesRecv));
+        for (auto& ep : extraParams) {
+            fs.params.push_back(std::move(ep));
+        }
+        return fs;
+    };
+
+    symbols.builtinReceiverCache["int"] = {
+        makeMethod("toStr", symbols.typeInt, false, symbols.typeStr),
+        makeMethod("toInt", symbols.typeInt, false, symbols.typeInt),
+        makeMethod("toFloat", symbols.typeInt, false, symbols.typeFloat),
+        makeMethod("bitAnd", symbols.typeInt, false, symbols.typeInt, {makeParam("y", symbols.typeInt)}),
+        makeMethod("bitOr", symbols.typeInt, false, symbols.typeInt, {makeParam("y", symbols.typeInt)}),
+        makeMethod("bitXor", symbols.typeInt, false, symbols.typeInt, {makeParam("y", symbols.typeInt)}),
+        makeMethod("bitNot", symbols.typeInt, false, symbols.typeInt),
+        makeMethod("shl", symbols.typeInt, false, symbols.typeInt, {makeParam("bits", symbols.typeInt)}),
+        makeMethod("shr", symbols.typeInt, false, symbols.typeInt, {makeParam("bits", symbols.typeInt)})
+    };
+    symbols.builtinReceiverCache["float"] = {
+        makeMethod("toStr", symbols.typeFloat, false, symbols.typeStr),
+        makeMethod("toInt", symbols.typeFloat, false, symbols.typeInt),
+        makeMethod("toFloat", symbols.typeFloat, false, symbols.typeFloat)
+    };
+    symbols.builtinReceiverCache["bool"] = {
+        makeMethod("toStr", symbols.typeBool, false, symbols.typeStr),
+        makeMethod("toInt", symbols.typeBool, false, symbols.typeInt)
+    };
+    symbols.builtinReceiverCache["err"] = {
+        makeMethod("toStr", symbols.typeErr, false, symbols.typeStr)
+    };
+    symbols.builtinReceiverCache["str"] = {
+        makeMethod("len", symbols.typeStr, false, symbols.typeInt),
+        makeMethod("toBytes", symbols.typeStr, false, symbols.typeBytes),
+        makeMethod("fromHex", symbols.typeStr, false, symbols.typeBytes, {}, true),
+        makeMethod("byteAt", symbols.typeStr, false, symbols.typeInt, {makeParam("idx", symbols.typeInt)}),
+        makeMethod("toStr", symbols.typeStr, false, symbols.typeStr)
+    };
+    std::vector<FnSymbol> bytesMethods = {
+        makeMethod("len", symbols.typeBytes, false, symbols.typeInt),
+        makeMethod("push", symbols.typeBytes, true, symbols.typeVoid, {makeParam("byteVal", symbols.typeInt)}),
+        makeMethod("pop", symbols.typeBytes, true, symbols.typeInt),
+        makeMethod("clear", symbols.typeBytes, true, symbols.typeVoid),
+        makeMethod("slice", symbols.typeBytes, false, symbols.typeBytes, {makeParam("start", symbols.typeInt), makeParam("stop", symbols.typeInt)}),
+        makeMethod("sliceFrom", symbols.typeBytes, false, symbols.typeBytes, {makeParam("start", symbols.typeInt)}),
+        makeMethod("toUtf8", symbols.typeBytes, false, symbols.typeStr, {}, true),
+        makeMethod("toHex", symbols.typeBytes, false, symbols.typeStr)
+    };
+    const std::vector<std::string_view> readNames = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
+    for (const auto rn : readNames) {
+        bytesMethods.push_back(makeMethod(rn, symbols.typeBytes, false, symbols.typeInt, {makeParam("offset", symbols.typeInt)}));
+    }
+    const std::vector<std::string_view> writeNames = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
+    for (const auto wn : writeNames) {
+        bytesMethods.push_back(makeMethod(wn, symbols.typeBytes, true, symbols.typeVoid, {makeParam("value", symbols.typeInt), makeParam("offset", symbols.typeInt)}));
+    }
+    symbols.builtinReceiverCache["bytes"] = std::move(bytesMethods);
 }
 
 inline bool isBuiltinTypeName(std::string_view name) {
@@ -690,24 +764,30 @@ inline std::vector<FnSymbol> getBuiltinReceiverMethods(
     std::string_view currentModuleId,
     TypeId recvTid
 ) {
-    std::vector<FnSymbol> methods;
     if (recvTid >= arena.types.size()) {
-        return methods;
+        return {};
     }
     const TypeNode resolvedRecvNode = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[recvTid]);
     const std::string& recvTypeKey = resolvedRecvNode.name;
-    const bool isEnumRecv = isEnumType(symbols, recvTid, arena, currentModuleId);
 
-    if (recvTypeKey == "str" || recvTypeKey == "list" || recvTypeKey == "dict" || recvTypeKey == "bytes") {
-        methods.push_back(makeBuiltinReceiverMethod("len", recvTid, false, symbols.typeInt));
+    const auto cachedIt = symbols.builtinReceiverCache.find(recvTypeKey);
+    if (cachedIt != symbols.builtinReceiverCache.end()) {
+        std::vector<FnSymbol> methods = cachedIt->second;
+        for (auto& m : methods) {
+            if (!m.params.empty() && m.params[0].typeId != recvTid) {
+                m.params[0].typeId = recvTid;
+            }
+        }
+        return methods;
     }
-    const bool isUnionRecv = isUnionType(symbols, recvTid, arena, currentModuleId);
 
+    std::vector<FnSymbol> methods;
     if (recvTypeKey == "list") {
         TypeId elemType = symbols.typeInt;
         if (!resolvedRecvNode.typeArgs.empty()) {
             elemType = resolvedRecvNode.typeArgs[0];
         }
+        methods.push_back(makeBuiltinReceiverMethod("len", recvTid, false, symbols.typeInt));
         methods.push_back(makeBuiltinReceiverMethod("push", recvTid, true, symbols.typeVoid, {makeBuiltinParam("item", elemType)}));
         methods.push_back(makeBuiltinReceiverMethod("pop", recvTid, true, elemType));
         methods.push_back(makeBuiltinReceiverMethod("clear", recvTid, true, symbols.typeVoid));
@@ -729,51 +809,16 @@ inline std::vector<FnSymbol> getBuiltinReceiverMethods(
         if (keyListTid == INVALID_ID) {
             keyListTid = symbols.typeAuto;
         }
+        methods.push_back(makeBuiltinReceiverMethod("len", recvTid, false, symbols.typeInt));
         methods.push_back(makeBuiltinReceiverMethod("get", recvTid, false, valType, {makeBuiltinParam("key", keyType), makeBuiltinParam("defaultValue", valType)}));
         methods.push_back(makeBuiltinReceiverMethod("has", recvTid, false, symbols.typeBool, {makeBuiltinParam("key", keyType)}));
         methods.push_back(makeBuiltinReceiverMethod("remove", recvTid, true, symbols.typeBool, {makeBuiltinParam("key", keyType)}));
         methods.push_back(makeBuiltinReceiverMethod("clear", recvTid, true, symbols.typeVoid));
         methods.push_back(makeBuiltinReceiverMethod("keys", recvTid, false, keyListTid));
-    } else if (recvTypeKey == "bytes") {
-        methods.push_back(makeBuiltinReceiverMethod("push", recvTid, true, symbols.typeVoid, {makeBuiltinParam("byteVal", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("pop", recvTid, true, symbols.typeInt));
-        methods.push_back(makeBuiltinReceiverMethod("clear", recvTid, true, symbols.typeVoid));
-        methods.push_back(makeBuiltinReceiverMethod("slice", recvTid, false, symbols.typeBytes, {makeBuiltinParam("start", symbols.typeInt), makeBuiltinParam("stop", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("sliceFrom", recvTid, false, symbols.typeBytes, {makeBuiltinParam("start", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("toUtf8", recvTid, false, symbols.typeStr, {}, true));
-        methods.push_back(makeBuiltinReceiverMethod("toHex", recvTid, false, symbols.typeStr));
-        const std::vector<std::string_view> readNames = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
-        for (const auto rn : readNames) {
-            methods.push_back(makeBuiltinReceiverMethod(rn, recvTid, false, symbols.typeInt, {makeBuiltinParam("offset", symbols.typeInt)}));
-        }
-        const std::vector<std::string_view> writeNames = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
-        for (const auto wn : writeNames) {
-            methods.push_back(makeBuiltinReceiverMethod(wn, recvTid, true, symbols.typeVoid, {makeBuiltinParam("value", symbols.typeInt), makeBuiltinParam("offset", symbols.typeInt)}));
-        }
-    } else if (recvTypeKey == "str") {
-        methods.push_back(makeBuiltinReceiverMethod("toBytes", recvTid, false, symbols.typeBytes));
-        methods.push_back(makeBuiltinReceiverMethod("fromHex", recvTid, false, symbols.typeBytes, {}, true));
-        methods.push_back(makeBuiltinReceiverMethod("byteAt", recvTid, false, symbols.typeInt, {makeBuiltinParam("idx", symbols.typeInt)}));
-    }
-
-    if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || recvTypeKey == "str" || recvTypeKey == "err" || isEnumRecv) {
+    } else if (isEnumType(symbols, recvTid, arena, currentModuleId)) {
         methods.push_back(makeBuiltinReceiverMethod("toStr", recvTid, false, symbols.typeStr));
-    }
-    if (recvTypeKey == "int" || recvTypeKey == "float" || recvTypeKey == "bool" || isEnumRecv) {
         methods.push_back(makeBuiltinReceiverMethod("toInt", recvTid, false, symbols.typeInt));
-    }
-    if (recvTypeKey == "int" || recvTypeKey == "float") {
-        methods.push_back(makeBuiltinReceiverMethod("toFloat", recvTid, false, symbols.typeFloat));
-    }
-    if (recvTypeKey == "int") {
-        methods.push_back(makeBuiltinReceiverMethod("bitAnd", recvTid, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("bitOr", recvTid, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("bitXor", recvTid, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("bitNot", recvTid, false, symbols.typeInt));
-        methods.push_back(makeBuiltinReceiverMethod("shl", recvTid, false, symbols.typeInt, {makeBuiltinParam("bits", symbols.typeInt)}));
-        methods.push_back(makeBuiltinReceiverMethod("shr", recvTid, false, symbols.typeInt, {makeBuiltinParam("bits", symbols.typeInt)}));
-    }
-    if (isUnionRecv) {
+    } else if (isUnionType(symbols, recvTid, arena, currentModuleId)) {
         methods.push_back(makeBuiltinReceiverMethod("kind", recvTid, false, symbols.typeStr));
     }
     return methods;

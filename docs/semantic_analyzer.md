@@ -29,6 +29,9 @@ struct GlobalSymbolTable {
     std::unordered_set<std::string> explicitlyImportedModules;
     std::unordered_set<std::string> referencedModules;
     std::unordered_map<std::string, std::string> headerModules;
+    std::unordered_map<std::string, std::vector<FnSymbol>> builtinReceiverCache;
+    std::unordered_map<std::string, std::unordered_set<std::string>> callGraphEdges;
+    std::unordered_set<std::string> rootReferencedFunctions;
     bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
@@ -53,6 +56,8 @@ struct GlobalSymbolTable {
 * **`headers` & `linkLibs`**: Deduplicated ordered lists of `import header "..."` and `import link "..."` targets across all loaded modules.
 * **`modules` (`importerModuleId -> {alias -> resolvedModuleId}`)**: Per-module import alias lookup tables.
 * **`fnScopes` (`fnKey -> {varName -> VarSymbol}`)**: Captured local variable and parameter scopes for each analyzed function.
+* **`builtinReceiverCache` (`typeName -> vector<FnSymbol>`)**: Pre-cached built-in receiver method tables for non-parametric built-in types (`int`, `float`, `bool`, `str`, `bytes`, `err`) populated once in `registerBuiltins`.
+* **`callGraphEdges` & `rootReferencedFunctions`**: Function call-graph edges and root-referenced function keys recorded during `Analyzer` Pass 2 and consumed by `Emitter::computeReachableFunctions()` for tree-shaking.
 
 ---
 

@@ -1,6 +1,6 @@
 ' Regression tests for fixes
 ' EXPECT_CPP: auto [_val1, _err1] = connect(std::string("127.0.0.1"));
-' EXPECT_CPP: CbError _err2 = voidFallible();
+' EXPECT_CPP: auto _err2 = voidFallible();
 ' EXPECT_CPP: if (cbHasError(_err2)) {
 ' EXPECT_CPP: return _err2;
 ' EXPECT_CPP: void overload(int64_t x) {
