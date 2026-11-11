@@ -27,6 +27,7 @@ inline unsigned char cbStrAsciiLowerByte(unsigned char c) {
     return c;
 }
 
+#ifndef CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 inline size_t cbStrUtf8SeqLen(const std::string& s, size_t idx) {
     if (idx >= s.size()) {
         return 0;
@@ -90,6 +91,20 @@ inline size_t cbStrUtf8Step(const std::string& s, size_t idx) {
     }
     return 1;
 }
+
+inline int cbHexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+#endif
 
 inline std::vector<size_t> cbStrUtf8Offsets(const std::string& s) {
     std::vector<size_t> offsets;
@@ -925,16 +940,7 @@ inline std::string cbStrEscapeCpp(const std::string& s) {
 }
 
 inline int cbStrHexDigitValue(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return 10 + (c - 'a');
-    }
-    if (c >= 'A' && c <= 'F') {
-        return 10 + (c - 'A');
-    }
-    return -1;
+    return cbHexDigitValue(c);
 }
 
 inline std::tuple<std::string, CbError> cbStrUnescape(const std::string& s) {

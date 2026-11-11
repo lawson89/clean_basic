@@ -16,7 +16,7 @@
 ' EXPECT_OUT: WalkFiles count=3, allWithHidden=5, bytes=32, first=build/testArtifacts/stdlibFsSandbox/nested/deep.txt
 ' EXPECT_OUT: Directory entries=3: nested, renamed.txt
 ' EXPECT_OUT: AbsPath leaf=stdlibFsSandbox, tempDirValid=true
-' EXPECT_OUT: Caught missing file (code=404)
+' EXPECT_OUT: Caught missing file (code=404), nonEmptyRemoveRejected=true
 ' EXPECT_OUT: Stdout stream write: hello via fs.stdout
 ' EXPECT_OUT: StdStreams: open=true/true/true, outEof=true, writeStdinErr=400, readStdoutErr=400, closedAfter=false/false/false, reopened=true
 ' EXPECT_OUT: Cleanup complete: removedAll=true, exists=false
@@ -112,12 +112,18 @@ fn testWalkFiles(baseDir as str) can error
 end fn
 
 fn testMissingFile(baseDir as str)
+    dim nonEmptyRejected = false
+    try
+        fs.remove(baseDir)
+    catch e
+        nonEmptyRejected = true
+    end try
     try
         dim missing = fs.joinPath(baseDir, "doesNotExist.txt")
         dim content = fs.read(missing)
         print(content)
     catch e
-        print("Caught missing file (code=" & e.code & ")")
+        print("Caught missing file (code=" & e.code & "), nonEmptyRemoveRejected=" & nonEmptyRejected)
         return
     end try
 end fn
@@ -179,7 +185,7 @@ fn main() as int
     try
         dim baseDir = "build/testArtifacts/stdlibFsSandbox"
         if fs.exists(baseDir)
-            fs.remove(baseDir)
+            fs.removeAll(baseDir)
         end if
         fs.mkdir(baseDir)
 

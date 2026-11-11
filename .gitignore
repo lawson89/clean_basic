@@ -34,10 +34,12 @@
 *.a
 *.lib
 
-# Executables
+# Executables & generated Unity C++ outputs
 *.exe
 *.out
 *.app
+/cbgrep
+build.cpp
 
 # Build directories
 build/

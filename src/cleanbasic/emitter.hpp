@@ -549,7 +549,13 @@ public:
         if (bareFnOpt.has_value()) {
             return bareFnOpt->cppName;
         }
-        return emitExpr(faccess->target, scope, asLvalue) + "." + faccess->fieldName;
+        const TypeId tgtTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
+        const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, tgtTid);
+        std::string emittedFieldName = faccess->fieldName;
+        if (!tsOpt.has_value() || !tsOpt->isExtern) {
+            emittedFieldName = sanitizeCppIdent(faccess->fieldName);
+        }
+        return emitExpr(faccess->target, scope, asLvalue) + "." + emittedFieldName;
     }
 
     if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
@@ -1003,6 +1009,33 @@ public:
     }
 }
 
+    bool emitIntrinsicFallibleOrErrorCall(
+        uint32_t line,
+        const FnDecl& fn,
+        const FuncCall& call,
+        bool breaksToCatch,
+        std::unordered_map<std::string, VarSymbol>& scope
+    ) {
+        if (cb::isAssertBuiltinCall(arena, call)) {
+            const auto [discardTmp, errVar] = nextValErrTemps();
+            emitLine("auto " + errVar + " = " + buildAssertCallValue(call, scope) + ";");
+            emitErrorCheck(line, fn, errVar, breaksToCatch);
+            return true;
+        }
+        if (cb::isErrorBuiltinCall(arena, call)) {
+            const std::string errVal = buildErrorCallValue(call, scope);
+            if (breaksToCatch && !catchErrStack.empty()) {
+                const auto [discardTmp, errVar] = nextValErrTemps();
+                emitLine("auto " + errVar + " = " + errVal + ";");
+                emitErrorCheck(line, fn, errVar, true);
+            } else {
+                emitLine(buildErrorBubbleReturn(fn, errVal));
+            }
+            return true;
+        }
+        return false;
+    }
+
     void emitExprStmt(
         uint32_t line,
         const FnDecl& fn,
@@ -1010,21 +1043,7 @@ public:
         std::unordered_map<std::string, VarSymbol>& scope
     ) {
         if (const auto* call = arena.getExpr<FuncCall>(stmt.expr)) {
-            if (cb::isAssertBuiltinCall(arena, *call)) {
-                const auto [discardTmp, errVar] = nextValErrTemps();
-                emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
-                emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
-                return;
-            }
-            if (cb::isErrorBuiltinCall(arena, *call)) {
-                const std::string errVal = buildErrorCallValue(*call, scope);
-                if (stmt.breaksToCatch && !catchErrStack.empty()) {
-                    const auto [discardTmp, errVar] = nextValErrTemps();
-                    emitLine("auto " + errVar + " = " + errVal + ";");
-                    emitErrorCheck(line, fn, errVar, true);
-                } else {
-                    emitLine(buildErrorBubbleReturn(fn, errVal));
-                }
+            if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, stmt.breaksToCatch, scope)) {
                 return;
             }
             const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
@@ -1068,21 +1087,7 @@ public:
 
         const ExprId firstId = stmt.value;
         if (const auto* call = arena.getExpr<FuncCall>(firstId)) {
-            if (cb::isAssertBuiltinCall(arena, *call)) {
-                const auto [discardTmp, errVar] = nextValErrTemps();
-                emitLine("auto " + errVar + " = " + buildAssertCallValue(*call, scope) + ";");
-                emitErrorCheck(line, fn, errVar, stmt.breaksToCatch);
-                return;
-            }
-            if (cb::isErrorBuiltinCall(arena, *call)) {
-                const std::string errVal = buildErrorCallValue(*call, scope);
-                if (stmt.breaksToCatch && !catchErrStack.empty()) {
-                    const auto [discardTmp, errVar] = nextValErrTemps();
-                    emitLine("auto " + errVar + " = " + errVal + ";");
-                    emitErrorCheck(line, fn, errVar, true);
-                } else {
-                    emitLine(buildErrorBubbleReturn(fn, errVal));
-                }
+            if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, stmt.breaksToCatch, scope)) {
                 return;
             }
             const auto calleeSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
@@ -1229,14 +1234,14 @@ public:
             return;
         }
 
-        if (forS->hasIterable) {
+        if (forS->iterable != INVALID_ID) {
             std::string iterCpp = emitExpr(forS->iterable, scope);
             if (const auto* call = arena.getExpr<FuncCall>(forS->iterable)) {
                 const auto fnOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
                 if (fnOpt.has_value() && fnOpt->isFallible) {
                     const auto [valTmp, errVar] = nextValErrTemps();
                     emitLine("auto [" + valTmp + ", " + errVar + "] = " + iterCpp + ";");
-                    emitErrorCheck(stmtNode.line, fn, errVar, !catchErrStack.empty());
+                    emitErrorCheck(stmtNode.line, fn, errVar, forS->breaksToCatch);
                     iterCpp = valTmp;
                 }
             }
@@ -1360,7 +1365,7 @@ public:
             const std::string callCpp = emitExpr(whileS->condition, whileScope);
             const auto [valTmp, errVar] = nextValErrTemps();
             emitLine("auto [" + valTmp + ", " + errVar + "] = " + callCpp + ";");
-            emitErrorCheck(stmtNode.line, fn, errVar, !catchErrStack.empty());
+            emitErrorCheck(stmtNode.line, fn, errVar, whileS->breaksToCatch);
             emitLine("if (!" + valTmp + ") { break; }");
             emitStmtList(fn, whileS->body, whileScope, whileDecls);
             indentLevel -= 1;
@@ -1636,19 +1641,20 @@ public:
 }
     void emitStructDecl(const TypeDecl& td) {
         const std::string cppName = lookupTypeCppName(currentModuleId, td.name);
-    emitLine("struct " + cppName + " {");
-    indentLevel += 1;
-    for (const auto& f : td.fields) {
-        if (f.hasDefault && f.defaultValue != INVALID_ID) {
-            std::unordered_map<std::string, VarSymbol> emptyScope;
-            emitLine(mapType(currentModuleId, f.typeId) + " " + f.name + " = " + emitExpr(f.defaultValue, emptyScope) + ";");
-        } else {
-            emitLine(mapType(currentModuleId, f.typeId) + " " + f.name + "{};");
+        emitLine("struct " + cppName + " {");
+        indentLevel += 1;
+        for (const auto& f : td.fields) {
+            const std::string fldCppName = sanitizeCppIdent(f.name);
+            if (f.hasDefault && f.defaultValue != INVALID_ID) {
+                std::unordered_map<std::string, VarSymbol> emptyScope;
+                emitLine(mapType(currentModuleId, f.typeId) + " " + fldCppName + " = " + emitExpr(f.defaultValue, emptyScope) + ";");
+            } else {
+                emitLine(mapType(currentModuleId, f.typeId) + " " + fldCppName + "{};");
+            }
         }
+        indentLevel -= 1;
+        emitLine("};");
     }
-    indentLevel -= 1;
-    emitLine("};");
-}
 
     void emitUnionDecl(const UnionDecl& ud) {
         const std::string key = symbolKey(currentModuleId, ud.name);
@@ -1911,7 +1917,7 @@ public:
                     if (!forS->loopVars.empty()) {
                         loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, false};
                     }
-                } else if (forS->hasIterable) {
+                } else if (forS->iterable != INVALID_ID) {
                     scanReachableExpr(forS->iterable, modId, scope, reachable, worklist);
                     const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, modId);
                     const TypeNode iterType = resolveAliasNode(arena, symbols, modId, iterTid);
@@ -2220,23 +2226,9 @@ public:
                 return;
             }
             visitedCompositeKeys.insert(key);
-            const auto tit = symbols.types.find(key);
-            if (tit != symbols.types.end()) {
-                for (const auto& fld : tit->second.fieldOrder) {
-                    const TypeNode& tn = arena.getType(fld.typeId);
-                    if (tn.typeArgs.empty() && tn.returnType == INVALID_ID && compositeByKey.count(tn.name) > 0) {
-                        self(self, tn.name);
-                    }
-                }
-            } else {
-                const auto uit = symbols.unions.find(key);
-                if (uit != symbols.unions.end()) {
-                    for (const auto& uv : uit->second.variants) {
-                        const TypeNode& tn = arena.getType(uv.type);
-                        if (tn.typeArgs.empty() && tn.returnType == INVALID_ID && compositeByKey.count(tn.name) > 0) {
-                            self(self, tn.name);
-                        }
-                    }
+            for (const std::string& depKey : collectDirectCompositeDeps(arena, symbols, key)) {
+                if (compositeByKey.count(depKey) > 0) {
+                    self(self, depKey);
                 }
             }
             sortedCompositeDecls.push_back(compositeByKey.at(key));

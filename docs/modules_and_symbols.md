@@ -143,14 +143,14 @@ Inside `GlobalSymbolTable`, declarations are indexed by `symbolKey(moduleId, nam
 
 `splitSymbolKey(key)` splits a `"::"` key back into `{moduleId, baseName}`.
 
-### 4.2 C++ Identifier Mangling (`makeCppTypeName` & `makeCppFnName`)
-`sanitizeModuleId(moduleId)` replaces every non-alphanumeric character (such as `'/'` or `'.'`) with `'_'`. The emitter then uses `makeCppTypeName` and `makeCppFnName` to compute each symbol's emitted C++ identifier:
+### 4.2 C++ Identifier Mangling (`makeCppTypeName`, `makeCppFnName` & `makeCppConstName`)
+`sanitizeModuleId(moduleId)` maps `'_'` to `"__"` and replaces every non-alphanumeric character (such as `'/'` or `'.'`) with `'_'` for a 1-to-1 collision-free module prefix. The emitter then uses `makeCppTypeName`, `makeCppFnName`, and `makeCppConstName` to compute each symbol's emitted C++ identifier:
 
 | Declaration Kind | Root Module (`moduleId == ""`) | Imported Module (`moduleId == "entities/hero"`) | `extern` Declaration (`isExtern == true`) |
 | :--- | :--- | :--- | :--- |
 | **`type Hero`** | `struct Hero` | `struct cb_entities_hero__Hero` | Unmangled (`Hero`, not re-emitted as a struct if extern) |
-| **`alias Id = int`** | `using Id = int;` | `using cb_entities_hero__Id = int;` | N/A (`extern alias` is forbidden) |
-| **`fn makeHero()`** | `makeHero(...)` | `cbEntitiesHeroMakeHero(...)` | Unmangled (`makeHero(...)`) |
-| **`fn main()`** | `cbMain()` (called by generated `int main()`) | `cbEntitiesHeroMain()` | Unmangled |
+| **`alias Id = int`** | `using Id = int64_t;` | `using cb_entities_hero__Id = int64_t;` | N/A (`extern alias` is forbidden) |
+| **`fn makeHero()`** | `makeHero(...)` | `cb_entities_hero__makeHero(...)` | Unmangled (`makeHero(...)`) |
+| **`fn main()`** | `cbMain()` (called by generated `int main()`) | `cb_entities_hero__main()` | Unmangled |
 
 Because `extern` types and functions bind to existing C/C++ symbols from `import header` files or linked libraries, their C++ names are **never mangled**, regardless of which `.cb` module declares them.

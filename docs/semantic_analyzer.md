@@ -17,12 +17,19 @@ This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/sy
 ```cpp
 struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
+    std::unordered_map<std::string, EnumSymbol> enums;
+    std::unordered_map<std::string, UnionSymbol> unions;
     std::unordered_map<std::string, AliasSymbol> aliases;
+    std::unordered_map<std::string, ConstSymbol> constants;
     std::unordered_map<std::string, FnSymbol> functions;
     std::vector<std::string> headers;
     std::vector<std::string> linkLibs;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> modules;
     std::unordered_map<std::string, std::unordered_map<std::string, VarSymbol>> fnScopes;
+    std::unordered_set<std::string> explicitlyImportedModules;
+    std::unordered_set<std::string> referencedModules;
+    std::unordered_map<std::string, std::vector<std::string>> headerModules;
+    bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
     TypeId typeStr = INVALID_ID;
@@ -32,6 +39,7 @@ struct GlobalSymbolTable {
     TypeId typeNull = INVALID_ID;
     TypeId typeErr = INVALID_ID;
     TypeId typeCptr = INVALID_ID;
+    TypeId typeBytes = INVALID_ID;
 };
 ```
 
@@ -256,10 +264,10 @@ In `analyzeStmt()` (`VarAssignment`):
 3. **`byref` Parameter Mutability:** Function parameters are passed by value by default (`isByref = false`). When a parameter is marked `byref p as Player`, `VarSymbol::isByref = true` is recorded in the function scope and emitted as a mutable C++ reference (`Player& p`).
 
 ### 6.3 `select case` Target and Case Expression Constraints
-`select case <target>` supports `int`, `bool`, `str`, and `enum` expressions. The analyzer validates that:
-1. The target expression is of type `int`, `bool`, `str`, or an `enum` (reporting an error otherwise).
-2. Every match expression in each `case expr1, expr2` clause matches the target type.
-Integral and boolean targets lower to native C++ `switch` jump tables with stacked `case` labels, while string targets lower to a single-evaluation temporary variable paired with an `if / else if / else` equality chain.
+`select case <target>` supports `int`, `bool`, `str`, `enum`, and tagged `union` expressions. The analyzer validates that:
+1. The target expression is of type `int`, `bool`, `str`, an `enum`, or a `union` (reporting an error otherwise).
+2. Every match expression in each `case expr1, expr2` clause matches the target type (or names a valid variant of the target `union`, supporting `case Variant as payload` binding on single-variant clauses).
+Integral, boolean, and enum targets lower to native C++ `switch` jump tables with stacked `case` labels, string targets lower to a single-evaluation temporary variable paired with an `if / else if / else` equality chain, and union targets switch on `_data.index()` with `std::get<Idx>` payload extraction.
 
 ### 6.4 Loop Nesting Depth & `break` / `continue` Validation
 The analyzer tracks loop depth (`loopDepth`) inside `ForStmt` and `WhileStmt` blocks. Using `break` or `continue` outside of a loop (`loopDepth <= 0`) is rejected at compile time with an `AnalyzerError`.

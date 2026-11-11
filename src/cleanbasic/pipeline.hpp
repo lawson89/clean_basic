@@ -290,6 +290,35 @@ inline std::string buildBackendPchHeaderSource() {
     return content;
 }
 
+inline std::optional<std::string> readFileToString(std::string_view filePath, bool binary = false) {
+    std::ios_base::openmode mode = std::ios::in;
+    if (binary) {
+        mode |= std::ios::binary;
+    }
+    std::ifstream in(std::string(filePath), mode);
+    if (!in.is_open()) {
+        return std::nullopt;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+inline bool atomicRenameWithReplace(const std::filesystem::path& src, const std::filesystem::path& dst) {
+    std::error_code ec;
+    std::filesystem::rename(src, dst, ec);
+    if (ec) {
+        std::filesystem::remove(dst, ec);
+        ec.clear();
+        std::filesystem::rename(src, dst, ec);
+        if (ec) {
+            std::filesystem::remove(src, ec);
+            return false;
+        }
+    }
+    return true;
+}
+
 inline std::string computeBackendPchHash(
     std::string_view compilerCmd,
     const TargetSpec& targetSpec,
@@ -325,12 +354,10 @@ inline std::string computeBackendPchHash(
             hash = fnv1aUpdate64(hash, ":");
             hash = fnv1aUpdate64(hash, std::to_string(mtimeTicks));
         } else {
-            std::ifstream in(fullPath, std::ios::in | std::ios::binary);
-            if (in.is_open()) {
-                std::ostringstream ss;
-                ss << in.rdbuf();
+            const auto contentOpt = readFileToString(fullPath, true);
+            if (contentOpt.has_value()) {
                 hash = fnv1aUpdate64(hash, "|");
-                hash = fnv1aUpdate64(hash, ss.str());
+                hash = fnv1aUpdate64(hash, *contentOpt);
             }
         }
     }
@@ -401,15 +428,8 @@ inline PchPrepareResult ensureBackendPch(
         outHeader.close();
     }
 
-    std::filesystem::rename(tmpHeaderPath, headerPath, ec);
-    if (ec) {
-        std::filesystem::remove(headerPath, ec);
-        ec.clear();
-        std::filesystem::rename(tmpHeaderPath, headerPath, ec);
-        if (ec) {
-            std::filesystem::remove(tmpHeaderPath, ec);
-            return res;
-        }
+    if (!atomicRenameWithReplace(tmpHeaderPath, headerPath)) {
+        return res;
     }
 
     const std::filesystem::path tmpGchPath = std::filesystem::path(gchPath.string() + ".tmp." + uniqueSuffix);
@@ -431,15 +451,8 @@ inline PchPrepareResult ensureBackendPch(
         return res;
     }
 
-    std::filesystem::rename(tmpGchPath, gchPath, ec);
-    if (ec) {
-        std::filesystem::remove(gchPath, ec);
-        ec.clear();
-        std::filesystem::rename(tmpGchPath, gchPath, ec);
-        if (ec) {
-            std::filesystem::remove(tmpGchPath, ec);
-            return res;
-        }
+    if (!atomicRenameWithReplace(tmpGchPath, gchPath)) {
+        return res;
     }
 
     res.used = true;
@@ -708,21 +721,13 @@ inline ModuleLoadResult loadAndParseModuleFile(
     for (size_t i = 0; i < candidates.size(); ++i) {
         res.candidatePath = candidates[i];
         auto memSource = findInMemorySource(openBuffers, res.candidatePath);
-        std::ifstream modIn;
         if (!memSource.has_value()) {
-            modIn.open(res.candidatePath);
+            memSource = readFileToString(res.candidatePath);
         }
-        if (memSource.has_value() || modIn.is_open()) {
+        if (memSource.has_value()) {
             res.found = true;
             res.candidateIndex = i;
-            if (memSource.has_value()) {
-                res.source = *memSource;
-            } else {
-                std::ostringstream ss;
-                ss << modIn.rdbuf();
-                res.source = ss.str();
-            }
-            if (modIn.is_open()) modIn.close();
+            res.source = *memSource;
 
             const auto lex = tokenize(res.source, res.candidatePath);
             if (!lex.ok) {
@@ -963,18 +968,14 @@ inline BuildFileResult buildFileWithOptions(
         return res;
     }
 
-    std::ifstream inFile(inputPath);
-    if (!inFile.is_open()) {
+    const auto sourceOpt = readFileToString(inputPath);
+    if (!sourceOpt.has_value()) {
         BuildFileResult res{};
         res.ok = false;
         res.error = makeError("FileNotFoundError", "Source file not found: " + inputPath, inputPath, 1, 1);
         return res;
     }
-
-    std::ostringstream sstr;
-    sstr << inFile.rdbuf();
-    inFile.close();
-    const std::string source = sstr.str();
+    const std::string source = *sourceOpt;
 
     const std::string parentDir = parentDirOf(inputPath);
 

@@ -102,27 +102,95 @@ inline std::vector<uint8_t> cbBytesSliceFrom(const std::vector<uint8_t>& b, int6
     return cbBytesSlice(b, start, static_cast<int64_t>(b.size()));
 }
 
+inline size_t cbStrUtf8SeqLen(const std::string& s, size_t idx) {
+    if (idx >= s.size()) {
+        return 0;
+    }
+    const unsigned char b0 = static_cast<unsigned char>(s[idx]);
+    if (b0 <= 0x7Fu) {
+        return 1;
+    }
+    if (b0 >= 0xC2u && b0 <= 0xDFu) {
+        if (idx + 1 >= s.size()) {
+            return 0;
+        }
+        const unsigned char b1 = static_cast<unsigned char>(s[idx + 1]);
+        if ((b1 & 0xC0u) != 0x80u) {
+            return 0;
+        }
+        return 2;
+    }
+    if (b0 >= 0xE0u && b0 <= 0xEFu) {
+        if (idx + 2 >= s.size()) {
+            return 0;
+        }
+        const unsigned char b1 = static_cast<unsigned char>(s[idx + 1]);
+        const unsigned char b2 = static_cast<unsigned char>(s[idx + 2]);
+        if ((b1 & 0xC0u) != 0x80u || (b2 & 0xC0u) != 0x80u) {
+            return 0;
+        }
+        if (b0 == 0xE0u && b1 < 0xA0u) {
+            return 0;
+        }
+        if (b0 == 0xEDu && b1 >= 0xA0u) {
+            return 0;
+        }
+        return 3;
+    }
+    if (b0 >= 0xF0u && b0 <= 0xF4u) {
+        if (idx + 3 >= s.size()) {
+            return 0;
+        }
+        const unsigned char b1 = static_cast<unsigned char>(s[idx + 1]);
+        const unsigned char b2 = static_cast<unsigned char>(s[idx + 2]);
+        const unsigned char b3 = static_cast<unsigned char>(s[idx + 3]);
+        if ((b1 & 0xC0u) != 0x80u || (b2 & 0xC0u) != 0x80u || (b3 & 0xC0u) != 0x80u) {
+            return 0;
+        }
+        if (b0 == 0xF0u && b1 < 0x90u) {
+            return 0;
+        }
+        if (b0 == 0xF4u && b1 > 0x8Fu) {
+            return 0;
+        }
+        return 4;
+    }
+    return 0;
+}
+
+inline size_t cbStrUtf8Step(const std::string& s, size_t idx) {
+    const size_t n = cbStrUtf8SeqLen(s, idx);
+    if (n > 0) {
+        return n;
+    }
+    return 1;
+}
+
+inline int cbHexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
 inline std::tuple<std::string, CbError> cbBytesToUtf8(const std::vector<uint8_t>& b) {
+    std::string s(reinterpret_cast<const char*>(b.data()), b.size());
     size_t i = 0;
-    const size_t n = b.size();
+    const size_t n = s.size();
     while (i < n) {
-        uint8_t byte = b[i];
-        if (byte <= 0x7F) {
-            i += 1;
-        } else if ((byte & 0xE0) == 0xC0) {
-            if (i + 1 >= n || (b[i + 1] & 0xC0) != 0x80) return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
-            i += 2;
-        } else if ((byte & 0xF0) == 0xE0) {
-            if (i + 2 >= n || (b[i + 1] & 0xC0) != 0x80 || (b[i + 2] & 0xC0) != 0x80) return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
-            i += 3;
-        } else if ((byte & 0xF8) == 0xF0) {
-            if (i + 3 >= n || (b[i + 1] & 0xC0) != 0x80 || (b[i + 2] & 0xC0) != 0x80 || (b[i + 3] & 0xC0) != 0x80) return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
-            i += 4;
-        } else {
+        const size_t seqLen = cbStrUtf8SeqLen(s, i);
+        if (seqLen == 0) {
             return {std::string(""), CbError{"Invalid UTF-8 byte sequence", 1}};
         }
+        i += seqLen;
     }
-    return {std::string(reinterpret_cast<const char*>(b.data()), b.size()), CbError{"", 0}};
+    return {s, CbError{"", 0}};
 }
 
 inline std::vector<uint8_t> cbStrToBytes(const std::string& s) {
@@ -148,31 +216,7 @@ inline std::vector<std::string> cbStrUtf8Chars(const std::string& s) {
     size_t i = 0;
     const size_t n = s.size();
     while (i < n) {
-        const unsigned char b0 = static_cast<unsigned char>(s[i]);
-        size_t step = 1;
-        if (b0 >= 0xC2u && b0 <= 0xDFu && i + 1 < n) {
-            const unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
-            if ((b1 & 0xC0u) == 0x80u) {
-                step = 2;
-            }
-        } else if (b0 >= 0xE0u && b0 <= 0xEFu && i + 2 < n) {
-            const unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
-            const unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
-            if ((b1 & 0xC0u) == 0x80u && (b2 & 0xC0u) == 0x80u) {
-                if (!(b0 == 0xE0u && b1 < 0xA0u) && !(b0 == 0xEDu && b1 >= 0xA0u)) {
-                    step = 3;
-                }
-            }
-        } else if (b0 >= 0xF0u && b0 <= 0xF4u && i + 3 < n) {
-            const unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
-            const unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
-            const unsigned char b3 = static_cast<unsigned char>(s[i + 3]);
-            if ((b1 & 0xC0u) == 0x80u && (b2 & 0xC0u) == 0x80u && (b3 & 0xC0u) == 0x80u) {
-                if (!(b0 == 0xF0u && b1 < 0x90u) && !(b0 == 0xF4u && b1 > 0x8Fu)) {
-                    step = 4;
-                }
-            }
-        }
+        const size_t step = cbStrUtf8Step(s, i);
         out.push_back(s.substr(i, step));
         i += step;
     }
@@ -194,17 +238,11 @@ inline std::tuple<std::vector<uint8_t>, CbError> cbBytesFromHex(const std::strin
     if (hex.size() % 2 != 0) {
         return {std::vector<uint8_t>{}, CbError{"Invalid hexadecimal string: length must be even", 400}};
     }
-    auto hexVal = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
-    };
     std::vector<uint8_t> out;
     out.reserve(hex.size() / 2);
     for (size_t i = 0; i < hex.size(); i += 2) {
-        int v1 = hexVal(hex[i]);
-        int v2 = hexVal(hex[i + 1]);
+        const int v1 = cbHexDigitValue(hex[i]);
+        const int v2 = cbHexDigitValue(hex[i + 1]);
         if (v1 == -1 || v2 == -1) {
             return {std::vector<uint8_t>{}, CbError{"Invalid hexadecimal character in string", 400}};
         }
@@ -212,7 +250,6 @@ inline std::tuple<std::vector<uint8_t>, CbError> cbBytesFromHex(const std::strin
     }
     return {out, CbError{"", 0}};
 }
-
 inline int64_t cbBytesReadU16Le(const std::vector<uint8_t>& b, int64_t offset) {
     if (offset < 0 || offset + 2 > static_cast<int64_t>(b.size())) return 0;
     const size_t off = static_cast<size_t>(offset);

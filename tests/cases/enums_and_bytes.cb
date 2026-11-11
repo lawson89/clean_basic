@@ -10,6 +10,7 @@
 ' EXPECT_OUT: GIF slice: GIF, sliceFrom: 89a
 ' EXPECT_OUT: fromHex: deadbeef, len: 4
 ' EXPECT_OUT: toBytes roundtrip: CleanBasic
+' EXPECT_OUT: Invalid UTF-8 rejected: overlong=true, surrogate=true
 ' EXPECT_OUT: Endian U16Le: 4660, U16Be: 4660, U32Le: 287454020
 ' EXPECT_OUT: Whole file bytes match: true
 ' EXPECT_OUT: Streamed bytes match: aabb and ccdd
@@ -128,6 +129,22 @@ fn testBytesBuffers() can error
     dim encoded = originalStr.toBytes()
     dim decodedStr = encoded.toUtf8()
     print("toBytes roundtrip: " & decodedStr)
+
+    dim overlongRejected = false
+    try
+        dim badOverlong = b"\xc0\x80".toUtf8()
+        print(badOverlong)
+    catch e
+        overlongRejected = true
+    end try
+    dim surrogateRejected = false
+    try
+        dim badSurrogate = b"\xed\xa0\x80".toUtf8()
+        print(badSurrogate)
+    catch e
+        surrogateRejected = true
+    end try
+    print($"Invalid UTF-8 rejected: overlong={overlongRejected}, surrogate={surrogateRejected}")
     dim endianBuf as bytes = b"\x00\x00\x00\x00\x00\x00\x00\x00"
     endianBuf.writeU16Le(4660, 0)
     endianBuf.writeU16Be(4660, 2)

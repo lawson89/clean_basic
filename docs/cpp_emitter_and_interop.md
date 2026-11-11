@@ -41,7 +41,7 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
 
 ## 2. Emitted C++17 Runtime Preamble (`CPP_RUNTIME_PREAMBLE`)
 
-Every generated `build.cpp` begins with a lightweight, zero-allocation runtime preamble (`emitter.hpp:21-51`):
+Every generated `build.cpp` begins with a lightweight, self-contained C++17 runtime preamble (`src/cleanbasic/runtime_preamble.hpp`), providing `CbError`, `cbToStr`, `cbHasError`, `cbStampError`, `cbAssertCond` / `cbAssertCmp`, RFC 3629 UTF-8 and `bytes` helpers (`cbStrUtf8SeqLen`, `cbStrUtf8Step`, `cbStrUtf8Chars`, `cbBytesToUtf8`, `cbBytesFromHex`), bounds-safe container helpers (`cbListGet`, `cbDictAt`, `cbDictGet`, `cbDictKeys`), `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`:
 
 ```cpp
 #include <cstdint>

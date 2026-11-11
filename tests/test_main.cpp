@@ -4332,4 +4332,89 @@ end fn
         CHECK(macroTp.cppCode.find("int64_t errno_cb") != std::string::npos);
         CHECK(macroTp.cppCode.find("EOF_cb = (errno_cb + 1)") != std::string::npos);
     }
+
+    SECTION("Sanitizes non-extern struct field names that collide with C++ keywords or macros") {
+        const std::string structKwSrc = R"CB(
+type Config
+    default as int = 42
+    class as str = "worker"
+    template as int = 7
+    delete as bool = false
+end type
+
+fn main() as int
+    dim c = Config(default=10, class="admin", template=3, delete=true)
+    c.default += c.template
+    if c.delete and c.class == "admin"
+        return c.default
+    end if
+    return 0
+end fn
+)CB";
+        const auto tp = cb::transpileSource(structKwSrc, "struct_kw.cb");
+        REQUIRE(tp.ok);
+        CHECK(tp.cppCode.find("int64_t default_ = 42;") != std::string::npos);
+        CHECK(tp.cppCode.find(R"(std::string class_ = std::string("worker");)") != std::string::npos);
+        CHECK(tp.cppCode.find("int64_t template_ = 7;") != std::string::npos);
+        CHECK(tp.cppCode.find("bool delete_ = false;") != std::string::npos);
+        CHECK(tp.cppCode.find("c.default_") != std::string::npos);
+        CHECK(tp.cppCode.find("c.template_") != std::string::npos);
+    }
+
+    SECTION("Emits shared RFC 3629 UTF-8 validator in cbBytesToUtf8 and single-entry std::filesystem::remove in cbFsRemove") {
+        const std::string utf8AndFsSrc = R"CB(
+import "std/fs"
+
+fn checkUtf8(data as bytes) as str can error
+    return data.toUtf8()
+end fn
+
+fn main() as int
+    try
+        dim s = checkUtf8(b"\xc0\x80")
+        print(s)
+    catch e
+        print(e.msg)
+    end try
+    try
+        fs.remove("nonexistent_file.txt")
+    catch e
+        print(e.msg)
+    end try
+    return 0
+end fn
+)CB";
+        const auto tp = cb::transpileSource(utf8AndFsSrc, "utf8_fs.cb");
+        REQUIRE(tp.ok);
+        CHECK(tp.cppCode.find("const size_t seqLen = cbStrUtf8SeqLen(s, i);") != std::string::npos);
+        CHECK(tp.cppCode.find("b0 == 0xE0u && b1 < 0xA0u") != std::string::npos);
+        CHECK(tp.cppCode.find("b0 == 0xEDu && b1 >= 0xA0u") != std::string::npos);
+        CHECK(tp.cppCode.find("b0 == 0xF0u && b1 < 0x90u") != std::string::npos);
+        CHECK(tp.cppCode.find("b0 == 0xF4u && b1 > 0x8Fu") != std::string::npos);
+
+        const std::string fsBridgeContent = cb::testE2E::readFileText("stdlib/fs/fs_bridge.hpp");
+        CHECK(fsBridgeContent.find("const bool removed = std::filesystem::remove(path, ec);") != std::string::npos);
+    }
+
+    SECTION("CLI parseCliArgs populates clear errorMessage for missing flag values and unknown flags") {
+        const auto missingOut = cb::parseCliArgs({"main.cb", "-o"});
+        CHECK(!missingOut.ok);
+        CHECK(missingOut.errorMessage.find("Missing output file path") != std::string::npos);
+
+        const auto missingBin = cb::parseCliArgs({"main.cb", "-b"});
+        CHECK(!missingBin.ok);
+        CHECK(missingBin.errorMessage.find("Missing binary output path") != std::string::npos);
+
+        const auto missingTarget = cb::parseCliArgs({"main.cb", "-t"});
+        CHECK(!missingTarget.ok);
+        CHECK(missingTarget.errorMessage.find("Missing target platform") != std::string::npos);
+
+        const auto missingCc = cb::parseCliArgs({"main.cb", "--cc"});
+        CHECK(!missingCc.ok);
+        CHECK(missingCc.errorMessage.find("Missing compiler command") != std::string::npos);
+
+        const auto unknownFlag = cb::parseCliArgs({"main.cb", "--unknown-flag"});
+        CHECK(!unknownFlag.ok);
+        CHECK(unknownFlag.errorMessage.find("Unknown option") != std::string::npos);
+    }
 }

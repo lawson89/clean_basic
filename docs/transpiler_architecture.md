@@ -155,6 +155,7 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
    using ExprVariant = std::variant<
        NumberLiteral,
        StringLiteral,
+       BytesLiteral,
        BoolLiteral,
        NullLiteral,
        Identifier,
@@ -178,8 +179,10 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
        SelectStmt,
        TryCatchStmt,
        DeferStmt,
+       WhileStmt,
        ReturnStmt,
-       BreakStmt
+       BreakStmt,
+       ContinueStmt
    >;
    ```
 
@@ -189,17 +192,20 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
        ImportDecl,
        AliasDecl,
        TypeDecl,
+       EnumDecl,
+       UnionDecl,
+       ConstDecl,
        FnDecl
    >;
    ```
 
-To adhere to the zero-raw-pointer rule, the analyzer and emitter inspect variants using `std::holds_alternative<T>(node.payload)` followed by reference-returning `std::get<T>(node.payload)` rather than pointer-returning `std::get_if`.
+The parser, analyzer, and emitter inspect arena variants ergonomically using non-owning `std::get_if<T>` helper methods on `AstArena` (`arena.getExpr<T>(id)`, `arena.getStmt<T>(id)`, `arena.getDecl<T>(id)`).
 
 ---
 
-## 3. Zero-Exception Error Handling (`src/cleanbasic/diagnostics.hpp`)
+## 3. Structured Diagnostic Reporting (`src/cleanbasic/diagnostics.hpp`)
 
-Because C++ exceptions are disabled (`-fno-exceptions`), every compiler phase reports errors through the POD `cb::DiagnosticError` structure:
+Every compiler phase reports errors at its public API boundary through the POD `cb::DiagnosticError` structure (using internal exception short-circuiting inside `Parser` and `Analyzer` caught by `parseTokensWithArena` and `analyzeProgram`):
 
 ```cpp
 struct DiagnosticError {

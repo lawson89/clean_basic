@@ -99,6 +99,7 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
                 idx += 2;
             } else {
                 args.ok = false;
+                args.errorMessage = "Missing output file path after '" + std::string(arg) + "'";
                 return args;
             }
         } else if (arg == "-c" || arg == "--compile") {
@@ -111,6 +112,7 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
                 idx += 2;
             } else {
                 args.ok = false;
+                args.errorMessage = "Missing binary output path after '" + std::string(arg) + "'";
                 return args;
             }
         } else if (arg == "-t" || arg == "--target") {
@@ -120,6 +122,7 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
                 idx += 2;
             } else {
                 args.ok = false;
+                args.errorMessage = "Missing target platform after '" + std::string(arg) + "'";
                 return args;
             }
         } else if (arg == "--cc") {
@@ -128,6 +131,7 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
                 idx += 2;
             } else {
                 args.ok = false;
+                args.errorMessage = "Missing compiler command after '--cc'";
                 return args;
             }
         } else if (arg == "-r" || arg == "--release") {
@@ -194,6 +198,7 @@ inline CliArgs parseCliArgs(const std::vector<std::string_view>& rawArgs) {
             return args;
         } else {
             args.ok = false;
+            args.errorMessage = "Unknown option or unexpected argument: '" + std::string(arg) + "'";
             return args;
         }
     }

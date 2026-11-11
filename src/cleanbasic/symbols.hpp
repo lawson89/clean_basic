@@ -289,7 +289,7 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     errType.fieldOrder.push_back(FieldDecl{1, 1, "code", symbols.typeInt});
     errType.fieldOrder.push_back(FieldDecl{1, 1, "file", symbols.typeStr});
     errType.fieldOrder.push_back(FieldDecl{1, 1, "line", symbols.typeInt});
-    errType.cppName = "cbErr";
+    errType.cppName = "CbError";
     symbols.types[errType.key] = std::move(errType);
 
     FnSymbol printFn{};
@@ -517,8 +517,10 @@ inline TypeId canonicalizeType(
     return canonicalTid;
 }
 
-inline bool isEnumType(
+template <typename TableMap>
+inline bool isTypeInTable(
     const GlobalSymbolTable& symbols,
+    const TableMap& table,
     TypeId tid,
     const AstArena& arena,
     std::string_view currentModuleId
@@ -527,7 +529,16 @@ inline bool isEnumType(
         return false;
     }
     const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
-    return symbols.enums.count(resolved.name) > 0;
+    return table.count(resolved.name) > 0;
+}
+
+inline bool isEnumType(
+    const GlobalSymbolTable& symbols,
+    TypeId tid,
+    const AstArena& arena,
+    std::string_view currentModuleId
+) {
+    return isTypeInTable(symbols, symbols.enums, tid, arena, currentModuleId);
 }
 
 inline bool isUnionType(
@@ -536,11 +547,7 @@ inline bool isUnionType(
     const AstArena& arena,
     std::string_view currentModuleId
 ) {
-    if (tid >= arena.types.size()) {
-        return false;
-    }
-    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, arena.types[tid]);
-    return symbols.unions.count(resolved.name) > 0;
+    return isTypeInTable(symbols, symbols.unions, tid, arena, currentModuleId);
 }
 
 inline std::optional<TypeSymbol> resolveTypeSymbolByName(
@@ -910,33 +917,44 @@ inline std::optional<FnSymbol> resolveUfcsFn(
     return std::nullopt;
 }
 
+template <typename SymbolT>
+inline std::optional<SymbolT> resolveSymbolInTable(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    const std::unordered_map<std::string, SymbolT>& table,
+    std::string_view currentModuleId,
+    std::string_view typeName
+) {
+    const std::string localKey = symbolKey(currentModuleId, typeName);
+    const auto it = table.find(localKey);
+    if (it != table.end()) {
+        return it->second;
+    }
+    const std::string rootKey = symbolKey("", typeName);
+    const auto it2 = table.find(rootKey);
+    if (it2 != table.end()) {
+        return it2->second;
+    }
+    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
+    const auto it3 = table.find(normKey);
+    if (it3 != table.end()) {
+        return it3->second;
+    }
+    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(typeName), {}, {}, INVALID_ID, false});
+    const auto it4 = table.find(resolved.name);
+    if (it4 != table.end()) {
+        return it4->second;
+    }
+    return std::nullopt;
+}
+
 inline std::optional<EnumSymbol> resolveEnumSymbol(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
     std::string_view typeName
 ) {
-    const std::string localKey = symbolKey(currentModuleId, typeName);
-    const auto it = symbols.enums.find(localKey);
-    if (it != symbols.enums.end()) {
-        return it->second;
-    }
-    const std::string rootKey = symbolKey("", typeName);
-    const auto it2 = symbols.enums.find(rootKey);
-    if (it2 != symbols.enums.end()) {
-        return it2->second;
-    }
-    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
-    const auto it3 = symbols.enums.find(normKey);
-    if (it3 != symbols.enums.end()) {
-        return it3->second;
-    }
-    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(typeName), {}, {}, INVALID_ID, false});
-    const auto it4 = symbols.enums.find(resolved.name);
-    if (it4 != symbols.enums.end()) {
-        return it4->second;
-    }
-    return std::nullopt;
+    return resolveSymbolInTable(arena, symbols, symbols.enums, currentModuleId, typeName);
 }
 
 inline std::optional<UnionSymbol> resolveUnionSymbolByName(
@@ -945,27 +963,7 @@ inline std::optional<UnionSymbol> resolveUnionSymbolByName(
     std::string_view currentModuleId,
     std::string_view typeName
 ) {
-    const std::string localKey = symbolKey(currentModuleId, typeName);
-    const auto it = symbols.unions.find(localKey);
-    if (it != symbols.unions.end()) {
-        return it->second;
-    }
-    const std::string rootKey = symbolKey("", typeName);
-    const auto it2 = symbols.unions.find(rootKey);
-    if (it2 != symbols.unions.end()) {
-        return it2->second;
-    }
-    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
-    const auto it3 = symbols.unions.find(normKey);
-    if (it3 != symbols.unions.end()) {
-        return it3->second;
-    }
-    const TypeNode resolved = resolveAliasFromNode(arena, symbols, currentModuleId, TypeNode{1, 1, std::string(typeName), {}, {}, INVALID_ID, false});
-    const auto it4 = symbols.unions.find(resolved.name);
-    if (it4 != symbols.unions.end()) {
-        return it4->second;
-    }
-    return std::nullopt;
+    return resolveSymbolInTable(arena, symbols, symbols.unions, currentModuleId, typeName);
 }
 
 inline std::optional<UnionSymbol> resolveUnionSymbol(
@@ -1555,6 +1553,38 @@ inline std::optional<FnSymbol> resolveFuncCall(
     }
 
     return std::nullopt;
+}
+
+inline std::vector<std::string> collectDirectCompositeDeps(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    const std::string& key
+) {
+    std::vector<std::string> deps;
+    const auto tit = symbols.types.find(key);
+    if (tit != symbols.types.end() && !tit->second.isExtern) {
+        for (const auto& fld : tit->second.fieldOrder) {
+            const TypeNode& tn = arena.getType(fld.typeId);
+            if (tn.typeArgs.empty() && tn.returnType == INVALID_ID) {
+                if (symbols.types.count(tn.name) > 0 || symbols.unions.count(tn.name) > 0) {
+                    deps.push_back(tn.name);
+                }
+            }
+        }
+    } else {
+        const auto uit = symbols.unions.find(key);
+        if (uit != symbols.unions.end()) {
+            for (const auto& uv : uit->second.variants) {
+                const TypeNode& tn = arena.getType(uv.type);
+                if (tn.typeArgs.empty() && tn.returnType == INVALID_ID) {
+                    if (symbols.types.count(tn.name) > 0 || symbols.unions.count(tn.name) > 0) {
+                        deps.push_back(tn.name);
+                    }
+                }
+            }
+        }
+    }
+    return deps;
 }
 
 } // namespace cb

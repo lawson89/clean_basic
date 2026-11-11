@@ -33,7 +33,7 @@ struct LexResult {
 
 | Token `kind` | Examples (`Token::value`) | Description |
 | :--- | :--- | :--- |
-| `KEYWORD` | `enum`, `end enum`, `union`, `end union`, `until`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
+| `KEYWORD` | `public`, `private`, `extern`, `import`, `import header`, `import link`, `const`, `dim`, `byref`, `enum`, `end enum`, `union`, `end union`, `while`, `end while`, `until`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
 | `TYPE_KW` | `int`, `float`, `bool`, `str`, `bytes`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
 | `NUMBER` | `42`, `1_000_000`, `0xFF_00`, `0b1010_0101`, `3.141_592` | Decimal, hexadecimal (`0x...`), or binary (`0b...`) integer literals and decimal floating-point literals (supporting `_` digit separators). |
@@ -107,7 +107,7 @@ Binary '==', '!=', '<', '>', '<=', '>=' (left-associative)" as L4
 rectangle "5. parseAdditive
 Binary '+', '-', '&' (left-associative)" as L5
 rectangle "6. parseMultiplicative
-Binary '*', '/' (left-associative)" as L6
+Binary '*', '/', '%' (left-associative)" as L6
 rectangle "7. parseUnary
 Unary prefix '+', '-' (right-associative)" as L7
 rectangle "8. parsePostfix
@@ -140,7 +140,7 @@ L8 --> L9
 ## 3. Statement & Declaration Disambiguation
 
 ### 3.1 Top-Level Declarations (`parseTopLevelDecl`)
-At the top level of a `.cb` file, only four declaration families are legal:
+At the top level of a `.cb` file, seven declaration families are supported:
 1. **Imports (`ImportDecl`)**:
    * `import "path/to/mod.cb" [as alias]` (`kind = "module"`)
    * `import header "header.hpp"` (`kind = "header"`)
@@ -148,15 +148,15 @@ At the top level of a `.cb` file, only four declaration families are legal:
 2. **Type Aliases (`AliasDecl`)**:
    * `[public] alias Name = Type` (Applying `extern` to an `alias` is rejected with a `ParseError`).
 3. **Struct / Extern Types (`TypeDecl`)**:
-   * `[public] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
-   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
+   * `[public] [extern] type Name ... end type` for struct definitions with `[private] field as Type [= defaultExpr]` declarations.
+   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `enum`, `union`, `const`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
 4. **Enums (`EnumDecl`)**:
-   * `[public] enum Name [as int] ... end enum` for enumeration types.
-   * `[public] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
-   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
-5. **Module Constants (`ConstDecl`)**:
+   * `[public] enum Name [as int] ... end enum` for 64-bit integer-backed enumeration types.
+5. **Tagged Unions (`UnionDecl`)**:
+   * `[public] union Name ... end union` for sum types with `VariantName as Type` variant declarations.
+6. **Module Constants (`ConstDecl`)**:
    * `[public] const name [as Type] = Expr` declares a module-level constant.
-6. **Functions (`FnDecl`)**:
+7. **Functions (`FnDecl`)**:
    * `[public] [extern] fn name([byref] p as Type [= defaultExpr], ...) [as ReturnType] [can error]`
    * Fallible functions declare `can error` at the end of the signature (the legacy `as err` return shorthand is rejected with a `ParseError`).
    * If `isExtern` is true and `end fn` is not present, `parseFnDecl()` returns a bodyless extern `FnDecl` immediately after the signature line.
@@ -168,12 +168,13 @@ Inside a function body, `parseStatement()` dispatches on leading keywords:
 | Leading Token | Parser Function | AST Node & Disambiguation Rules |
 | :--- | :--- | :--- |
 | `dim` or `const` | `parseAssignmentOrExprStmt` | Parses `(dim\|const) <IDENT> [as <Type>] = <Expr>` into a `VarAssignment` with `isDim = true` or `isConst = true`. |
-| Any expression starter | `parseAssignmentOrExprStmt` | Parses lhs `firstExpr = parseExpr()`. If the next token is `ASSIGN` (`=`), parses rhs `valExpr` and emits a `VarAssignment` (covering variable reassignment, struct field mutation `p.health = 10`, and container index assignment `nums[0] = 5`). Otherwise, emits an `ExprStmt` (e.g., `print("hi")` or `hero.heal(10)`). |
+| Any expression starter | `parseAssignmentOrExprStmt` | Parses lhs `firstExpr = parseExpr()`. If the next token is `ASSIGN` (`=`) or `COMPOUND_ASSIGN` (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`), parses rhs `valExpr` and emits a `VarAssignment` (covering variable reassignment, struct field mutation `p.health = 10`, and container index assignment `nums[0] = 5`). Otherwise, emits an `ExprStmt` (e.g., `print("hi")` or `hero.heal(10)`). |
 | `if` | `parseIfStmt` | Parses `if <Expr>`, zero or more `else if <Expr>` branches (`ElseIfBranch`), optional `else` branch, and terminating `end if` into `IfStmt`. |
-| `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, and parses inclusive `<start> to <end> [step <step>]` into `rangeSpec`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal` or `for k, v in dictVal`). Terminated by `end for`. |
-| `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr1>[, <matchExpr2>...]` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
+| `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, and parses inclusive `<start> to <end> [step <step>]` or exclusive `<start> until <end> [step <step>]` into `rangeSpec`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal`, `for i, item in listVal`, or `for k, v in dictVal`). Terminated by `end for`. |
+| `while` | `parseWhileStmt` | Parses `while <Expr>`, statement list body, and `end while` into `WhileStmt`. |
+| `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr1>[, <matchExpr2>...] [as <binding>]` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
 | `try` | `parseTryCatchStmt` | Parses `try`, try statement list, `catch <errIdent>`, catch statement list, and `end try` into `TryCatchStmt`. |
 | `defer` | `parseDeferStmt` | Parses `defer`, statement list body, and `end defer` into `DeferStmt`. |
-| `return` | `parseReturnStmt` | Parses `return [<Expr>]` into `ReturnStmt` (`has_value = true` if an expression precedes `NEWLINE`/`EOF`). |
+| `return` | `parseReturnStmt` | Parses `return [<Expr>]` into `ReturnStmt` (`hasValue = true` if an expression precedes `NEWLINE`/`EOF`). |
 | `break` | `parseBreakStmt` | Parses `break` into `BreakStmt`. |
 | `continue` | `parseContinueStmt` | Parses `continue` into `ContinueStmt`. |

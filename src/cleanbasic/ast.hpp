@@ -228,9 +228,10 @@ struct RangeSpec {
 struct ForStmt {
     std::vector<std::string> loopVars;
     RangeSpec rangeSpec;
-    bool hasIterable = false;
     ExprId iterable = INVALID_ID;
     std::vector<StmtId> body;
+    bool implicitBubble = false;
+    bool breaksToCatch = false;
 };
 
 struct SelectCase {
@@ -255,6 +256,8 @@ struct DeferStmt {
 struct WhileStmt {
     ExprId condition = INVALID_ID;
     std::vector<StmtId> body;
+    bool implicitBubble = false;
+    bool breaksToCatch = false;
 };
 
 struct ReturnStmt {
@@ -583,8 +586,6 @@ struct AstArena {
 };
 
 struct Program {
-    uint32_t line = 1;
-    uint32_t col = 1;
     std::vector<DeclId> declarations;
     std::string fileName = "main.cb";
 };

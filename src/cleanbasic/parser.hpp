@@ -3,7 +3,6 @@
 
 #include "src/cleanbasic/ast.hpp"
 #include "src/cleanbasic/diagnostics.hpp"
-#include "src/cleanbasic/json.hpp"
 #include "src/cleanbasic/lexer.hpp"
 
 #include <cstddef>
@@ -49,6 +48,19 @@ inline int64_t parseIntegerLiteral(std::string_view raw) {
     return std::stoll(cleaned, nullptr, 10);
 }
 
+inline int hexDigitToInt(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
 inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string* errorOut = nullptr) {
     std::vector<uint8_t> bytes;
     if (raw.size() < 3) {
@@ -83,13 +95,13 @@ inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string
                     if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
                     return bytes;
                 }
-                const auto v1 = jsonHexDigitValue(raw[i + 2]);
-                const auto v2 = jsonHexDigitValue(raw[i + 3]);
-                if (!v1.has_value() || !v2.has_value()) {
+                const int v1 = hexDigitToInt(raw[i + 2]);
+                const int v2 = hexDigitToInt(raw[i + 3]);
+                if (v1 < 0 || v2 < 0) {
                     if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
                     return bytes;
                 }
-                bytes.push_back(static_cast<uint8_t>((v1.value() << 4) | v2.value()));
+                bytes.push_back(static_cast<uint8_t>((v1 << 4) | v2));
                 i += 4;
             } else {
                 bytes.push_back(static_cast<uint8_t>(esc));
@@ -667,7 +679,6 @@ public:
         }
 
         RangeSpec rangeSpec{};
-        bool hasIterable = false;
         ExprId iterable = INVALID_ID;
 
         if (check("ASSIGN")) {
@@ -694,7 +705,6 @@ public:
             rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr, inclusive};
         } else {
             match("KEYWORD", "in");
-            hasIterable = true;
             iterable = parseExpr();
         }
 
@@ -703,7 +713,7 @@ public:
         match("KEYWORD", "end for");
         expectNewlineOrEof();
 
-        return arena.addStmt(start.line, start.col, ForStmt{std::move(loopVars), rangeSpec, hasIterable, iterable, std::move(body)});
+        return arena.addStmt(start.line, start.col, ForStmt{std::move(loopVars), rangeSpec, iterable, std::move(body)});
     }
 
     StmtId parseSelectStmt() {

@@ -592,9 +592,12 @@ inline CbError cbFsRemove(const std::string& path) {
         return CbError{"Cannot remove empty path", 400};
     }
     std::error_code ec;
-    std::filesystem::remove_all(path, ec);
+    const bool removed = std::filesystem::remove(path, ec);
     if (ec) {
         return CbError{"Failed to remove path '" + path + "': " + ec.message(), 500};
+    }
+    if (!removed) {
+        return CbError{"Failed to remove path '" + path + "': file or directory does not exist", 404};
     }
     return CbError{"", 0};
 }

@@ -777,7 +777,7 @@ public:
             return;
         }
 
-        if (const auto* forStmt = arena.getStmt<ForStmt>(stmtId)) {
+        if (auto* forStmt = arena.getStmtMut<ForStmt>(stmtId)) {
             loopDepth += 1;
             if (forStmt->rangeSpec.hasRange) {
                 validateExprCalls(fn, forStmt->rangeSpec.start, scope, false);
@@ -788,10 +788,8 @@ public:
                 if (!forStmt->loopVars.empty()) {
                     bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
                 }
-            } else if (forStmt->hasIterable) {
-                bool dummyBubble = false;
-                bool dummyBreaks = false;
-                checkFallibleUsage(fn, forStmt->iterable, scope, dummyBubble, dummyBreaks);
+            } else if (forStmt->iterable != INVALID_ID) {
+                checkFallibleUsage(fn, forStmt->iterable, scope, forStmt->implicitBubble, forStmt->breaksToCatch);
                 validateExprCalls(fn, forStmt->iterable, scope, true);
                 const TypeId iterTid = inferExprType(arena, forStmt->iterable, symbols, scope, moduleId);
                 if (iterTid < arena.types.size()) {
@@ -842,7 +840,7 @@ public:
             return;
         }
 
-        if (const auto* whileStmt = arena.getStmt<WhileStmt>(stmtId)) {
+        if (auto* whileStmt = arena.getStmtMut<WhileStmt>(stmtId)) {
             loopDepth += 1;
             bool isFallibleCond = false;
             if (const auto* call = arena.getExpr<FuncCall>(whileStmt->condition)) {
@@ -852,9 +850,7 @@ public:
                 }
             }
             if (isFallibleCond) {
-                bool dummyBubble = false;
-                bool dummyBreaks = false;
-                checkFallibleUsage(fn, whileStmt->condition, scope, dummyBubble, dummyBreaks);
+                checkFallibleUsage(fn, whileStmt->condition, scope, whileStmt->implicitBubble, whileStmt->breaksToCatch);
                 validateExprCalls(fn, whileStmt->condition, scope, true);
             } else {
                 validateExprCalls(fn, whileStmt->condition, scope, false);
@@ -877,9 +873,6 @@ public:
 
             for (const auto& scase : selStmt->cases) {
                 if (isUnionTarget) {
-                    if (!scase.bindingName.empty() && scase.matchExprs.size() != 1) {
-                        setAnalyzerError(scase.line, scase.col, "Case payload binding ('as <ident>') requires a single variant in 'case'");
-                    }
                     TypeId boundPayloadTid = INVALID_ID;
                     for (const auto& mExpr : scase.matchExprs) {
                         std::string varName;
@@ -1308,37 +1301,10 @@ public:
         // Validate that composite value types (structs and unions) have no direct by-value recursive cycles
         {
             std::unordered_map<std::string, int> visitState;
-            auto collectDirectValueDeps = [&](const std::string& key) -> std::vector<std::string> {
-                std::vector<std::string> deps;
-                const auto tit = symbols.types.find(key);
-                if (tit != symbols.types.end() && !tit->second.isExtern) {
-                    for (const auto& fld : tit->second.fieldOrder) {
-                        const TypeNode& tn = arena.getType(fld.typeId);
-                        if (tn.typeArgs.empty() && tn.returnType == INVALID_ID) {
-                            if (symbols.types.count(tn.name) > 0 || symbols.unions.count(tn.name) > 0) {
-                                deps.push_back(tn.name);
-                            }
-                        }
-                    }
-                } else {
-                    const auto uit = symbols.unions.find(key);
-                    if (uit != symbols.unions.end()) {
-                        for (const auto& uv : uit->second.variants) {
-                            const TypeNode& tn = arena.getType(uv.type);
-                            if (tn.typeArgs.empty() && tn.returnType == INVALID_ID) {
-                                if (symbols.types.count(tn.name) > 0 || symbols.unions.count(tn.name) > 0) {
-                                    deps.push_back(tn.name);
-                                }
-                            }
-                        }
-                    }
-                }
-                return deps;
-            };
 
             auto dfsCycleCheck = [&](auto& self, const std::string& currKey) -> void {
                 visitState[currKey] = 1;
-                for (const std::string& depKey : collectDirectValueDeps(currKey)) {
+                for (const std::string& depKey : collectDirectCompositeDeps(arena, symbols, currKey)) {
                     const int st = visitState[depKey];
                     if (st == 1) {
                         std::string errFile = fileName;
