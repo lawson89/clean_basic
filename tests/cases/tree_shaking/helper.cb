@@ -1,0 +1,23 @@
+fn transitiveInternal(x as int) as int
+    return x * 2
+end fn
+
+fn defaultParamHelper() as int
+    return 7
+end fn
+
+pub fn usedPublic(a as int, b as int = defaultParamHelper()) as int
+    return transitiveInternal(a) + b
+end fn
+
+pub fn bareRefTarget(v as int) as int
+    return v + 1
+end fn
+
+pub fn unusedPublic(x as int) as int
+    return x + 999
+end fn
+
+fn unusedPrivate() as int
+    return 42
+end fn

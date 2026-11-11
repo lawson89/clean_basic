@@ -1,0 +1,159 @@
+' EXPECT_CPP: x = (x + 5);
+' EXPECT_CPP: x = (x - 3);
+' EXPECT_CPP: x = (x * 4);
+' EXPECT_CPP: x = (x / 6);
+' EXPECT_CPP: x = (x % 5);
+' EXPECT_CPP: msg = (msg + cbToStr(x));
+' EXPECT_CPP: std::string host = defaultHost;
+' EXPECT_CPP: int64_t port = 8080;
+' EXPECT_CPP: ServerConfig{defaultHost, 9090, false}
+' EXPECT_CPP: connectEndpoint(std::string("localhost"), 8080, 5000)
+' EXPECT_CPP: connectEndpoint(std::string("10.0.0.1"), 8080, 1500)
+' EXPECT_CPP: void* h = nullptr;
+' EXPECT_CPP: (h == nullptr)
+' EXPECT_CPP: cbListGet(nums, 0)
+' EXPECT_CPP: cbBytesGet(raw, 0)
+' EXPECT_CPP: cbDictAt(d, std::string("present"))
+' EXPECT_CPP: cbDictGet(d, std::string("missing"), 10)
+' EXPECT_CPP: inline const T& cbListGet(const std::vector<T>& v, int64_t idx)
+' EXPECT_CPP: inline const V& cbDictAt(const std::unordered_map<K, V>& d, const KArg& k)
+' EXPECT_CPP: cb_std_str__trim(
+' EXPECT_CPP: cb_std_str__split(
+' EXPECT_CPP: cb_std_str__join(
+' EXPECT_CPP: struct [[nodiscard]] CbError {
+' EXPECT_CPP: [[nodiscard]] CbError testZeroImportStdStrPrelude()
+' EXPECT_CPP: int64_t sumReadOnly(const std::vector<int64_t>& nums, const std::vector<uint8_t>& raw, const std::unordered_map<std::string, int64_t>& d)
+' EXPECT_OUT: compound: count=3
+' EXPECT_OUT: defaults: 127.0.0.1 | 9090 | localhost:8080 (t=5000) | 10.0.0.1:8080 (t=1500)
+' EXPECT_OUT: cptrNull: true
+' EXPECT_OUT: safeContainers: sum=165, zeroCopyTotal=12
+' EXPECT_OUT: zeroImportPrelude: alpha-beta:42
+' EXPECT_OUT: multilineCfg: localhost:8080 (retries=3)
+
+const defaultHost = "127.0.0.1"
+
+type ServerConfig
+    host as str = defaultHost
+    port as int = 8080
+    tls as bool = false
+end type
+
+type Item
+    id as int
+end type
+
+type MultilineConfig
+    host as str
+    port as int
+    retries as int
+end type
+
+fn makeMultilineConfig(
+    host as str,
+    port as int, # inline hash comment
+    retries as int, ' trailing comma + single-quote comment
+) as MultilineConfig
+    return MultilineConfig(
+        host=host,
+        port=port,
+        retries=retries,
+    )
+end fn
+
+fn connectEndpoint(host as str = "localhost", port as int = 8080, timeoutMs as int = 5000) as str
+    return $"{host}:{port} (t={timeoutMs})"
+end fn
+
+fn sumReadOnly(nums as list[int], raw as bytes, d as dict[str, int]) as int
+    return nums[0] + nums[99] + raw[0] + raw[99] + d["present"] + d.get("missing", 10)
+end fn
+
+fn mutateContainers(byref nums as list[int], byref d as dict[str, int])
+    nums[0] = 50
+    d["present"] = 100
+end fn
+
+fn readZeroCopyItems(items as list[Item], table as dict[str, list[Item]]) as int
+    dim total = items[0].id + table["a"][0].id
+    for it in items
+        total += it.id
+    end for
+    for k, v in table
+        total += v.len()
+    end for
+    return total
+end fn
+
+fn testZeroImportStdStrPrelude() can error
+    dim raw = "  alpha,beta,42  "
+    dim trimmed = raw.trim()
+    dim parts = trimmed.split(",")
+    dim num = parts[2].toInt()
+    dim joined = str.join([parts[0], parts[1]], "-")
+    if trimmed.contains("beta")
+        print($"zeroImportPrelude: {joined}:{num}")
+    end if
+end fn
+
+fn main() as int
+    dim x = 10
+    x += 5
+    x -= 3
+    x *= 4
+    x /= 6
+    x %= 5
+    dim msg = "count="
+    msg &= x
+    print("compound: " & msg)
+
+    dim cfg1 = ServerConfig()
+    dim cfg2 = ServerConfig(port=9090)
+    dim s1 = connectEndpoint()
+    dim s2 = connectEndpoint("10.0.0.1", timeoutMs=1500)
+    print($"defaults: {cfg1.host} | {cfg2.port} | {s1} | {s2}")
+
+    dim h as cptr = null
+    if h == null
+        print("cptrNull: true")
+    end if
+
+    dim nums as list[int] = [1, 2]
+    dim raw = b"\x05"
+    dim d as dict[str, int] = {"present": 7}
+    mutateContainers(nums, d)
+    dim sro = sumReadOnly(nums, raw, d)
+    dim zc = readZeroCopyItems([Item(id=2), Item(id=3)], {"a": [Item(id=4)]})
+    print($"safeContainers: sum={sro}, zeroCopyTotal={zc}")
+
+    try
+        testZeroImportStdStrPrelude()
+    catch e
+        print("Unexpected error: " & e.msg)
+        return 1
+    end try
+
+    dim mcfg = makeMultilineConfig(
+        "localhost",
+        8080,
+        3,
+    )
+    dim ports as list[int] = [
+        80,
+        443,
+        mcfg.port,
+    ]
+    dim labels as dict[str, int] = {
+        "http": ports[0],
+        "https": ports[1],
+        "app": ports[2],
+    }
+    dim ok = (
+        mcfg.port == 8080
+        and mcfg.retries == 3
+        and labels["app"] == 8080
+    )
+    if ok
+        print($"multilineCfg: {mcfg.host}:{mcfg.port} (retries={mcfg.retries})")
+    end if
+    return 0
+end fn

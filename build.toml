@@ -1,4 +1,4 @@
 [commands]
 compile = "cmake -B build -S . && cmake --build build"
 test_all = "cd build && ctest --output-on-failure"
-format = "./build/cleanbasic build tools/cbfmt.cb -b build/cbfmt && ./build/cbfmt -w stdlib examples tools"
+format = "./build/cleanbasic build tools/cbfmt.cb -b build/cbfmt && ./build/cbfmt -w stdlib examples tools tests/cases"

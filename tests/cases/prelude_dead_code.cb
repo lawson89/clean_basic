@@ -1,0 +1,10 @@
+' EXPECT_CPP: int64_t cbMain()
+' FORBID_CPP: str_bridge.hpp
+' FORBID_CPP: cb_std_str__
+' EXPECT_OUT: answer=42
+
+fn main() as int
+    dim x = 20 + 22
+    print("answer=" & x.toStr())
+    return 0
+end fn

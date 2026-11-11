@@ -3,6 +3,14 @@
 ' EXPECT_CPP: cbListSlice(
 ' EXPECT_CPP: cbListSort(
 ' EXPECT_CPP: cbDictKeys(
+' EXPECT_CPP: cbListPop(
+' EXPECT_CPP: cbBytesPop(
+' EXPECT_CPP: continue;
+' EXPECT_CPP: case 1:
+' EXPECT_CPP: case 2:
+' EXPECT_CPP: case 3: {
+' EXPECT_CPP: default: {
+' EXPECT_CPP: const auto _sel_
 ' FORBID_CPP: std::list
 ' EXPECT_OUT: first: 10
 ' EXPECT_OUT: empty: 0
@@ -11,6 +19,9 @@
 ' EXPECT_OUT: sorted: 5,20,40,0, contains20: true, contains99: false, slice: 10,20, sliceFrom: 20,40, removedAt1: 10, afterRemoveLen: 3
 ' EXPECT_OUT: keys: alpha,beta,gamma,
 ' EXPECT_OUT: arenaSummary: node0_line=12, hasX=true, tagX=99, valsLen=2, totalVals=35
+' EXPECT_OUT: classify: small|medium|large, str: 1|2|0
+' EXPECT_OUT: continueSum: for=12, while=13, bytesPop=99, emptyRet=0:0
+' EXPECT_OUT: indexed: 0:alice|1:bob|, bytesSum=132
 
 type NodeEntry
     line as int
@@ -44,11 +55,86 @@ end fn
 
 fn testContainers(nums as list[int], lookup as dict[str, int]) as int
     select case nums.len()
-    case 0
-        return 0
-    case else
-        return nums[0]
+        case 0
+            return 0
+        case else
+            return nums[0]
     end select
+end fn
+
+fn classifyInt(n as int) as str
+    select case n
+        case 1, 2, 3
+            return "small"
+        case 4, 5
+            return "medium"
+        case else
+            return "large"
+    end select
+end fn
+
+fn classifyStr(s as str) as int
+    select case s
+        case "apple", "banana"
+            return 1
+        case "cherry"
+            return 2
+        case else
+            return 0
+    end select
+end fn
+
+fn makeEmptyList() as list[int]
+    return []
+end fn
+
+fn makeEmptyDict() as dict[str, int]
+    return {}
+end fn
+
+fn testContinueAndEmptyInference()
+    dim forSum = 0
+    for i = 1 to 5
+        if i == 3
+            continue
+        end if
+        forSum += i
+    end for
+
+    dim n = 0
+    dim whileSum = 0
+    while n < 5
+        n += 1
+        if n == 2
+            continue
+        end if
+        whileSum += n
+    end while
+
+    dim buf = b"abc"
+    dim lastByte = buf.pop()
+    buf.clear()
+
+    dim el = makeEmptyList()
+    dim ed = makeEmptyDict()
+    el = []
+    ed = {}
+    print($"continueSum: for={forSum}, while={whileSum}, bytesPop={lastByte}, emptyRet={el.len()}:{ed.len()}")
+end fn
+
+fn testIndexedLoops()
+    dim names as list[str] = ["alice", "bob"]
+    dim nameOut = ""
+    for i, name in names
+        nameOut &= $"{i}:{name}|"
+    end for
+
+    dim raw = b"AB"
+    dim bytesSum = 0
+    for idx, b in raw
+        bytesSum += idx + b
+    end for
+    print($"indexed: {nameOut}, bytesSum={bytesSum}")
 end fn
 
 fn main()
@@ -90,4 +176,8 @@ fn main()
     arena.modules["root"]["hero"] = "entities/hero"
     bumpNode(arena.nodes[0], 10)
     print("arenaSummary: " & inspectReadOnlyArena(arena))
+
+    print($"classify: {classifyInt(2)}|{classifyInt(5)}|{classifyInt(9)}, str: {classifyStr("banana")}|{classifyStr("cherry")}|{classifyStr("pear")}")
+    testContinueAndEmptyInference()
+    testIndexedLoops()
 end fn

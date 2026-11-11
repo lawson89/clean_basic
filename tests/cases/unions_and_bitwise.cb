@@ -1,0 +1,80 @@
+' EXPECT_CPP: struct Span {
+' EXPECT_CPP: struct AstNode {
+' EXPECT_CPP: std::in_place_index<0>
+' EXPECT_CPP: cbUnionKind(n)
+' EXPECT_CPP: std::get<0>(
+' EXPECT_CPP: cbBitShl(
+' EXPECT_CPP: cbBitShr(
+' EXPECT_CPP: (~(
+' FORBID_CPP: throw
+' EXPECT_OUT: unionDescribe: intVal:4096|text:ok|span:10:4
+' EXPECT_OUT: bitwiseAndContainers: sum=3, subLen=2, tailLen=2, removed=10, mask=-7685
+' EXPECT_OUT: overloads: a=7, b=5
+
+type Span
+    line as int
+    col as int
+end type
+
+union AstNode
+    intVal as int
+    textVal as str
+    spanVal as Span
+end union
+
+type TypeRegistry
+    items as list[str]
+end type
+
+fn findType(reg as TypeRegistry, target as str) as int
+    return target.len() + reg.items.len()
+end fn
+
+fn findType(byref reg as TypeRegistry, target as list[int], tag as str) as int
+    reg.items.push(tag)
+    return target.len() + reg.items.len()
+end fn
+
+fn describe(n as AstNode) as str
+    select case n
+        case intVal as v
+            return n.kind() & ":" & v.toStr()
+        case AstNode.textVal as s
+            return "text:" & s
+        case spanVal as sp
+            return "span:" & sp.line.toStr() & ":" & sp.col.toStr()
+    end select
+    return ""
+end fn
+
+fn main() as int
+    dim a = AstNode.intVal(0x10_00)
+    dim b = AstNode.textVal("ok")
+    dim c = AstNode.spanVal(Span(line=0b1010, col=4))
+    print("unionDescribe: " & describe(a) & "|" & describe(b) & "|" & describe(c))
+
+    dim nums = [30, 10, 20]
+    nums.sort()
+    dim sub = nums.slice(0, 2)
+    dim tail = nums.sliceFrom(1)
+    dim has20 = nums.contains(20)
+    dim removed = nums.removeAt(0)
+
+    dim table = {"b": 2, "a": 1}
+    dim ks = table.keys()
+
+    dim mask = 0xFF_00.bitAnd(0x0F_00).bitOr(0b0000_0011).bitXor(1).shl(2).shr(1).bitNot()
+    dim sum = 0
+    for i = 0 until ks.len()
+        sum += table[ks[i]]
+    end for
+    if has20
+        print($"bitwiseAndContainers: sum={sum}, subLen={sub.len()}, tailLen={tail.len()}, removed={removed}, mask={mask}")
+    end if
+
+    dim reg = TypeRegistry(items=["int", "str"])
+    dim ovA = reg.findType("float")
+    dim ovB = reg.findType([10, 20], "list")
+    print($"overloads: a={ovA}, b={ovB}")
+    return 0
+end fn

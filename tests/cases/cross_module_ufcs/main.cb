@@ -1,0 +1,38 @@
+' EXPECT_CPP: inline const int64_t cb_ast__defaultPort = 8080;
+' EXPECT_CPP: inline const int64_t localLimit = 100;
+' EXPECT_CPP: struct cb_ast__SharedCfg {
+' EXPECT_CPP: struct cb_ast__AstArena {
+' EXPECT_CPP: cb_symbols__resolveAlias(arena, 0)
+' EXPECT_CPP: cb_symbols__resolveAlias(arena, 99, std::string("void"))
+' FORBID_CPP: throw
+' EXPECT_OUT: constAndDiamond: port=8180, scale=7, secretLen=6
+' EXPECT_OUT: crossUfcs: t0=int, fallback=void, node=intVal:42
+
+import "ast.cb"
+import "symbols.cb"
+
+const localLimit as int = 100
+
+fn describeNode(n as ast.AstNode) as str
+    select case n
+        case intVal as v
+            return n.kind() & ":" & v.toStr()
+        case textVal as s
+            return "text:" & s
+    end select
+    return ""
+end fn
+
+fn main() as int
+    dim p = ast.defaultPort + localLimit
+    dim cfg = symbols.makeCfg(7)
+    dim sLen = ast.privateSecretLen()
+    print($"constAndDiamond: port={p}, scale={cfg.scale}, secretLen={sLen}")
+
+    dim arena = ast.AstArena(types=["int", "str"])
+    dim t0 = arena.resolveAlias(0)
+    dim tFallback = arena.resolveAlias(99, "void")
+    dim node = ast.AstNode.intVal(42)
+    print($"crossUfcs: t0={t0}, fallback={tFallback}, node={describeNode(node)}")
+    return 0
+end fn

@@ -15,6 +15,7 @@
 ' EXPECT_CPP: auto records = _val4;
 ' EXPECT_CPP: do {
 ' EXPECT_CPP: _catch_err_3 = _err4;
+' EXPECT_CPP: cbBytesToUtf8(
 ' EXPECT_OUT: Closing connection: 1
 ' EXPECT_OUT: Connected and processed 100 records.
 ' EXPECT_OUT: Handled empty IP (code=408): IP cannot be empty
@@ -24,6 +25,23 @@
 ' EXPECT_OUT: Defer A before error return
 ' EXPECT_OUT: Forwarded connection id: 1
 ' EXPECT_OUT: Fallback connection id: -1
+' EXPECT_OUT: Fallible loops & compound: total=5, label=items:ac, mode=fast, decoded=ok
+' EXPECT_OUT: innerCaught(neg:-1)|outerCaught(neg:-2)|m1=6|loopCaught(neg:-5)|direct(directRaise:422)|forCont=6
+
+pub enum Status
+    ok = 10
+    bad = 20
+end enum
+
+pub alias StatusAlias = Status
+
+pub enum Mode
+    fast
+    safe
+end enum
+
+pub alias ModeAlias = Mode
+pub alias IntList = list[int]
 
 pub type Connection
     id as int
@@ -137,10 +155,127 @@ fn testDirectReturnFallible()
     end try
 end fn
 
+fn loadItems() as list[str] can error
+    return ["ab", "cde"]
+end fn
+
+fn countItem(s as str) as int can error
+    return s.len()
+end fn
+
+fn decodeBytesDirect(raw as bytes) as str can error
+    return raw.toUtf8()
+end fn
+
+fn parseAndSumMode(raw as bytes, nums as IntList) as ModeAlias can error
+    dim decoded = raw.toUtf8()
+    dim total = 0
+    for b in raw
+        total += b
+    end for
+    for n in nums
+        total += n
+    end for
+    if total > 0 and decoded.len() > 0
+        return Mode.fast
+    end if
+    return Mode.safe
+end fn
+
+fn testFallibleLoopsAndCompound() can error
+    dim total = 0
+    dim label = "items:"
+    for item in loadItems()
+        total += countItem(item)
+        label &= item.left(1)
+    end for
+    dim m = parseAndSumMode(b"ok", [1, 2])
+    dim dec = decodeBytesDirect(b"ok")
+    print($"Fallible loops & compound: total={total}, label={label}, mode={m}, decoded={dec}")
+end fn
+
+fn mightFail(x as int) as int can error
+    if x < 0
+        error("neg:" & x.toStr(), code=400)
+    end if
+    return x * 2
+end fn
+
+fn testNestedTryAndControlFlow() as str
+    dim log = ""
+    ' 1. Nested try/catch where inner catch throws a new error caught by outer catch
+    try
+        try
+            dim a = mightFail(-1)
+            log &= "UNREACHABLE_INNER|"
+        catch innerErr
+            log &= "innerCaught(" & innerErr.msg & ")|"
+            dim b = mightFail(-2)
+            log &= "UNREACHABLE_AFTER_RETHROW|"
+        end try
+        log &= "UNREACHABLE_OUTER|"
+    catch outerErr
+        log &= "outerCaught(" & outerErr.msg & ")|"
+    end try
+
+    ' 2. Fallible call inside string select case inside while loop inside try
+    try
+        dim stepIdx = 0
+        while stepIdx < 3
+            stepIdx += 1
+            select case "mode_" & stepIdx.toStr()
+                case "mode_1"
+                    dim v1 = mightFail(3)
+                    log &= "m1=" & v1.toStr() & "|"
+                case "mode_2"
+                    if stepIdx == 2
+                        dim v2 = mightFail(-5)
+                        log &= "m2=" & v2.toStr() & "|"
+                    end if
+                    log &= "UNREACHABLE_M2|"
+                case else
+                    log &= "UNREACHABLE_M3|"
+            end select
+        end while
+    catch loopErr
+        log &= "loopCaught(" & loopErr.msg & ")|"
+    end try
+
+    ' 3. Calling error(...) directly inside try/catch in an infallible function
+    try
+        if StatusAlias.bad == Status.bad
+            error("directRaise", code=422)
+        end if
+        log &= "UNREACHABLE_DIRECT|"
+    catch directErr
+        log &= "direct(" & directErr.msg & ":" & directErr.code.toStr() & ")|"
+    end try
+
+    ' 4. try / catch inside a for loop using continue in catch
+    dim forSum = 0
+    for i = -1 to 2
+        try
+            dim v = mightFail(i)
+            forSum += v
+        catch e
+            continue
+        end try
+    end for
+    log &= "forCont=" & forSum.toStr()
+
+    return log
+end fn
+
 fn main()
     startServer()
     testFailedConnect()
     testFailedPort()
     testMultiCallAndDeferLifo()
     testDirectReturnFallible()
+    try
+        testFallibleLoopsAndCompound()
+    catch e
+        print("Unexpected error: " & e.msg)
+    end try
+    print(testNestedTryAndControlFlow())
 end fn

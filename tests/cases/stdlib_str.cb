@@ -3,6 +3,11 @@
 ' EXPECT_CPP: cb_std_str__trim(
 ' EXPECT_CPP: cb_std_str__split(
 ' EXPECT_CPP: cb_std_str__toInt(
+' EXPECT_CPP: cbStrIndex(
+' EXPECT_CPP: cbStrByteAtFast(
+' EXPECT_CPP: cb_std_str__escapeCpp(
+' EXPECT_CPP: cb_std_str__unescape(
+' EXPECT_CPP: cbBytesFromHex(
 ' EXPECT_OUT: Search: contains=true find=6 rfind=17 count=2 starts=true ends=true
 ' EXPECT_OUT: IgnoreCase: eq=true starts=true ends=true find=7 rfind=24 contains=true
 ' EXPECT_OUT: Split/Join: csv=a|b|c chars=X-Y fields=2026-11-06,ERROR,diskFull lines=3
@@ -11,146 +16,150 @@
 ' EXPECT_OUT: Transform: rep=a-b-c first=a-b:c lower=cleanbasic upper=CLEANBASIC repeat=ha!ha!ha! rev=dcba
 ' EXPECT_OUT: Parse/Class: int=-42 hexInt=42 binInt=42 float=3.250000 bool1=true bool0=false digit=true alpha=true space=true alnum=true hex=true builtinStr=99
 ' EXPECT_OUT: UTF8: bytes=10 cp=6 valid=true chars=c|a|f|é rev=🚀 éfac left=café right=🚀 mid=fé char3=é rocket=🚀 trim=café padL=««café padR=café»» jpLen=5 jpMid=んに jpFrom=ちは
-' EXPECT_OUT: Index/Escape: idx0=C idxOut=[] byte0=67 byteOut=-1 escLen=14 unesc=true
+' EXPECT_OUT: Index/Escape/Hex: idx0=C idxOut=[] byte0=67 byteOut=-1 escLen=14 unesc=true hex=deadbeef:cafebabe:0102
 
 import "std/str"
 import "std/fs"
 
 fn main() as int
     try
+        ' 1. Search & Match (both UFCS s.* and module str.*)
+        dim sample = "alpha beta alpha beta"
+        print(
+            "Search: contains=" & sample.contains("beta") &
+            " find=" & sample.find("beta") &
+            " rfind=" & str.rfind(sample, "beta") &
+            " count=" & sample.count("alpha") &
+            " starts=" & sample.startsWith("alpha") &
+            " ends=" & sample.endsWith("beta")
+        )
 
-    ' 1. Search & Match (both UFCS s.* and module str.*)
-    dim sample = "alpha beta alpha beta"
-    print(
-        "Search: contains=" & sample.contains("beta") &
-        " find=" & sample.find("beta") &
-        " rfind=" & str.rfind(sample, "beta") &
-        " count=" & sample.count("alpha") &
-        " starts=" & sample.startsWith("alpha") &
-        " ends=" & sample.endsWith("beta")
-    )
+        ' 1b. Zero-Allocation ASCII Case-Insensitive Search & Comparison
+        dim diagLine = "struct DiagnosticError: diagnosticERROR"
+        print(
+            "IgnoreCase: eq=" & "CleanBasic".asciiEqualsIgnoreCase("cleanBASIC") &
+            " starts=" & diagLine.asciiStartsWithIgnoreCase("STRUCT") &
+            " ends=" & diagLine.asciiEndsWithIgnoreCase("error") &
+            " find=" & diagLine.asciiFindIgnoreCase("diagnosticerror") &
+            " rfind=" & str.asciiRfindIgnoreCase(diagLine, "DIAGNOSTICERROR") &
+            " contains=" & diagLine.asciiContainsIgnoreCase("DiagnosticError")
+        )
 
-    ' 1b. Zero-Allocation ASCII Case-Insensitive Search & Comparison
-    dim diagLine = "struct DiagnosticError: diagnosticERROR"
-    print(
-        "IgnoreCase: eq=" & "CleanBasic".asciiEqualsIgnoreCase("cleanBASIC") &
-        " starts=" & diagLine.asciiStartsWithIgnoreCase("STRUCT") &
-        " ends=" & diagLine.asciiEndsWithIgnoreCase("error") &
-        " find=" & diagLine.asciiFindIgnoreCase("diagnosticerror") &
-        " rfind=" & str.asciiRfindIgnoreCase(diagLine, "DIAGNOSTICERROR") &
-        " contains=" & diagLine.asciiContainsIgnoreCase("DiagnosticError")
-    )
+        ' 2. Splitting & Joining (including s.lines() UFCS disambiguated from std/fs)
+        dim csvParts = "a,b,c".split(",")
+        dim joinedCsv = str.join(csvParts, "|")
+        dim charParts = "XY".split("")
+        dim joinedChars = str.join(charParts, "-")
+        dim logLine = "  2026-11-06   ERROR\tdiskFull  "
+        dim cols = logLine.fields()
+        dim multiline = "first\r\nsecond\nthird\n"
+        dim lineList = multiline.lines()
+        print(
+            "Split/Join: csv=" & joinedCsv &
+            " chars=" & joinedChars &
+            " fields=" & str.join(cols, ",") &
+            " lines=" & lineList.len()
+        )
 
-    ' 2. Splitting & Joining (including s.lines() UFCS disambiguated from std/fs)
-    dim csvParts = "a,b,c".split(",")
-    dim joinedCsv = str.join(csvParts, "|")
-    dim charParts = "XY".split("")
-    dim joinedChars = str.join(charParts, "-")
-    dim logLine = "  2026-11-06   ERROR\tdiskFull  "
-    dim cols = logLine.fields()
-    dim multiline = "first\r\nsecond\nthird\n"
-    dim lineList = multiline.lines()
-    print(
-        "Split/Join: csv=" & joinedCsv &
-        " chars=" & joinedChars &
-        " fields=" & str.join(cols, ",") &
-        " lines=" & lineList.len()
-    )
+        ' 3. Trimming & Padding
+        dim padded = "  hello  "
+        print(
+            "Trim/Pad: trim=[" & padded.trim() &
+            "] ltrim=[" & padded.ltrim() &
+            "] rtrim=[" & padded.rtrim() &
+            "] chars=[" & "--[core]--".trimChars("-[]") &
+            "] padL=[" & "42".padLeft(5, "0") &
+            "] padR=[" & "hi".padRight(5, ".") & "]"
+        )
 
-    ' 3. Trimming & Padding
-    dim padded = "  hello  "
-    print(
-        "Trim/Pad: trim=[" & padded.trim() &
-        "] ltrim=[" & padded.ltrim() &
-        "] rtrim=[" & padded.rtrim() &
-        "] chars=[" & "--[core]--".trimChars("-[]") &
-        "] padL=[" & "42".padLeft(5, "0") &
-        "] padR=[" & "hi".padRight(5, ".") & "]"
-    )
+        ' 4. Slicing & Substrings (with clamped bounds)
+        dim word = "CleanBasic"
+        print(
+            "Slice: slice=" & word.slice(5, 99) &
+            " sliceFrom=" & word.sliceFrom(5) &
+            " left=" & word.left(5) &
+            " right=" & word.right(5) &
+            " mid=" & word.mid(2, 5) &
+            " char=" & word.charAt(5) &
+            " byte=" & word.byteAt(5) &
+            " fromChar=" & str.fromChar(65)
+        )
 
-    ' 4. Slicing & Substrings (with clamped bounds)
-    dim word = "CleanBasic"
-    print(
-        "Slice: slice=" & word.slice(5, 99) &
-        " sliceFrom=" & word.sliceFrom(5) &
-        " left=" & word.left(5) &
-        " right=" & word.right(5) &
-        " mid=" & word.mid(2, 5) &
-        " char=" & word.charAt(5) &
-        " byte=" & word.byteAt(5) &
-        " fromChar=" & str.fromChar(65)
-    )
+        ' 5. Transformations
+        print(
+            "Transform: rep=" & "a:b:c".replace(":", "-") &
+            " first=" & "a:b:c".replaceFirst(":", "-") &
+            " lower=" & "CleanBasic".asciiLower() &
+            " upper=" & "CleanBasic".asciiUpper() &
+            " repeat=" & "ha!".repeat(3) &
+            " rev=" & "abcd".reverse()
+        )
 
-    ' 5. Transformations
-    print(
-        "Transform: rep=" & "a:b:c".replace(":", "-") &
-        " first=" & "a:b:c".replaceFirst(":", "-") &
-        " lower=" & "CleanBasic".asciiLower() &
-        " upper=" & "CleanBasic".asciiUpper() &
-        " repeat=" & "ha!".repeat(3) &
-        " rev=" & "abcd".reverse()
-    )
+        ' 6. Fallible Parsing, ASCII Character Classes & Built-in str(x) Coexistence
+        dim parsedI = " -42 ".toInt()
+        dim parsedHex = " 0x2A ".toInt()
+        dim parsedBin = " 0b101010 ".toInt()
+        dim parsedF = " 3.25 ".toFloat()
+        dim parsedB1 = "TRUE".toBool()
+        dim parsedB0 = "0".toBool()
+        dim bStr = 99.toStr()
+        print(
+            "Parse/Class: int=" & parsedI &
+            " hexInt=" & parsedHex &
+            " binInt=" & parsedBin &
+            " float=" & parsedF &
+            " bool1=" & parsedB1 &
+            " bool0=" & parsedB0 &
+            " digit=" & "12345".asciiIsDigit() &
+            " alpha=" & "CleanBasic".asciiIsAlpha() &
+            " space=" & " \t\r\n".asciiIsSpace() &
+            " alnum=" & ("Cb2026".asciiIsAlnum() and not "Cb_2026".asciiIsAlnum()) &
+            " hex=" & ("deadBEEF09".asciiIsHexDigit() and not "0x10".asciiIsHexDigit()) &
+            " builtinStr=" & bStr
+        )
 
-    ' 6. Fallible Parsing, ASCII Character Classes & Built-in str(x) Coexistence
-    dim parsedI = " -42 ".toInt()
-    dim parsedHex = " 0x2A ".toInt()
-    dim parsedBin = " 0b101010 ".toInt()
-    dim parsedF = " 3.25 ".toFloat()
-    dim parsedB1 = "TRUE".toBool()
-    dim parsedB0 = "0".toBool()
-    dim bStr = 99.toStr()
-    print(
-        "Parse/Class: int=" & parsedI &
-        " hexInt=" & parsedHex &
-        " binInt=" & parsedBin &
-        " float=" & parsedF &
-        " bool1=" & parsedB1 &
-        " bool0=" & parsedB0 &
-        " digit=" & "12345".asciiIsDigit() &
-        " alpha=" & "CleanBasic".asciiIsAlpha() &
-        " space=" & " \t\r\n".asciiIsSpace() &
-        " alnum=" & ("Cb2026".asciiIsAlnum() and not "Cb_2026".asciiIsAlnum()) &
-        " hex=" & ("deadBEEF09".asciiIsHexDigit() and not "0x10".asciiIsHexDigit()) &
-        " builtinStr=" & bStr
-    )
+        ' 7. UTF-8 Codepoint-Safe Operations
+        dim u = "café 🚀"
+        dim cafe = "café"
+        dim jp = "こんにちは"
+        print(
+            "UTF8: bytes=" & u.len() &
+            " cp=" & u.utf8Len() &
+            " valid=" & u.utf8Valid() &
+            " chars=" & str.join(cafe.chars(), "|") &
+            " rev=" & u.reverse() &
+            " left=" & u.left(4) &
+            " right=" & u.right(1) &
+            " mid=" & u.mid(2, 2) &
+            " char3=" & cafe.charAt(3) &
+            " rocket=" & str.fromChar(128640) &
+            " trim=" & "««café»»".trimChars("«»") &
+            " padL=" & cafe.padLeft(6, "«") &
+            " padR=" & cafe.padRight(6, "»") &
+            " jpLen=" & jp.utf8Len() &
+            " jpMid=" & jp.mid(1, 2) &
+            " jpFrom=" & jp.sliceFrom(jp.find("ち"))
+        )
 
-    ' 7. UTF-8 Codepoint-Safe Operations
-    dim u = "café 🚀"
-    dim cafe = "café"
-    dim jp = "こんにちは"
-    print(
-        "UTF8: bytes=" & u.len() &
-        " cp=" & u.utf8Len() &
-        " valid=" & u.utf8Valid() &
-        " chars=" & str.join(cafe.chars(), "|") &
-        " rev=" & u.reverse() &
-        " left=" & u.left(4) &
-        " right=" & u.right(1) &
-        " mid=" & u.mid(2, 2) &
-        " char3=" & cafe.charAt(3) &
-        " rocket=" & str.fromChar(128640) &
-        " trim=" & "««café»»".trimChars("«»") &
-        " padL=" & cafe.padLeft(6, "«") &
-        " padR=" & cafe.padRight(6, "»") &
-        " jpLen=" & jp.utf8Len() &
-        " jpMid=" & jp.mid(1, 2) &
-        " jpFrom=" & jp.sliceFrom(jp.find("ち"))
-    )
-
-    ' 8. String Indexing s[i], Built-in .byteAt(i), escapeCpp & unescape
-    dim idx0 = word[0]
-    dim idxOut = word[-1] & word[999]
-    dim rawEsc = "a" & str.fromChar(34) & "b" & str.fromChar(92) & "c" & str.fromChar(10) & "d" & str.fromChar(1)
-    dim escaped = rawEsc.escapeCpp()
-    dim unescaped = str.unescape(escaped)
-    print(
-        "Index/Escape: idx0=" & idx0 &
-        " idxOut=[" & idxOut & "]" &
-        " byte0=" & word.byteAt(0) &
-        " byteOut=" & word.byteAt(99) &
-        " escLen=" & escaped.len() &
-        " unesc=" & (unescaped == rawEsc)
-    )
+        ' 8. String Indexing s[i], Built-in .byteAt(i), escapeCpp, unescape, bytes.fromHex & str.fromHex
+        dim idx0 = word[0]
+        dim idxOut = word[-1] & word[999]
+        dim rawEsc = "a" & str.fromChar(34) & "b" & str.fromChar(92) & "c" & str.fromChar(10) & "d" & str.fromChar(1)
+        dim escaped = rawEsc.escapeCpp()
+        dim unescaped = str.unescape(escaped)
+        dim b1 = bytes.fromHex("deadbeef")
+        dim hexStr = "cafebabe"
+        dim b2 = hexStr.fromHex()
+        dim b3 = "0102".fromHex()
+        print(
+            "Index/Escape/Hex: idx0=" & idx0 &
+            " idxOut=[" & idxOut & "]" &
+            " byte0=" & word.byteAt(0) &
+            " byteOut=" & word.byteAt(99) &
+            " escLen=" & escaped.len() &
+            " unesc=" & (unescaped == rawEsc) &
+            " hex=" & b1.toHex() & ":" & b2.toHex() & ":" & b3.toHex()
+        )
 
         return 0
     catch e

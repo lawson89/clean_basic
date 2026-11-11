@@ -177,31 +177,30 @@ end fn
 
 fn main() as int
     try
+        dim baseDir = "build/testArtifacts/stdlibFsSandbox"
+        if fs.exists(baseDir)
+            fs.remove(baseDir)
+        end if
+        fs.mkdir(baseDir)
 
-    dim baseDir = "build/testArtifacts/stdlibFsSandbox"
-    if fs.exists(baseDir)
-        fs.remove(baseDir)
-    end if
-    fs.mkdir(baseDir)
+        testWholeFileAndCopy(baseDir)
+        testStreamingFile(baseDir)
+        testWalkFiles(baseDir)
 
-    testWholeFileAndCopy(baseDir)
-    testStreamingFile(baseDir)
-    testWalkFiles(baseDir)
+        if fs.isDir(baseDir)
+            dim entries = fs.dir(baseDir)
+            print("Directory entries=" & entries.len() & ": " & entries[0] & ", " & entries[1])
+        end if
 
-    if fs.isDir(baseDir)
-        dim entries = fs.dir(baseDir)
-        print("Directory entries=" & entries.len() & ": " & entries[0] & ", " & entries[1])
-    end if
+        dim absBase = fs.absPath(baseDir)
+        dim tmpDir = fs.tempDir()
+        print("AbsPath leaf=" & fs.fileName(absBase) & ", tempDirValid=" & (tmpDir.len() > 0 and fs.isDir(tmpDir)))
 
-    dim absBase = fs.absPath(baseDir)
-    dim tmpDir = fs.tempDir()
-    print("AbsPath leaf=" & fs.fileName(absBase) & ", tempDirValid=" & (tmpDir.len() > 0 and fs.isDir(tmpDir)))
+        testMissingFile(baseDir)
+        testStandardStreams()
 
-    testMissingFile(baseDir)
-    testStandardStreams()
-
-    dim removedCount = fs.removeAll(baseDir)
-    print("Cleanup complete: removedAll=" & (removedCount >= 3) & ", exists=" & fs.exists(baseDir))
+        dim removedCount = fs.removeAll(baseDir)
+        print("Cleanup complete: removedAll=" & (removedCount >= 3) & ", exists=" & fs.exists(baseDir))
         return 0
     catch e
         print("Unexpected error: " & e.msg)

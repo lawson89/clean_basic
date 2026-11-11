@@ -30,18 +30,18 @@ pub fn fibRecursive(n as int) as int
     else if n == 1
         return 1
     end if
-    
+
     return fibRecursive(n - 1) + fibRecursive(n - 2)
 end fn
 
 fn main() as int
     const target = 10
-    
+
     dim iterResult = fibIterative(target)
     print("Iterative Fib(", target, ") = ", iterResult)
-    
+
     dim recResult = fibRecursive(target)
     print("Recursive Fib(", target, ") = ", recResult)
-    
+
     return 0
 end fn

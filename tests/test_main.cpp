@@ -603,28 +603,6 @@ end fn
     CHECK(cpp.find("CbError e = _catch_err_2;") != std::string::npos);
     CHECK(cpp.find("auto records = _val3;") != std::string::npos);
 
-    SECTION("Emits variadic print, cbToStr auto-coercion on &, and inclusive for..to loop") {
-        const std::string ergonomicCode = R"(
-fn main()
-    dim score = 95
-    dim ok = true
-    for i = 0 to 3
-        print("i=", i, " ok=", ok)
-    end for
-    print("Score: " & score)
-    print(score & " points")
-    print()
-end fn
-)";
-        const auto ergRes = cb::transpileSource(ergonomicCode, "ergonomic.cb");
-        REQUIRE(ergRes.ok);
-        CHECK(ergRes.cppCode.find("for (int64_t i = 0; i <= 3; i += 1) {") != std::string::npos);
-        CHECK(ergRes.cppCode.find(R"raw((std::cout << std::string("i=") << i << std::string(" ok=") << cbToStr(ok) << std::endl);)raw") != std::string::npos);
-        CHECK(ergRes.cppCode.find(R"raw((std::string("Score: ") + cbToStr(score)))raw") != std::string::npos);
-        CHECK(ergRes.cppCode.find(R"raw((cbToStr(score) + std::string(" points")))raw") != std::string::npos);
-        CHECK(ergRes.cppCode.find("(std::cout << std::endl);") != std::string::npos);
-    }
-
     SECTION("Deduplicates canonical TypeNodes in AstArena and emits from const AstArena&") {
         const std::string immutCode = R"(
 pub type Box
@@ -708,37 +686,12 @@ end fn
     }
 
     SECTION("Deduplicates diamond imports and preserves topological order") {
-        {
-            std::ofstream fcommon(baseDir + "/sub/common.cb");
-            fcommon << R"(pub type SharedCfg
-    scale as int
-end type
-)";
-        }
-        {
-            std::ofstream fleft(baseDir + "/left.cb");
-            fleft << R"(import "sub/common.cb"
-pub fn makeCfg(s as int) as common.SharedCfg
-    return common.SharedCfg(scale=s)
-end fn
-)";
-        }
-        {
-            std::ofstream fmain(baseDir + "/diamondMain.cb");
-            fmain << R"(import "sub/common.cb"
-import "left.cb"
-fn main()
-    dim c = left.makeCfg(7)
-    print(c.scale)
-end fn
-)";
-        }
-        const auto res = cb::buildFile(baseDir + "/diamondMain.cb", baseDir + "/diamondOut.cpp", false);
+        const auto res = cb::buildFile("tests/cases/cross_module_ufcs/main.cb", baseDir + "/diamondOut.cpp", false);
         REQUIRE(res.ok);
         const std::string cpp = cb::testE2E::readFileText(baseDir + "/diamondOut.cpp");
-        const size_t firstPos = cpp.find("struct cb_sub_common__SharedCfg {");
+        const size_t firstPos = cpp.find("struct cb_ast__SharedCfg {");
         REQUIRE(firstPos != std::string::npos);
-        CHECK(cpp.find("struct cb_sub_common__SharedCfg {", firstPos + 1) == std::string::npos);
+        CHECK(cpp.find("struct cb_ast__SharedCfg {", firstPos + 1) == std::string::npos);
     }
 
     SECTION("Rejects duplicate module import aliases in the same file") {
@@ -813,6 +766,14 @@ end fn
     }
 }
 
+TEST_CASE("End-to-end fixture: cross-module UFCS, module constants, and diamond imports", "[e2e]") {
+    cb::testE2E::runE2EFixture("crossModuleUfcs", "tests/cases/cross_module_ufcs/main.cb");
+}
+
+TEST_CASE("End-to-end fixture: call-graph tree-shaking across modules and stdlib", "[e2e]") {
+    cb::testE2E::runE2EFixture("treeShaking", "tests/cases/tree_shaking/main.cb");
+}
+
 TEST_CASE("End-to-end fixture: network error bubbling and defer cleanup", "[e2e]") {
     cb::testE2E::runE2EFixture("networkErrorBubblingDefer", "tests/cases/network_error_bubbling_defer.cb");
 }
@@ -833,13 +794,56 @@ TEST_CASE("End-to-end fixture: cptr interop", "[e2e]") {
     cb::testE2E::runE2EFixture("cptrInterop", "tests/cases/cptr_interop.cb");
 }
 
-
 TEST_CASE("End-to-end fixture: fibonacci sequence", "[e2e]") {
     cb::testE2E::runE2EFixture("fibonacci", "tests/cases/fibonacci.cb");
 }
 
 TEST_CASE("End-to-end fixture: enums and bytes", "[e2e]") {
     cb::testE2E::runE2EFixture("enumsAndBytes", "tests/cases/enums_and_bytes.cb");
+}
+
+TEST_CASE("End-to-end fixture: defaults, compound assignments, zero-copy containers, and prelude", "[e2e]") {
+    cb::testE2E::runE2EFixture("defaultsAndErgonomics", "tests/cases/defaults_and_ergonomics.cb");
+}
+
+TEST_CASE("End-to-end fixture: tagged unions, bitwise methods, and function overloads", "[e2e]") {
+    cb::testE2E::runE2EFixture("unionsAndBitwise", "tests/cases/unions_and_bitwise.cb");
+}
+
+TEST_CASE("End-to-end fixture: unused std/str prelude dead-code elimination", "[e2e]") {
+    cb::testE2E::runE2EFixture("preludeDeadCode", "tests/cases/prelude_dead_code.cb");
+}
+
+TEST_CASE("End-to-end fixture: self-hosting compiler constructs", "[e2e]") {
+    cb::testE2E::runE2EFixture("selfhostConstructs", "tests/cases/selfhost_constructs.cb");
+}
+
+TEST_CASE("End-to-end fixture: regression fixes", "[e2e]") {
+    cb::testE2E::runE2EFixture("regressionFixes", "tests/cases/regression_fixes.cb");
+}
+
+TEST_CASE("End-to-end fixture: std/str standard library", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibStr", "tests/cases/stdlib_str.cb");
+}
+
+TEST_CASE("End-to-end fixture: std/fs standard library", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibFs", "tests/cases/stdlib_fs.cb");
+}
+
+TEST_CASE("End-to-end fixture: std/os standard library", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibOs", "tests/cases/stdlib_os.cb");
+}
+
+TEST_CASE("End-to-end fixture: std/json standard library", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibJson", "tests/cases/stdlib_json.cb");
+}
+
+TEST_CASE("End-to-end fixture: std/cli standard library", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibCli", "tests/cases/stdlib_cli.cb");
+}
+
+TEST_CASE("End-to-end fixture: std/test standard library and assert()", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibTest", "tests/cases/stdlib_test.cb");
 }
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
     const std::string artifactDir = "build/testArtifacts/cliBuild";
@@ -1369,62 +1373,7 @@ end fn
     }
 }
 
-TEST_CASE("Implicit multiline continuation inside (), [], and {} and trailing parameter commas", "[lexer][parser][multiline]") {
-    SECTION("Multiline function params with trailing comma, struct constructors, list/dict literals, and parenthesized expressions transpile") {
-        const std::string src = R"(type Config
-    host as str
-    port as int
-    retries as int
-end type
-
-fn makeConfig(
-    host as str,
-    port as int, # inline hash comment
-    retries as int, ' trailing comma + single-quote comment
-) as Config
-    return Config(
-        host = host,
-        port = port,
-        retries = retries,
-    )
-end fn
-
-fn main() as int
-    dim cfg = makeConfig(
-        "localhost",
-        8080,
-        3,
-    )
-
-    dim ports as list[int] = [
-        80,
-        443,
-        cfg.port,
-    ]
-
-    dim labels as dict[str, int] = {
-        "http": ports[0],
-        "https": ports[1],
-        "app": ports[2],
-    }
-
-    dim ok = (
-        cfg.port == 8080
-        and cfg.retries == 3
-        and labels["app"] == 8080
-    )
-
-    if ok
-        return 0
-    end if
-    return 1
-end fn
-)";
-        const auto res = cb::transpileSource(src, "multiline.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("Config makeConfig(const std::string& host, int64_t port, int64_t retries)") != std::string::npos);
-    }
-
+TEST_CASE("Implicit multiline continuation inside (), [], and {} preserves diagnostic coordinates", "[lexer][parser][multiline]") {
     SECTION("Line and column numbers remain exact inside and after multiline bracketed blocks") {
         const std::string src = R"(fn compute(
     a as int,
@@ -2227,36 +2176,7 @@ TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are 
     }
 }
 
-TEST_CASE("Standard library std/json module: vendor/ + stdlib/ resolution, UFCS queries, error handling, and E2E compilation", "[stdlib][json][e2e]") {
-    SECTION("E2E fixture tests/cases/stdlib_json.cb compiles and runs natively") {
-        cb::testE2E::runE2EFixture("stdlibJson", "tests/cases/stdlib_json.cb");
-    }
-
-    SECTION("import 'std/json' and 'std/json.cb' resolve module ID 'std/json', default alias 'json', and module-relative json_bridge.hpp") {
-        const std::string src = R"(import "std/json"
-
-fn main() as int
-    try
-        dim doc = json.parse("3.5")
-        dim root = doc.root()
-        dim pi = doc.getFloat(root)
-        if pi > 3.0
-            return 0
-        end if
-    catch e
-        return 1
-    end try
-    return 1
-end fn
-)";
-        const auto res = cb::transpileSource(src, "appWithStdJson.cb");
-        REQUIRE(res.ok);
-        REQUIRE(!res.symbols.headers.empty());
-        CHECK(res.cppCode.find("json/json_bridge.hpp") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_json__parse(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_json__getFloat(") != std::string::npos);
-    }
-
+TEST_CASE("LSP go-to-definition and hover resolve std/json symbols into stdlib/json/json.cb", "[stdlib][json][lsp]") {
     SECTION("LSP go-to-definition and hover resolve std/json symbols into stdlib/json/json.cb") {
         std::stringstream clientToServer;
         std::stringstream serverToClient;
@@ -2706,19 +2626,7 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
     }
 }
 
-TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/cbgrep.cb E2E verification", "[stdlib][fs][os][str][cbgrep][e2e]") {
-    SECTION("E2E fixture tests/cases/stdlib_fs.cb compiles and runs natively") {
-        cb::testE2E::runE2EFixture("stdlib_fs", "tests/cases/stdlib_fs.cb");
-    }
-
-    SECTION("E2E fixture tests/cases/stdlib_os.cb compiles and runs natively") {
-        cb::testE2E::runE2EFixture("stdlib_os", "tests/cases/stdlib_os.cb");
-    }
-
-    SECTION("E2E fixture tests/cases/stdlib_str.cb compiles and runs natively with deterministic std/str UFCS") {
-        cb::testE2E::runE2EFixture("stdlib_str", "tests/cases/stdlib_str.cb");
-    }
-
+TEST_CASE("examples/cbgrep.cb and piped standard streams E2E verification", "[stdlib][fs][os][str][cbgrep][e2e]") {
     SECTION("examples/cbgrep.cb compiles and runs natively with CLI flags and exit codes") {
         const std::string outCpp = "build/testArtifacts/cbgrepBuild.cpp";
         const std::string outBin = "build/testArtifacts/cbgrepBin";
@@ -2778,84 +2686,16 @@ TEST_CASE("Standard library std/fs, std/os, std/str, while loops, and examples/c
         const std::string stdinImplicitOut = cb::testE2E::readFileText(stdoutFile);
         CHECK(stdinImplicitOut.find("{stdin}:2") != std::string::npos);
 
+        const int rcHelp = std::system(("./" + outBin + " --help > " + stdoutFile + " 2>&1").c_str());
+        CHECK(rcHelp == 0);
+        const std::string helpOut = cb::testE2E::readFileText(stdoutFile);
+        CHECK(helpOut.find("Usage: cbgrep [options] <pattern>") != std::string::npos);
+        CHECK(helpOut.find("-i, --ignore-case") != std::string::npos);
+
         const int rcVersion = std::system(("./" + outBin + " --version > " + stdoutFile + " 2>&1").c_str());
         CHECK(rcVersion == 0);
         const std::string versionOut = cb::testE2E::readFileText(stdoutFile);
         CHECK(versionOut.find("cbgrep 1.0") != std::string::npos);
-    }
-
-    SECTION("fs.stdin(), fs.stdout(), and fs.stderr() streaming I/O with piped stdin and separated stdout/stderr") {
-        const std::string workDir = "build/testArtifacts/stdStreamsTest";
-        std::error_code ec;
-        std::filesystem::create_directories(workDir, ec);
-        REQUIRE(!ec);
-
-        const std::string cbPath = workDir + "/std_streams.cb";
-        const std::string cppPath = workDir + "/build.cpp";
-        const std::string binPath = workDir + "/std_streams_bin";
-        const std::string stdinPath = workDir + "/stdin.txt";
-        const std::string stdoutPath = workDir + "/stdout.txt";
-        const std::string stderrPath = workDir + "/stderr.txt";
-
-        {
-            std::ofstream inFile(stdinPath, std::ios::binary | std::ios::trunc);
-            inFile << "lineOne" << std::endl
-                   << "lineTwo" << std::endl
-                   << "RAWB";
-        }
-
-        const std::string cbSource = R"CB(
-import "std/fs"
-
-fn main() as int
-    try
-        dim inStream = fs.stdin()
-        dim outStream = fs.stdout()
-        dim errStream = fs.stderr()
-        defer
-            inStream.close()
-            outStream.close()
-            errStream.close()
-        end defer
-
-        dim firstLine = ""
-        dim secondLine = ""
-        dim ok1 = inStream.readLine(firstLine)
-        dim ok2 = inStream.readLine(secondLine)
-        dim rawBytes = inStream.readBytes(4)
-        dim atEof = inStream.eof()
-
-        outStream.writeStr("OUT:")
-        outStream.writeLine(firstLine & "|" & secondLine & "|eof=" & atEof.toStr())
-        outStream.flush()
-
-        errStream.writeStr("ERR:")
-        errStream.writeBytes(rawBytes)
-        errStream.writeLine("|ok=" & (ok1 and ok2).toStr())
-        errStream.flush()
-        return 0
-    catch e
-        print("Error: " & e.msg)
-        return 1
-    end try
-end fn
-)CB";
-        {
-            std::ofstream cbOut(cbPath, std::ios::binary | std::ios::trunc);
-            cbOut << cbSource;
-        }
-
-        const cb::BuildFileResult buildRes = cb::buildFile(cbPath, cppPath, true, binPath, "native", "g++");
-        INFO("std_streams build diagnostic: " << cb::formatDiagnostic(buildRes.error));
-        REQUIRE(buildRes.ok);
-
-        const int rc = std::system(("./" + binPath + " < " + stdinPath + " > " + stdoutPath + " 2> " + stderrPath).c_str());
-        CHECK(rc == 0);
-
-        const std::string outText = cb::testE2E::readFileText(stdoutPath);
-        const std::string errText = cb::testE2E::readFileText(stderrPath);
-        CHECK(outText.find("OUT:lineOne|lineTwo|eof=true") != std::string::npos);
-        CHECK(errText.find("ERR:RAWB|ok=true") != std::string::npos);
     }
 }
 
@@ -2897,61 +2737,7 @@ end fn
     }
 }
 
-TEST_CASE("Emitted C++17 safest subset: const T&, [[nodiscard]], int64_t, and mutability enforcement", "[emitter][analyzer]") {
-    SECTION("Read-only parameters emit const T&, primitives emit value, byref emits T&") {
-        const std::string code = R"(
-type Point
-    x as int
-    y as int
-end type
-
-fn inspect(
-    s as str,
-    nums as list[int],
-    lookup as dict[str, int],
-    pt as Point,
-    n as int,
-    f as float,
-    flag as bool,
-    byref outPt as Point
-) as int
-    return n
-end fn
-
-fn main()
-end fn
-)";
-        const auto res = cb::transpileSource(code, "paramPassing.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("int64_t inspect(const std::string& s, const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& lookup, const Point& pt, int64_t n, double f, bool flag, Point& outPt)") != std::string::npos);
-    }
-
-    SECTION("Fallible functions emit [[nodiscard]] and CbError is [[nodiscard]]") {
-        const std::string code = R"(
-fn failVoid() can error
-    error("fail")
-end fn
-
-fn failVal() as int can error
-    return 42
-end fn
-
-fn main()
-    try
-        failVoid()
-        dim x = failVal()
-    catch e
-        return
-    end try
-end fn
-)";
-        const auto res = cb::transpileSource(code, "fallibleNodiscard.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("struct [[nodiscard]] CbError {") != std::string::npos);
-        CHECK(res.cppCode.find("[[nodiscard]] CbError failVoid()") != std::string::npos);
-        CHECK(res.cppCode.find("[[nodiscard]] std::tuple<int64_t, CbError> failVal()") != std::string::npos);
-    }
-
+TEST_CASE("Analyzer enforces non-byref parameter and const mutability rules", "[analyzer]") {
     SECTION("Analyzer rejects reassigning non-byref parameter") {
         const std::string code = R"(
 fn test(p as int)
@@ -3005,30 +2791,7 @@ end fn
         CHECK(res.error.message.find("Cannot pass const variable 'p' to byref parameter 'p'") != std::string::npos);
     }
 }
-TEST_CASE("Language ergonomics: continue, loop depth validation, and multi-value/string select case", "[control_flow][select_case][continue]") {
-    SECTION("continue statement in for and while loops transpiles to C++ continue;") {
-        const std::string code = R"(
-fn main()
-    for i = 1 to 5
-        if i == 3
-            continue
-        end if
-    end for
-
-    dim n = 0
-    while n < 5
-        n = n + 1
-        if n == 2
-            continue
-        end if
-    end while
-end fn
-)";
-        const auto res = cb::transpileSource(code, "testContinue.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("continue;") != std::string::npos);
-    }
-
+TEST_CASE("Analyzer validates loop depth for break/continue and select case target/case types", "[control_flow][select_case][continue]") {
     SECTION("Analyzer rejects break and continue outside loops") {
         const std::string badBreak = R"(
 fn main()
@@ -3061,56 +2824,6 @@ end fn
         CHECK(resSelBreak.error.message.find("'break' cannot be used outside of a loop") != std::string::npos);
     }
 
-    SECTION("Multi-value case clauses for int emit stacked case labels") {
-        const std::string code = R"(
-fn classify(n as int) as str
-    select case n
-        case 1, 2, 3
-            return "small"
-        case 4, 5
-            return "medium"
-        case else
-            return "large"
-    end select
-end fn
-
-fn main()
-end fn
-)";
-        const auto res = cb::transpileSource(code, "multiCaseInt.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("case 1:") != std::string::npos);
-        CHECK(res.cppCode.find("case 2:") != std::string::npos);
-        CHECK(res.cppCode.find("case 3: {") != std::string::npos);
-        CHECK(res.cppCode.find("case 4:") != std::string::npos);
-        CHECK(res.cppCode.find("case 5: {") != std::string::npos);
-        CHECK(res.cppCode.find("default: {") != std::string::npos);
-    }
-
-    SECTION("select case on str lowers to single-eval temporary variable and if/else-if equality chain") {
-        const std::string code = R"(
-fn classifyStr(s as str) as int
-    select case s
-        case "apple", "banana"
-            return 1
-        case "cherry"
-            return 2
-        case else
-            return 0
-    end select
-end fn
-
-fn main()
-end fn
-)";
-        const auto res = cb::transpileSource(code, "strSelect.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("const auto _sel_") != std::string::npos);
-        CHECK(res.cppCode.find(R"(if (_sel_1 == std::string("apple") || _sel_1 == std::string("banana")) {)") != std::string::npos);
-        CHECK(res.cppCode.find(R"(} else if (_sel_1 == std::string("cherry")) {)") != std::string::npos);
-        CHECK(res.cppCode.find("} else {") != std::string::npos);
-    }
-
     SECTION("Analyzer type-checks case expressions against target type and rejects invalid select case targets") {
         const std::string mismatchType = R"(
 fn main()
@@ -3136,28 +2849,6 @@ end fn
         const auto resBadTarget = cb::transpileSource(badTarget, "badTarget.cb");
         CHECK_FALSE(resBadTarget.ok);
         CHECK(resBadTarget.error.message.find("select case expression must be of type 'int', 'bool', or 'str'") != std::string::npos);
-    }
-
-    SECTION("try / catch blocks inside loops support fallthrough or continue in catch") {
-        const std::string code = R"(
-fn fallibleTask() as int can error
-    error("failed")
-    return 0
-end fn
-
-fn main()
-    for i = 1 to 5
-        try
-            dim x = fallibleTask()
-        catch e
-            continue
-        end try
-    end for
-end fn
-)";
-        const auto res = cb::transpileSource(code, "continueOnError.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("continue;") != std::string::npos);
     }
 }
 
@@ -3292,37 +2983,6 @@ TEST_CASE("String interpolation zero-AST lexer desugaring and diagnostics", "[le
         CHECK(actual == expected);
     }
 
-    SECTION("Supports expressions, precedence, {{ / }} escaping, nested interpolation, and dict literals") {
-        const std::string code = R"CB(
-enum Status
-    ready
-    busy
-end enum
-
-type User
-    name as str
-    score as int
-end type
-
-fn greet(u as User) as str
-    return $"User {u.name} has {u.score + 5} pts (valid={u.score >= 10 and not false})"
-end fn
-
-fn main()
-    dim u = User(name="Alice", score=95)
-    dim st = Status.ready
-    dim msg = $"{greet(u)} | status={st} | braces={{literal}} | nested={$"inner({1 + 2})"} | dict={({"x": 7})["x"]}"
-    print(msg)
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "interpFull.cb");
-        INFO("Transpile diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("cbToStr((u.score + 5))") != std::string::npos);
-        CHECK(res.cppCode.find("cbToStr(((u.score >= 10) && (!false)))") != std::string::npos);
-        CHECK(res.cppCode.find(R"CB(std::string(" | braces={literal} | nested="))CB") != std::string::npos);
-    }
-
     SECTION("Reports clear LexerError diagnostics for invalid interpolated strings") {
         const auto emptyHole = cb::tokenize(R"CB(dim s = $"Hello {}")CB", "emptyHole.cb");
         CHECK_FALSE(emptyHole.ok);
@@ -3353,7 +3013,7 @@ end fn
 }
 
 TEST_CASE("Fallible UFCS scope forwarding, enum aliases, for-in over bytes/aliases, and LSP enum/bytes parity", "[analyzer][emitter][lsp]") {
-    SECTION("Rejects unhandled fallible UFCS receiver calls and bubbles them in can error functions") {
+    SECTION("Rejects unhandled fallible UFCS receiver calls") {
         const std::string badUfcs = R"CB(
 fn decodeUnhandled()
     dim raw = b"hello"
@@ -3365,37 +3025,6 @@ end fn
         CHECK_FALSE(badRes.ok);
         CHECK(badRes.error.kind == "AnalyzerError");
         CHECK(badRes.error.message.find("Unhandled error") != std::string::npos);
-
-        const std::string goodUfcs = R"CB(
-enum Mode
-    fast
-    safe
-end enum
-
-alias ModeAlias = Mode
-alias IntList = list[int]
-
-fn parseAndSum(raw as bytes, nums as IntList) as ModeAlias can error
-    dim decoded = raw.toUtf8()
-    dim total = 0
-    for b in raw
-        total = total + b
-    end for
-    for n in nums
-        total = total + n
-    end for
-    if total > 0 and decoded.len() > 0
-        return Mode.fast
-    end if
-    return Mode.safe
-end fn
-)CB";
-        const auto goodRes = cb::transpileSource(goodUfcs, "goodUfcs.cb");
-        INFO("Transpile diagnostic: " << cb::formatDiagnostic(goodRes.error));
-        REQUIRE(goodRes.ok);
-        CHECK(goodRes.cppCode.find("auto [_val1, _err1] = cbBytesToUtf8(raw);") != std::string::npos);
-        CHECK(goodRes.cppCode.find("if (cbHasError(_err1)) {") != std::string::npos);
-        CHECK(goodRes.cppCode.find("return { static_cast<Mode>(0), _err1 };") != std::string::npos);
     }
 
     SECTION("LSP supports enum symbols/hover/completions and bytes receiver completions") {
@@ -3443,56 +3072,13 @@ end fn
     }
 }
 
-TEST_CASE("Language clarity and utility polish: compound assignments, modulo, module constants, defaults, container methods, indexed loops, and guardrails", "[ergonomics][constants][defaults][containers][guardrails]") {
-    SECTION("Compound assignments (+=, -=, *=, /=, %=, &=) and modulo (%) desugar cleanly") {
-        const std::string code = R"CB(
-fn main()
-    dim x = 10
-    x += 5
-    x -= 3
-    x *= 4
-    x /= 6
-    x %= 5
-    dim msg = "count="
-    msg &= x
-    print(msg)
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "compound.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("x = (x + 5);") != std::string::npos);
-        CHECK(res.cppCode.find("x = (x - 3);") != std::string::npos);
-        CHECK(res.cppCode.find("x = (x * 4);") != std::string::npos);
-        CHECK(res.cppCode.find("x = (x / 6);") != std::string::npos);
-        CHECK(res.cppCode.find("x = (x % 5);") != std::string::npos);
-        CHECK(res.cppCode.find("msg = (msg + cbToStr(x));") != std::string::npos);
-    }
-
-    SECTION("Top-level [pub] const declarations, module qualification, visibility, and immutability") {
-        const std::string modSource = R"CB(
+TEST_CASE("Analyzer guardrails for module constants, defaults, const containers, untyped empty literals, and LSP parity", "[ergonomics][constants][defaults][containers][guardrails]") {
+    SECTION("Rejects private cross-module constant access and constant reassignment") {
+        std::unordered_map<std::string, std::string> memFiles;
+        memFiles["cfg.cb"] = R"CB(
 pub const defaultPort = 8080
 const secretKey = "hidden"
 )CB";
-        const std::string mainSource = R"CB(
-import "cfg.cb"
-
-const localLimit as int = 100
-
-fn main()
-    dim p = cfg.defaultPort + localLimit
-    print(p)
-end fn
-)CB";
-        std::unordered_map<std::string, std::string> memFiles;
-        memFiles["cfg.cb"] = modSource;
-        memFiles["main.cb"] = mainSource;
-        const auto res = cb::transpileSource(mainSource, "main.cb", memFiles);
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("inline const int64_t cb_cfg__defaultPort = 8080;") != std::string::npos);
-        CHECK(res.cppCode.find("inline const int64_t localLimit = 100;") != std::string::npos);
-        CHECK(res.cppCode.find("(cb_cfg__defaultPort + localLimit)") != std::string::npos);
 
         const std::string badPrivConst = R"CB(
 import "cfg.cb"
@@ -3515,37 +3101,7 @@ end fn
         CHECK(reassignRes.error.message.find("Cannot reassign const variable 'maxRetries'") != std::string::npos);
     }
 
-    SECTION("Struct field defaults and function parameter defaults") {
-        const std::string code = R"CB(
-const defaultHost = "127.0.0.1"
-
-type ServerConfig
-    host as str = defaultHost
-    port as int = 8080
-    tls as bool = false
-end type
-
-fn connect(host as str = "localhost", port as int = 8080, timeoutMs as int = 5000) as str
-    return $"{host}:{port} (t={timeoutMs})"
-end fn
-
-fn main()
-    dim cfg1 = ServerConfig()
-    dim cfg2 = ServerConfig(port=9090)
-    dim s1 = connect()
-    dim s2 = connect("10.0.0.1", timeoutMs=1500)
-    print(cfg1.host, cfg2.port, s1, s2)
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "defaults.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("std::string host = defaultHost;") != std::string::npos);
-        CHECK(res.cppCode.find("int64_t port = 8080;") != std::string::npos);
-        CHECK(res.cppCode.find(R"CB(ServerConfig{defaultHost, 9090, false})CB") != std::string::npos);
-        CHECK(res.cppCode.find(R"CB(connect(std::string("localhost"), 8080, 5000))CB") != std::string::npos);
-        CHECK(res.cppCode.find(R"CB(connect(std::string("10.0.0.1"), 8080, 1500))CB") != std::string::npos);
-
+    SECTION("Rejects default value on byref parameter and missing required arguments") {
         const std::string badByrefDefault = R"CB(
 fn bump(byref x as int = 0)
     x += 1
@@ -3568,33 +3124,7 @@ end fn
         CHECK(missingRes.error.message.find("Missing required argument for parameter 'name'") != std::string::npos);
     }
 
-    SECTION("Container receiver methods (has, remove, clear, pop) and const receiver checks") {
-        const std::string code = R"CB(
-fn main()
-    dim d as dict[str, int] = {"a": 1, "b": 2}
-    if d.has("a")
-        dim removed = d.remove("a")
-    end if
-    d.clear()
-
-    dim items as list[str] = ["x", "y"]
-    dim lastItem = items.pop()
-    items.clear()
-
-    dim buf = b"abc"
-    dim lastByte = buf.pop()
-    buf.clear()
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "containers.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find(R"CB((d.count(std::string("a")) > 0))CB") != std::string::npos);
-        CHECK(res.cppCode.find(R"CB((d.erase(std::string("a")) > 0))CB") != std::string::npos);
-        CHECK(res.cppCode.find("d.clear();") != std::string::npos);
-        CHECK(res.cppCode.find("cbListPop(items)") != std::string::npos);
-        CHECK(res.cppCode.find("cbBytesPop(buf)") != std::string::npos);
-
+    SECTION("Rejects mutating container receiver methods (pop, remove) on const variables") {
         const std::string badConstPop = R"CB(
 fn main()
     const items as list[int] = [1, 2, 3]
@@ -3614,31 +3144,6 @@ end fn
         const auto badRemRes = cb::transpileSource(badConstRemove, "badRemove.cb");
         CHECK_FALSE(badRemRes.ok);
         CHECK(badRemRes.error.message.find("Cannot call '.remove()' on const variable 'd'") != std::string::npos);
-    }
-
-    SECTION("Indexed for i, item in list/bytes and negative step countdown loops") {
-        const std::string code = R"CB(
-fn main()
-    dim names as list[str] = ["alice", "bob"]
-    for i, name in names
-        print($"{i}: {name}")
-    end for
-
-    dim raw = b"AB"
-    for idx, b in raw
-        print(idx + b)
-    end for
-
-    for n = 10 to 0 step -2
-        print(n)
-    end for
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "indexedFor.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("for (int64_t i = 0; i < static_cast<int64_t>(_iter_1.size()); ++i)") != std::string::npos);
-        CHECK(res.cppCode.find("for (int64_t n = 10; n >= 0; n += (-2))") != std::string::npos);
     }
 
     SECTION("Guardrails: retired 'as err' return shorthand, untyped empty []/{}, and non-cptr null") {
@@ -3678,20 +3183,6 @@ end fn
         const auto nullStrRes = cb::transpileSource(badNullStr, "nullStr.cb");
         CHECK_FALSE(nullStrRes.ok);
         CHECK(nullStrRes.error.message.find("only 'cptr' can be 'null'") != std::string::npos);
-
-        const std::string validNullCptr = R"CB(
-fn main()
-    dim h as cptr = null
-    if h == null
-        print("null handle")
-    end if
-end fn
-)CB";
-        const auto okCptrRes = cb::transpileSource(validNullCptr, "okCptr.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(okCptrRes.error));
-        REQUIRE(okCptrRes.ok);
-        CHECK(okCptrRes.cppCode.find("void* h = nullptr;") != std::string::npos);
-        CHECK(okCptrRes.cppCode.find("(h == nullptr)") != std::string::npos);
     }
 
     SECTION("LSP surfaces top-level constants and new container receiver methods") {
@@ -3734,25 +3225,7 @@ end fn
     }
 }
 
-TEST_CASE("String indexing s[i], built-in s.byteAt(i), std/str compiler helpers, and std/os raw stdio", "[str_index][byteAt][stdlib]") {
-    SECTION("s[i] emits cbStrIndex and built-in s.byteAt(i) works without importing std/str") {
-        const std::string code = R"CB(
-fn main() as int
-    dim s = "CleanBasic"
-    dim ch = s[0]
-    if s[1] == "l" and s[-1] == "" and s[999] == ""
-        print(ch & ":" & s.byteAt(0) & ":" & s.byteAt(-1))
-    end if
-    return 0
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "strIndexAndByteAt.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("cbStrIndex(s, 0)") != std::string::npos);
-        CHECK(res.cppCode.find("cbStrByteAtFast(s, 0)") != std::string::npos);
-    }
-
+TEST_CASE("String indexing immutability, .byteAt(i) arity validation, and LSP parity", "[str_index][byteAt][stdlib]") {
     SECTION("Analyzer rejects mutating string index s[i] = val in place and validates .byteAt(idx) arity") {
         const std::string badMutCode = R"CB(
 fn main()
@@ -3774,26 +3247,6 @@ end fn
         const auto arityRes = cb::transpileSource(badByteAtArity, "badByteAtArity.cb");
         CHECK_FALSE(arityRes.ok);
         CHECK(arityRes.error.message.find("Missing required argument for parameter 'idx'") != std::string::npos);
-    }
-
-    SECTION("std/str escapeCpp, unescape, asciiIsAlnum, and asciiIsHexDigit") {
-        const std::string unescapeCode = R"CB(
-import "std/str"
-fn main() can error
-    dim raw = str.fromChar(92) & "x41"
-    dim decoded = str.unescape(raw)
-    dim esc = decoded.escapeCpp()
-    dim alnum = decoded.asciiIsAlnum()
-    dim hex = decoded.asciiIsHexDigit()
-end fn
-)CB";
-        const auto res = cb::transpileSource(unescapeCode, "unescapeCheck.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("cb_std_str__unescape(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__escapeCpp(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__asciiIsAlnum(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__asciiIsHexDigit(") != std::string::npos);
     }
 
     SECTION("LSP completes and hovers built-in .byteAt on str") {
@@ -3827,49 +3280,7 @@ end fn
     }
 }
 
-TEST_CASE("Direct return fallibleCall() and top-level fallible statement guardrail", "[analyzer][emitter][fallible]") {
-    SECTION("Supports return fallibleCall() in can error functions, try / catch blocks, and bytes.toUtf8()") {
-        const std::string code = R"CB(
-fn parseNum(s as str) as int can error
-    if s == ""
-        error("empty input", code=400)
-    end if
-    return 42
-end fn
-
-fn delegateParse(s as str) as int can error
-    return parseNum(s)
-end fn
-
-fn decodeBytes(raw as bytes) as str can error
-    return raw.toUtf8()
-end fn
-
-fn safeParse(s as str) as int
-    try
-        return delegateParse(s)
-    catch e
-        return -1
-    end try
-end fn
-
-fn main()
-    print(safeParse("ok"))
-    print(safeParse(""))
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "returnFallible.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("auto [_val1, _err1] = parseNum(s);") != std::string::npos);
-        CHECK(res.cppCode.find("if (cbHasError(_err1)) {") != std::string::npos);
-        CHECK(res.cppCode.find("return { {}, _err1 };") != std::string::npos);
-        CHECK(res.cppCode.find(R"CB(return { _val1, CbError{"", 0} };)CB") != std::string::npos);
-        CHECK(res.cppCode.find("auto [_val2, _err2] = cbBytesToUtf8(raw);") != std::string::npos);
-        CHECK(res.cppCode.find("auto [_val4, _err4] = delegateParse(s);") != std::string::npos);
-        CHECK(res.cppCode.find("return _val4;") != std::string::npos);
-    }
-
+TEST_CASE("Top-level fallible statement guardrails and unhandled fallible call rejection", "[analyzer][fallible]") {
     SECTION("Rejects unhandled return fallibleCall() inside infallible function without try / catch") {
         const std::string badReturn = R"CB(
 fn risky() as int can error
@@ -3944,34 +3355,7 @@ end fn
         CHECK(resUtf8.error.message.find("Fallible call to 'toUtf8' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 
-    SECTION("Supports fallible iterable in for-in loops and direct fallible RHS in compound assignments") {
-        const std::string code = R"CB(
-fn loadItems() as list[str] can error
-    return ["a", "b"]
-end fn
-
-fn countItem(s as str) as int can error
-    return s.len()
-end fn
-
-fn processAll() as int can error
-    dim total = 0
-    dim label = "items:"
-    for item in loadItems()
-        total += countItem(item)
-        label &= item
-    end for
-    return total
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "fallibleForAndCompound.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("auto [_val1, _err1] = loadItems();") != std::string::npos);
-        CHECK(res.cppCode.find("for (const auto& item : _val1) {") != std::string::npos);
-        CHECK(res.cppCode.find("auto [_val2, _err2] = countItem(item);") != std::string::npos);
-        CHECK(res.cppCode.find("total += _val2;") != std::string::npos);
-
+    SECTION("Rejects unhandled fallible iterable in for-in loops and unhandled fallible RHS in compound assignments") {
         const std::string unhandledFor = R"CB(
 fn loadItems() as list[str] can error
     return ["a"]
@@ -4005,78 +3389,8 @@ end fn
     }
 }
 
-TEST_CASE("Auto-included std/str prelude, bytes.fromHex vs str.fromHex cleanup, and safe container/buffer indexing", "[prelude][fromHex][containers]") {
-    SECTION("std/str methods and str.* calls work without import 'std/str' and compile E2E") {
-        const std::string src = R"CB(
-fn main() as int can error
-    dim raw = "  alpha,beta,42  "
-    dim trimmed = raw.trim()
-    dim parts = trimmed.split(",")
-    dim num = parts[2].toInt()
-    dim joined = str.join([parts[0], parts[1]], "-")
-    if trimmed.contains("beta") and joined == "alpha-beta" and num == 42
-        return 0
-    end if
-    return 1
-end fn
-)CB";
-        const auto res = cb::transpileSource(src, "zeroImportStr.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("str_bridge.hpp") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__trim(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__split(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__toInt(") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__join(") != std::string::npos);
-    }
-
-    SECTION("Programs that do not reference std/str omit str_bridge.hpp and cb_std_str__* definitions") {
-        const std::string src = R"CB(
-fn main() as int
-    dim x = 20 + 22
-    print("answer=" & x.toStr())
-    return 0
-end fn
-)CB";
-        const auto res = cb::transpileSource(src, "unusedPrelude.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("str_bridge.hpp") == std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__") == std::string::npos);
-        CHECK(res.symbols.headers.empty());
-    }
-
-    SECTION("Explicit import 'std/str' remains idempotent without duplicate alias errors") {
-        const std::string src = R"CB(
-import "std/str"
-
-fn main() as int
-    dim s = "  ok  ".trim()
-    print(s)
-    return 0
-end fn
-)CB";
-        const auto res = cb::transpileSource(src, "explicitStdStr.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("str_bridge.hpp") != std::string::npos);
-        CHECK(res.cppCode.find("cb_std_str__trim(") != std::string::npos);
-    }
-
-    SECTION("bytes.fromHex(hex) and hex.fromHex() succeed while bytes instance b.fromHex(...) is rejected") {
-        const std::string validHex = R"CB(
-fn main() as int can error
-    dim b1 = bytes.fromHex("deadbeef")
-    dim hexStr = "cafebabe"
-    dim b2 = hexStr.fromHex()
-    dim b3 = "0102".fromHex()
-    print(b1.toHex() & ":" & b2.toHex() & ":" & b3.toHex())
-    return 0
-end fn
-)CB";
-        const auto okRes = cb::transpileSource(validHex, "validHex.cb");
-        REQUIRE(okRes.ok);
-        CHECK(okRes.cppCode.find(R"CPP(cbBytesFromHex(std::string("deadbeef")))CPP") != std::string::npos);
-        CHECK(okRes.cppCode.find("cbBytesFromHex(hexStr)") != std::string::npos);
-        CHECK(okRes.cppCode.find(R"CPP(cbBytesFromHex(std::string("0102")))CPP") != std::string::npos);
-
+TEST_CASE("Auto-included std/str prelude LSP parity and bytes instance .fromHex() rejection", "[prelude][fromHex][lsp]") {
+    SECTION("Rejects calling .fromHex(...) on a bytes instance") {
         const std::string badInstanceHex = R"CB(
 fn main() as int can error
     dim b = b""
@@ -4088,35 +3402,6 @@ end fn
         CHECK_FALSE(badRes.ok);
         CHECK(badRes.error.kind == "AnalyzerError");
         CHECK(badRes.error.message.find("'.fromHex()' cannot be called on a 'bytes' instance") != std::string::npos);
-    }
-
-    SECTION("dict.get(key, defaultVal), read-only dict parameter indexing, and bounds-safe list/bytes indexing") {
-        const std::string src = R"CB(
-fn sumReadOnly(nums as list[int], raw as bytes, d as dict[str, int]) as int
-    return nums[0] + nums[99] + raw[0] + raw[99] + d["present"] + d.get("missing", 10)
-end fn
-
-fn mutateContainers(byref nums as list[int], byref d as dict[str, int])
-    nums[0] = 50
-    d["present"] = 100
-end fn
-
-fn main() as int
-    dim nums as list[int] = [1, 2]
-    dim raw = b"\x05"
-    dim d as dict[str, int] = {"present": 7}
-    mutateContainers(nums, d)
-    return sumReadOnly(nums, raw, d)
-end fn
-)CB";
-        const auto res = cb::transpileSource(src, "safeContainers.cb");
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("cbListGet(nums, 0)") != std::string::npos);
-        CHECK(res.cppCode.find("cbBytesGet(raw, 0)") != std::string::npos);
-        CHECK(res.cppCode.find(R"CPP(cbDictAt(d, std::string("present")))CPP") != std::string::npos);
-        CHECK(res.cppCode.find(R"CPP(cbDictGet(d, std::string("missing"), 10))CPP") != std::string::npos);
-        CHECK(res.cppCode.find("nums[0] = 50;") != std::string::npos);
-        CHECK(res.cppCode.find(R"CPP(d[std::string("present")] = 100;)CPP") != std::string::npos);
     }
 
     SECTION("LSP zero-import str completions/hover, dict.get, str.fromHex, and aligned infallible bytes endian signatures") {
@@ -4184,11 +3469,8 @@ end fn
         CHECK(symInfo.definition.value().fileName.find("stdlib/str/str.cb") != std::string::npos);
     }
 }
-TEST_CASE("Standard library std/test module, built-in assert(), and stateless fn(...) types", "[stdlib][test][assert][fn][e2e]") {
-    SECTION("End-to-end execution of std/test, assert(), err.file/err.line, and stateless fn(...) references") {
-        cb::testE2E::runE2EFixture("stdlib_test", "tests/cases/stdlib_test.cb");
-    }
 
+TEST_CASE("Analyzer validates assert() arguments, fallibility rules, and fn(...) signature matching", "[stdlib][test][assert][fn]") {
     SECTION("Analyzer validates assert() arguments, fallibility rules, and fn(...) signature matching") {
         const std::string unhandledAssert = R"(
 fn bad()
@@ -4225,55 +3507,7 @@ end fn
     }
 }
 
-TEST_CASE("Declarative CLI parser (std/cli), refactored cbgrep, cbdoc, and LSP '' doc-comments", "[stdlib][cli][cbdoc][lsp][e2e]") {
-    SECTION("End-to-end execution of std/cli and std/str test suites (including str.unescape)") {
-        cb::testE2E::runE2EFixture("stdlib_cli", "tests/cases/stdlib_cli.cb");
-        cb::testE2E::runE2EFixture("stdlib_str", "tests/cases/stdlib_str.cb");
-    }
-
-    SECTION("Refactored examples/cbgrep.cb compiles and executes with std/cli") {
-        const std::string workDir = "build/testArtifacts/example_cbgrep_cli";
-        std::error_code ec;
-        std::filesystem::create_directories(workDir, ec);
-        REQUIRE(!ec);
-
-        const std::string outCpp = workDir + "/build.cpp";
-        const std::string outBin = workDir + "/cbgrep_bin";
-        const std::string sampleTxt = workDir + "/sample.txt";
-        const std::string stdoutTxt = workDir + "/stdout.txt";
-
-        {
-            std::ofstream f(sampleTxt, std::ios::binary | std::ios::trunc);
-            f << "Alpha line\nBeta MATCH line\ngamma match two\n";
-        }
-
-        const auto buildRes = cb::buildFile("examples/cbgrep.cb", outCpp, true, outBin);
-        INFO("buildFile error: " << cb::formatDiagnostic(buildRes.error));
-        REQUIRE(buildRes.ok);
-
-        const int helpRc = std::system(("./" + outBin + " --help > " + stdoutTxt + " 2>&1").c_str());
-        CHECK(helpRc == 0);
-        const std::string helpOut = cb::testE2E::readFileText(stdoutTxt);
-        CHECK(helpOut.find("Usage: cbgrep [options] <pattern>") != std::string::npos);
-        CHECK(helpOut.find("-i, --ignore-case") != std::string::npos);
-
-        const int versionRc = std::system(("./" + outBin + " -V > " + stdoutTxt + " 2>&1").c_str());
-        CHECK(versionRc == 0);
-        const std::string versionOut = cb::testE2E::readFileText(stdoutTxt);
-        CHECK(versionOut.find("cbgrep 1.0") != std::string::npos);
-
-        const int searchRc = std::system(("./" + outBin + " -in match " + sampleTxt + " > " + stdoutTxt + " 2>&1").c_str());
-        CHECK(searchRc == 0);
-        const std::string searchOut = cb::testE2E::readFileText(stdoutTxt);
-        CHECK(searchOut.find("2:Beta MATCH line") != std::string::npos);
-        CHECK(searchOut.find("3:gamma match two") != std::string::npos);
-
-        const int countRc = std::system(("./" + outBin + " -ic match " + sampleTxt + " > " + stdoutTxt + " 2>&1").c_str());
-        CHECK(countRc == 0);
-        const std::string countOut = cb::testE2E::readFileText(stdoutTxt);
-        CHECK(countOut.find("2") != std::string::npos);
-    }
-
+TEST_CASE("Tools cbdoc and cbfmt, LSP '' doc-comments, and collection loop const enforcement", "[cbdoc][cbfmt][lsp][e2e]") {
     SECTION("tools/cbdoc.cb extracts '' doc-comments and pub signatures into Markdown") {
         const std::string workDir = "build/testArtifacts/tool_cbdoc";
         std::error_code ec;
@@ -4410,11 +3644,11 @@ end fn
         const auto checkFormatted = cb::checkSource(expectedFormatted, "formatted.cb");
         REQUIRE(checkFormatted.ok);
 
-        // 5. Verify stdlib, examples, and tools pass cbfmt --check
+        // 5. Verify stdlib, examples, tools, and tests/cases pass cbfmt --check
         const int repoCheckRc = std::system(
-            ("./" + outBin + " --check stdlib examples tools > " + stdoutTxt + " 2>&1").c_str()
+            ("./" + outBin + " --check stdlib examples tools tests/cases > " + stdoutTxt + " 2>&1").c_str()
         );
-        INFO("cbfmt --check stdlib examples tools output: " << cb::testE2E::readFileText(stdoutTxt));
+        INFO("cbfmt --check stdlib examples tools tests/cases output: " << cb::testE2E::readFileText(stdoutTxt));
         CHECK(repoCheckRc == 0);
     }
 
@@ -4531,31 +3765,7 @@ end fn
         CHECK(sigDocVal.find("Connects to the target Endpoint.") != std::string::npos);
     }
 
-    SECTION("Self-hosting readiness: zero-copy cbListGet/cbDictAt and collection loop/param const enforcement") {
-        // Verify runtime preamble cbListGet and cbDictAt return const references
-        const auto res = cb::transpileSource(
-            R"(type Item
-    id as int
-end type
-fn readItem(items as list[Item], table as dict[str, list[Item]]) as int
-    dim total = items[0].id + table["a"][0].id
-    for it in items
-        total += it.id
-    end for
-    for k, v in table
-        total += v.len()
-    end for
-    return total
-end fn
-)",
-            "self_host_read.cb"
-        );
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("inline const T& cbListGet(const std::vector<T>& v, int64_t idx)") != std::string::npos);
-        CHECK(res.cppCode.find("inline const V& cbDictAt(const std::unordered_map<K, V>& d, const KArg& k)") != std::string::npos);
-        CHECK(res.cppCode.find("for (const auto& it : items)") != std::string::npos);
-        CHECK(res.cppCode.find("for (const auto& [k, v] : table)") != std::string::npos);
-
+    SECTION("Analyzer rejects mutating collection for-in loop variables or chained non-byref parameters") {
         // Verify mutating a collection for-in loop variable is rejected by the analyzer
         const auto badLoopMut = cb::checkSource(
             R"(fn badLoop(items as list[int])
@@ -4585,9 +3795,10 @@ end fn
     }
 }
 
-TEST_CASE("Tagged union sum types, until loops, hex/binary/underscore numerics, bitwise methods, and list/dict helpers", "[union][loops][numerics][bitwise][containers][lsp][e2e]") {
-    SECTION("Cross-module pub/private union visibility, variant constructors, .kind(), and select case payload bindings") {
-        const std::string modAst = R"CB(
+TEST_CASE("Tagged union guardrails, const list sort/removeAt checks, overload arity errors, and LSP union/UFCS parity", "[union][containers][lsp]") {
+    SECTION("Analyzer rejects private union access, unknown union variants, and invalid case payload bindings") {
+        std::unordered_map<std::string, std::string> memFiles;
+        memFiles["ast.cb"] = R"CB(
 pub type Span
     line as int
     col as int
@@ -4603,40 +3814,6 @@ union PrivateUnion
     secret as int
 end union
 )CB";
-        const std::string mainSrc = R"CB(
-import "ast.cb"
-
-fn describe(n as ast.AstNode) as str
-    select case n
-        case intVal as v
-            return n.kind() & ":" & v.toStr()
-        case ast.AstNode.textVal as s
-            return "text:" & s
-        case spanVal as sp
-            return "span:" & sp.line.toStr() & ":" & sp.col.toStr()
-    end select
-    return ""
-end fn
-
-fn main() as int
-    dim a = ast.AstNode.intVal(0x10_00)
-    dim b = ast.AstNode.textVal("ok")
-    dim c = ast.AstNode.spanVal(ast.Span(line=0b1010, col=4))
-    print(describe(a) & "|" & describe(b) & "|" & describe(c))
-    return 0
-end fn
-)CB";
-        std::unordered_map<std::string, std::string> memFiles;
-        memFiles["ast.cb"] = modAst;
-        memFiles["main.cb"] = mainSrc;
-        const auto okRes = cb::transpileSource(mainSrc, "main.cb", memFiles);
-        INFO("Diagnostic: " << cb::formatDiagnostic(okRes.error));
-        REQUIRE(okRes.ok);
-        CHECK(okRes.cppCode.find("struct cb_ast__AstNode {") != std::string::npos);
-        CHECK(okRes.cppCode.find("std::in_place_index<0>") != std::string::npos);
-        CHECK(okRes.cppCode.find("cbUnionKind(n)") != std::string::npos);
-        CHECK(okRes.cppCode.find("std::get<0>(") != std::string::npos);
-
         const std::string badPrivUnion = R"CB(
 import "ast.cb"
 fn main()
@@ -4684,39 +3861,7 @@ end fn
         CHECK(intBindRes.error.message.find("Case payload binding ('as <ident>') is only supported when 'select case' target is a union") != std::string::npos);
     }
 
-    SECTION("Unannotated list/dict literals, dict.keys(), list.slice/sort/contains/removeAt, until loops, and bitwise methods") {
-        const std::string code = R"CB(
-fn main() as int
-    dim nums = [30, 10, 20]
-    nums.sort()
-    dim sub = nums.slice(0, 2)
-    dim tail = nums.sliceFrom(1)
-    dim has20 = nums.contains(20)
-    dim removed = nums.removeAt(0)
-
-    dim table = {"b": 2, "a": 1}
-    dim ks = table.keys()
-
-    dim mask = 0xFF_00.bitAnd(0x0F_00).bitOr(0b0000_0011).bitXor(1).shl(2).shr(1).bitNot()
-    dim sum = 0
-    for i = 0 until ks.len()
-        sum += table[ks[i]]
-    end for
-    return sum + sub.len() + tail.len() + removed + mask
-end fn
-)CB";
-        const auto res = cb::transpileSource(code, "unannotatedContainers.cb");
-        INFO("Diagnostic: " << cb::formatDiagnostic(res.error));
-        REQUIRE(res.ok);
-        CHECK(res.cppCode.find("cbListSort(nums);") != std::string::npos);
-        CHECK(res.cppCode.find("cbListSlice(nums, 0, 2)") != std::string::npos);
-        CHECK(res.cppCode.find("cbListSliceFrom(nums, 1)") != std::string::npos);
-        CHECK(res.cppCode.find("cbListContains(nums, 20)") != std::string::npos);
-        CHECK(res.cppCode.find("cbListRemoveAt(nums, 0)") != std::string::npos);
-        CHECK(res.cppCode.find("cbDictKeys(table)") != std::string::npos);
-        CHECK(res.cppCode.find("cbBitShl(") != std::string::npos);
-        CHECK(res.cppCode.find("cbBitShr(") != std::string::npos);
-
+    SECTION("Analyzer rejects .sort() and .removeAt() on const list variables") {
         const auto badSort = cb::checkSource(R"CB(
 fn f()
     const xs = [3, 1, 2]
@@ -4779,85 +3924,46 @@ end fn
         CHECK(varHover.definition->line == 2);
     }
 
-    SECTION("Overloaded functions with shared parameter names, UFCS arity overloads, and cross-module UFCS Step 3") {
-        // 1. Overloaded functions sharing parameter name 'target' with different types (str vs list[int]) and UFCS arity overloads
-        const std::string overloadCode = R"CB(
+    SECTION("Analyzer rejects invalid argument count on overloaded UFCS function and LSP discovers cross-module UFCS") {
+        const std::string badOvCode = R"CB(
 type TypeRegistry
     items as list[str]
 end type
 
 fn findType(reg as TypeRegistry, target as str) as int
-    return target.len() + reg.items.len()
+    return target.len()
 end fn
 
 fn findType(byref reg as TypeRegistry, target as list[int], tag as str) as int
-    reg.items.push(tag)
-    return target.len() + reg.items.len()
+    return target.len()
 end fn
 
-fn main() as int
-    dim reg = TypeRegistry(items=["int", "str"])
-    dim a = reg.findType("float")
-    dim b = reg.findType([10, 20], "list")
-    return a + b
-end fn
-)CB";
-        const auto ovRes = cb::transpileSource(overloadCode, "overload_ufcs.cb");
-        INFO("Overload UFCS diagnostic: " << cb::formatDiagnostic(ovRes.error));
-        REQUIRE(ovRes.ok);
-        CHECK(ovRes.cppCode.find(R"CB(findType(reg, std::string("float")))CB") != std::string::npos);
-        CHECK(ovRes.cppCode.find(R"CB(findType(reg, {10, 20}, std::string("list")))CB") != std::string::npos);
-
-        // Reject invalid argument count on overloaded function
-        const std::string badOvSuffix = R"CB(
 fn bad(r as TypeRegistry) as int
     return r.findType("a", "b", "c")
 end fn
 )CB";
-        const auto badOv = cb::checkSource(overloadCode + badOvSuffix, "bad_ov.cb");
+        const auto badOv = cb::checkSource(badOvCode, "bad_ov.cb");
         CHECK_FALSE(badOv.ok);
         CHECK(badOv.error.message.find("Too many arguments in call to 'findType'") != std::string::npos);
 
-        // 2. Cross-module UFCS Step 3 across imported modules (ast.cb defines AstArena, symbols.cb defines pub fn resolveAlias(arena as ast.AstArena, ...))
-        std::unordered_map<std::string, std::string> virtualFiles;
-        virtualFiles["/ws/ast.cb"] = R"CB(pub type AstArena
+        // Verify LSP dot-completion on 'arena' in analyzer.cb discovers 'resolveAlias' from imported symbols.cb
+        cb::LspServerState lspState{};
+        lspState.openDocuments["file:///ws/ast.cb"] = R"CB(pub type AstArena
     types as list[str]
 end type
 )CB";
-        virtualFiles["/ws/symbols.cb"] = R"CB(import "ast.cb"
-
+        lspState.openDocuments["file:///ws/symbols.cb"] = R"CB(import "ast.cb"
 pub fn resolveAlias(arena as ast.AstArena, tid as int) as str
     return arena.types[tid]
 end fn
-
-pub fn resolveAlias(arena as ast.AstArena, tid as int, fallback as str) as str
-    if tid < 0 or tid >= arena.types.len()
-        return fallback
-    end if
-    return arena.types[tid]
-end fn
 )CB";
-        const std::string analyzerSrc = R"CB(import "ast.cb"
+        lspState.openDocuments["file:///ws/analyzer.cb"] = R"CB(import "ast.cb"
 import "symbols.cb"
-
 fn main() as int
-    dim arena = ast.AstArena(types=["int", "str"])
-    dim t0 = arena.resolveAlias(0)
-    dim tFallback = arena.resolveAlias(99, "void")
-    return t0.len() + tFallback.len()
+    dim arena = ast.AstArena(types=["int"])
+    return 0
 end fn
 )CB";
-        virtualFiles["/ws/analyzer.cb"] = analyzerSrc;
-
-        const auto crossUfcsCheck = cb::checkSource(analyzerSrc, "/ws/analyzer.cb", virtualFiles);
-        INFO("Cross-module UFCS diagnostic: " << cb::formatDiagnostic(crossUfcsCheck.error));
-        REQUIRE(crossUfcsCheck.ok);
-
-        // Verify LSP dot-completion on 'arena' in analyzer.cb discovers 'resolveAlias' from imported symbols.cb
-        cb::LspServerState lspState{};
-        lspState.openDocuments["file:///ws/ast.cb"] = virtualFiles["/ws/ast.cb"];
-        lspState.openDocuments["file:///ws/symbols.cb"] = virtualFiles["/ws/symbols.cb"];
-        lspState.openDocuments["file:///ws/analyzer.cb"] = analyzerSrc;
         const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(lspState, "file:///ws/analyzer.cb");
         REQUIRE(snap.valid);
 
@@ -4871,10 +3977,6 @@ end fn
             }
         }
         CHECK(foundResolveAlias);
-    }
-
-    SECTION("Self-hosting compiler construct conformance E2E fixture (tests/cases/selfhost_constructs.cb)") {
-        cb::testE2E::runE2EFixture("selfhost_constructs", "tests/cases/selfhost_constructs.cb");
     }
 }
 
@@ -4920,88 +4022,9 @@ TEST_CASE("Transpiler and LSP regression fixes for edge-case defects", "[regress
         CHECK(help->paramLabels[0] == "item as int");
     }
 
-    SECTION("E2E Regression: Fallible void return, overloaded scope, and enum assignments") {
-        cb::testE2E::runE2EFixture("regression_fixes", "tests/cases/regression_fixes.cb");
-    }
 }
 
-TEST_CASE("Optimizations 1-3: Call-graph tree-shaking, fast linker detection, and alias/PCH fast paths", "[emitter][pipeline][symbols][optimization]") {
-    SECTION("Emitter call-graph tree-shaking strips unreachable imported module and stdlib functions") {
-        std::unordered_map<std::string, std::string> virtualFiles;
-        virtualFiles["/ws/helper.cb"] = R"CB(fn transitiveInternal(x as int) as int
-    return x * 2
-end fn
-
-fn defaultParamHelper() as int
-    return 7
-end fn
-
-pub fn usedPublic(a as int, b as int = defaultParamHelper()) as int
-    return transitiveInternal(a) + b
-end fn
-
-pub fn bareRefTarget(v as int) as int
-    return v + 1
-end fn
-
-pub fn unusedPublic(x as int) as int
-    return x + 999
-end fn
-
-fn unusedPrivate() as int
-    return 42
-end fn
-)CB";
-        const std::string mainSrc = R"CB(import "helper.cb"
-import "std/fs"
-import "std/os"
-
-fn applyFn(f as fn(int) as int, x as int) as int
-    return f(x)
-end fn
-
-fn localUnreferencedHelper() as int
-    return 123
-end fn
-
-fn main() as int
-    dim r1 = helper.usedPublic(10)
-    dim r2 = applyFn(helper.bareRefTarget, r1)
-    if fs.exists("README.md") and os.platform().len() > 0
-        return r2
-    end if
-    return 0
-end fn
-)CB";
-        virtualFiles["/ws/main.cb"] = mainSrc;
-
-        const auto checkRes = cb::checkSource(mainSrc, "/ws/main.cb", virtualFiles);
-        INFO("Tree-shaking check diagnostic: " << cb::formatDiagnostic(checkRes.error));
-        REQUIRE(checkRes.ok);
-
-        const std::string cpp = cb::emitProgram(checkRes.arena, checkRes.symbols, checkRes.program);
-
-        // Root module functions (including unreferenced root helpers) are preserved
-        CHECK(cpp.find("localUnreferencedHelper(") != std::string::npos);
-
-        // Reachable imported functions (direct, transitive internal, default param, bare fn ref) are emitted
-        CHECK(cpp.find("cb_helper__usedPublic(") != std::string::npos);
-        CHECK(cpp.find("cb_helper__transitiveInternal(") != std::string::npos);
-        CHECK(cpp.find("cb_helper__defaultParamHelper(") != std::string::npos);
-        CHECK(cpp.find("cb_helper__bareRefTarget(") != std::string::npos);
-
-        // Unreachable imported module functions are stripped
-        CHECK(cpp.find("cb_helper__unusedPublic") == std::string::npos);
-        CHECK(cpp.find("cb_helper__unusedPrivate") == std::string::npos);
-
-        // Referenced stdlib functions are emitted while unused stdlib functions are stripped
-        CHECK(cpp.find("cb_std_fs__exists(") != std::string::npos);
-        CHECK(cpp.find("cb_std_os__platform(") != std::string::npos);
-        CHECK(cpp.find("cb_std_fs__walkFiles") == std::string::npos);
-        CHECK(cpp.find("cb_std_fs__removeAll") == std::string::npos);
-        CHECK(cpp.find("cb_std_os__exec") == std::string::npos);
-    }
-
+TEST_CASE("Fast linker detection, built-in type alias fast path, and PCH hash stability", "[pipeline][symbols][optimization]") {
     SECTION("Built-in type alias resolution fast path preserves primitive TypeIds and unwraps user aliases") {
         const std::string src = R"CB(alias MyInt = int
 alias IntList = list[MyInt]
@@ -5051,110 +4074,7 @@ end fn
     }
 }
 
-TEST_CASE("Nested try/catch, control-flow error propagation, error() in try/catch, and enum aliases", "[emitter][analyzer][e2e]") {
-    SECTION("Nested try/catch blocks use distinct _catch_err_N temporaries and route errors to the right catch block") {
-        const std::string workDir = "build/testArtifacts/nestedTryCatchTest";
-        std::error_code ec;
-        std::filesystem::create_directories(workDir, ec);
-        REQUIRE(!ec);
-
-        const std::string cbPath = workDir + "/nested_try.cb";
-        const std::string cppPath = workDir + "/build.cpp";
-        const std::string binPath = workDir + "/nested_try_bin";
-        const std::string stdoutPath = workDir + "/stdout.txt";
-
-        const std::string cbSource = R"CB(
-enum Status
-    ok = 10
-    bad = 20
-end enum
-
-alias StatusAlias = Status
-
-fn mightFail(x as int) as int can error
-    if x < 0
-        error("neg:" & x.toStr(), code=400)
-    end if
-    return x * 2
-end fn
-
-fn testControlFlowAndNestedTry() as str
-    dim log = ""
-    ' 1. Nested try/catch where inner catch throws a new error caught by outer catch
-    try
-        try
-            dim a = mightFail(-1)
-            log &= "UNREACHABLE_INNER|"
-        catch innerErr
-            log &= "innerCaught(" & innerErr.msg & ")|"
-            dim b = mightFail(-2)
-            log &= "UNREACHABLE_AFTER_RETHROW|"
-        end try
-        log &= "UNREACHABLE_OUTER|"
-    catch outerErr
-        log &= "outerCaught(" & outerErr.msg & ")|"
-    end try
-
-    ' 2. Fallible call inside string select case inside while loop inside try
-    try
-        dim stepIdx = 0
-        while stepIdx < 3
-            stepIdx += 1
-            select case "mode_" & stepIdx.toStr()
-                case "mode_1"
-                    dim v1 = mightFail(3)
-                    log &= "m1=" & v1.toStr() & "|"
-                case "mode_2"
-                    if stepIdx == 2
-                        dim v2 = mightFail(-5)
-                        log &= "m2=" & v2.toStr() & "|"
-                    end if
-                    log &= "UNREACHABLE_M2|"
-                case else
-                    log &= "UNREACHABLE_M3|"
-            end select
-        end while
-    catch loopErr
-        log &= "loopCaught(" & loopErr.msg & ")|"
-    end try
-
-    ' 3. Calling error(...) directly inside try/catch in an infallible function
-    try
-        if StatusAlias.bad == Status.bad
-            error("directRaise", code=422)
-        end if
-        log &= "UNREACHABLE_DIRECT|"
-    catch directErr
-        log &= "direct(" & directErr.msg & ":" & directErr.code.toStr() & ")"
-    end try
-
-    return log
-end fn
-
-fn main() as int
-    print(testControlFlowAndNestedTry())
-    return 0
-end fn
-)CB";
-        {
-            std::ofstream cbOut(cbPath, std::ios::binary | std::ios::trunc);
-            cbOut << cbSource;
-        }
-
-        const cb::BuildFileResult buildRes = cb::buildFile(cbPath, cppPath, true, binPath, "native", "g++");
-        INFO("nested_try build diagnostic: " << cb::formatDiagnostic(buildRes.error));
-        REQUIRE(buildRes.ok);
-
-        const std::string cppText = cb::testE2E::readFileText(cppPath);
-        CHECK(cppText.find("_catch_err_1") != std::string::npos);
-        CHECK(cppText.find("_catch_err_2") != std::string::npos);
-
-        const int rc = std::system(("./" + binPath + " > " + stdoutPath + " 2>&1").c_str());
-        CHECK(rc == 0);
-        const std::string outText = cb::testE2E::readFileText(stdoutPath);
-        CHECK(outText.find("innerCaught(neg:-1)|outerCaught(neg:-2)|m1=6|loopCaught(neg:-5)|direct(directRaise:422)") != std::string::npos);
-    }
-
+TEST_CASE("fnScopes preserves outer variable types when inner try/catch scopes shadow variable names", "[analyzer][symbols]") {
     SECTION("fnScopes preserves outer variable types when inner try/catch scopes declare same-named variables") {
         const std::string src = R"CB(
 fn demo() as int

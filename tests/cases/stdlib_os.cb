@@ -41,44 +41,43 @@ end fn
 
 fn main() as int
     try
+        dim argv = os.args()
+        print("Args count=" & argv.len())
 
-    dim argv = os.args()
-    print("Args count=" & argv.len())
+        dim plat = os.platform()
+        dim platOk = (plat == "linux" or plat == "macos" or plat == "windows")
+        dim exeP = os.exePath()
+        dim exeOk = (exeP.len() > 0 and fs.exists(exeP))
+        dim hasUnset = os.hasEnv("CB_NONEXISTENT_ENV_VAR_999")
+        dim unsetVal = os.env("CB_NONEXISTENT_ENV_VAR_999")
+        print("Platform valid=" & platOk & ", exePathNonEmpty=" & exeOk & ", unsetEnvExists=" & hasUnset & ", unsetEnvVal=[" & unsetVal & "]")
 
-    dim plat = os.platform()
-    dim platOk = (plat == "linux" or plat == "macos" or plat == "windows")
-    dim exeP = os.exePath()
-    dim exeOk = (exeP.len() > 0 and fs.exists(exeP))
-    dim hasUnset = os.hasEnv("CB_NONEXISTENT_ENV_VAR_999")
-    dim unsetVal = os.env("CB_NONEXISTENT_ENV_VAR_999")
-    print("Platform valid=" & platOk & ", exePathNonEmpty=" & exeOk & ", unsetEnvExists=" & hasUnset & ", unsetEnvVal=[" & unsetVal & "]")
+        dim sandboxDir = "build/testArtifacts/stdlibOsSandbox"
+        if not fs.exists(sandboxDir)
+            fs.mkdir(sandboxDir)
+        end if
+        testChdirRoundtrip(sandboxDir)
+        fs.remove(sandboxDir)
 
-    dim sandboxDir = "build/testArtifacts/stdlibOsSandbox"
-    if not fs.exists(sandboxDir)
-        fs.mkdir(sandboxDir)
-    end if
-    testChdirRoundtrip(sandboxDir)
-    fs.remove(sandboxDir)
+        dim t0 = os.clock()
+        os.sleep(5)
+        dim t1 = os.clock()
+        print("Clock monotonic=" & (t1 >= t0 and t0 >= 0))
 
-    dim t0 = os.clock()
-    os.sleep(5)
-    dim t1 = os.clock()
-    print("Clock monotonic=" & (t1 >= t0 and t0 >= 0))
+        dim rc0 = os.run("exit 0")
+        dim rc7 = os.run("exit 7")
+        print("Subprocess exit codes: zero=" & rc0 & ", seven=" & rc7)
 
-    dim rc0 = os.run("exit 0")
-    dim rc7 = os.run("exit 7")
-    print("Subprocess exit codes: zero=" & rc0 & ", seven=" & rc7)
+        dim execOut = os.exec("echo CleanBasicExecOk")
+        print("Exec captured=" & execOut.trim())
+        testExecFailure()
 
-    dim execOut = os.exec("echo CleanBasicExecOk")
-    print("Exec captured=" & execOut.trim())
-    testExecFailure()
-
-    os.printRaw("Raw framing: ")
-    os.printRaw("Content-Length: 4")
-    dim emptyExact = os.readExact(0)
-    print(" | readExact0=[" & emptyExact & "]")
-    os.eprintRaw("Stderr message ")
-    os.eprint("via eprint")
+        os.printRaw("Raw framing: ")
+        os.printRaw("Content-Length: 4")
+        dim emptyExact = os.readExact(0)
+        print(" | readExact0=[" & emptyExact & "]")
+        os.eprintRaw("Stderr message ")
+        os.eprint("via eprint")
         return 0
     catch e
         print("Unexpected error: " & e.msg)

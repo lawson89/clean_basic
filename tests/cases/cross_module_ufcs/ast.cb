@@ -1,0 +1,19 @@
+pub const defaultPort = 8080
+const secretKey = "hidden"
+
+pub type SharedCfg
+    scale as int
+end type
+
+pub type AstArena
+    types as list[str]
+end type
+
+pub union AstNode
+    intVal as int
+    textVal as str
+end union
+
+pub fn privateSecretLen() as int
+    return secretKey.len()
+end fn

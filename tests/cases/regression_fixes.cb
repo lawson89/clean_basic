@@ -59,10 +59,10 @@ fn main() as int
 
         dim s = State(val=Status.Active)
         s.val = Status.Inactive
-        
+
         dim l as list[Status] = [Status.Active]
         l[0] = Status.Inactive
-        
+
         print("Enum assignment success")
         return 0
     catch e
