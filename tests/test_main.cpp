@@ -4271,8 +4271,12 @@ end fn
         CHECK(checkRes.symbols.callGraphEdges.at("main").count("inspectEvent") == 1);
         CHECK(checkRes.symbols.callGraphEdges.at("inspectEvent").count("bump") == 1);
 
+        CHECK(!checkRes.cppCode.empty());
+        CHECK(checkRes.cppCode == checkRes.symbols.emittedCpp);
+
         const auto tpRes = cb::transpileSource(unionSelectSrc, "union_zero_copy.cb");
         REQUIRE(tpRes.ok);
+        CHECK(tpRes.cppCode == checkRes.cppCode);
         CHECK(tpRes.cppCode.find("const auto& _sel_1 = ev;") != std::string::npos);
         CHECK(tpRes.cppCode.find("const auto& ro = std::get<0>(_sel_1._data);") != std::string::npos);
         CHECK(tpRes.cppCode.find("const auto& m = std::get<1>(_sel_1._data);") != std::string::npos);

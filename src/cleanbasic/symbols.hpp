@@ -182,6 +182,7 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, std::unordered_set<std::string>> callGraphEdges;
     std::unordered_set<std::string> rootReferencedFunctions;
     std::vector<std::pair<std::string, DeclId>> sortedCompositeDecls;
+    std::string emittedCpp;
     bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
@@ -195,6 +196,7 @@ struct GlobalSymbolTable {
 struct AnalysisResult {
     bool ok = true;
     GlobalSymbolTable symbols;
+    std::string cppCode;
     DiagnosticError error;
 };
 
@@ -1261,19 +1263,6 @@ inline std::vector<std::pair<std::string, TypeId>> resolveForInLoopVars(
         }
     }
     return bindings;
-}
-
-inline void bindForInLoopVars(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    std::string_view modId,
-    const ForStmt& forStmt,
-    std::unordered_map<std::string, VarSymbol>& loopScope
-) {
-    const auto bindings = resolveForInLoopVars(arena, symbols, modId, forStmt, loopScope, nullptr);
-    for (const auto& kv : bindings) {
-        loopScope[kv.first] = VarSymbol{kv.first, kv.second, false, true};
-    }
 }
 
 inline std::vector<std::string> collectDirectCompositeDeps(

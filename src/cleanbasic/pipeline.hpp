@@ -47,6 +47,7 @@ struct CheckSourceResult {
     AstArena arena;
     Program program;
     GlobalSymbolTable symbols;
+    std::string cppCode;
     DiagnosticError error;
     BuildTimings timings{};
 };
@@ -874,7 +875,7 @@ inline CheckSourceResult checkSource(
         timings.lexParseMs = elapsedMillis(t0, t1);
         timings.transpileTotalMs = timings.lexParseMs;
         timings.totalMs = timings.lexParseMs;
-        return CheckSourceResult{false, {}, {}, {}, lexRes.error, timings};
+        return CheckSourceResult{false, {}, {}, {}, "", lexRes.error, timings};
     }
 
     auto parseRes = parseTokens(lexRes.tokens, fileName);
@@ -883,7 +884,7 @@ inline CheckSourceResult checkSource(
         timings.lexParseMs = elapsedMillis(t0, t1);
         timings.transpileTotalMs = timings.lexParseMs;
         timings.totalMs = timings.lexParseMs;
-        return CheckSourceResult{false, {}, {}, {}, parseRes.error, timings};
+        return CheckSourceResult{false, {}, {}, {}, "", parseRes.error, timings};
     }
     attachDocCommentsToDecls(parseRes.arena, parseRes.program.declarations, source);
     const auto tLexParseEnd = std::chrono::steady_clock::now();
@@ -903,7 +904,7 @@ inline CheckSourceResult checkSource(
         timings.moduleLoadMs = elapsedMillis(tLexParseEnd, tModEnd);
         timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs;
         timings.totalMs = timings.transpileTotalMs;
-        return CheckSourceResult{false, {}, {}, {}, loader.error, timings};
+        return CheckSourceResult{false, {}, {}, {}, "", loader.error, timings};
     }
 
     loadModuleDeclarationsRecursive(
@@ -918,7 +919,7 @@ inline CheckSourceResult checkSource(
     if (loader.hasError) {
         timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs;
         timings.totalMs = timings.transpileTotalMs;
-        return CheckSourceResult{false, {}, {}, {}, loader.error, timings};
+        return CheckSourceResult{false, {}, {}, {}, "", loader.error, timings};
     }
     parseRes.program.declarations = std::move(loader.mergedDecls);
 
@@ -928,7 +929,7 @@ inline CheckSourceResult checkSource(
     timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs + timings.analyzeMs;
     timings.totalMs = timings.transpileTotalMs;
     if (!anaRes.ok) {
-        return CheckSourceResult{false, {}, {}, {}, anaRes.error, timings};
+        return CheckSourceResult{false, {}, {}, {}, "", anaRes.error, timings};
     }
 
     return CheckSourceResult{
@@ -936,6 +937,7 @@ inline CheckSourceResult checkSource(
         std::move(parseRes.arena),
         std::move(parseRes.program),
         std::move(anaRes.symbols),
+        std::move(anaRes.cppCode),
         {},
         timings
     };
@@ -951,15 +953,7 @@ inline TranspileResult transpileSource(
         return TranspileResult{false, "", {}, checkRes.error, checkRes.timings};
     }
 
-    const auto tEmitStart = std::chrono::steady_clock::now();
-    std::string cppCode = emitProgram(checkRes.arena, checkRes.symbols, checkRes.program);
-    const auto tEmitEnd = std::chrono::steady_clock::now();
-
-    BuildTimings timings = checkRes.timings;
-    timings.emitMs = elapsedMillis(tEmitStart, tEmitEnd);
-    timings.transpileTotalMs = timings.lexParseMs + timings.moduleLoadMs + timings.analyzeMs + timings.emitMs;
-    timings.totalMs = timings.transpileTotalMs;
-    return TranspileResult{true, std::move(cppCode), std::move(checkRes.symbols), {}, timings};
+    return TranspileResult{true, std::move(checkRes.cppCode), std::move(checkRes.symbols), {}, checkRes.timings};
 }
 
 inline BuildFileResult buildFileWithOptions(

@@ -31,6 +31,8 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, std::vector<FnSymbol>> builtinReceiverCache;
     std::unordered_map<std::string, std::unordered_set<std::string>> callGraphEdges;
     std::unordered_set<std::string> rootReferencedFunctions;
+    std::vector<std::pair<std::string, DeclId>> sortedCompositeDecls;
+    std::string emittedCpp;
     bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
@@ -151,12 +153,13 @@ partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
      - Reject duplicate function names in the same module and register FnSymbol in symbols.functions[key];
 }
 
-partition "Pass 2: Function Body & Statement Validation" {
-  :Iterate over non-extern FnDecl in program.declarations:
+partition "Pass 2: Fused Typecheck & C++17 Code Generation" {
+  :Iterate over ConstDecl and non-extern FnDecl in program.declarations:
   - Seed local scope with resolved function parameters (including isByref)
-  - Call analyzeBlock() -> analyzeStmt() for every statement
-  - Infer variable types, check mutability, validate UFCS/visibility,
-    and enforce static fallibility rules;
+  - Call checkAndEmitBlock() -> checkAndEmitStmt() / checkAndEmitExpr()
+    in a single walk to infer types, check mutability, validate UFCS/visibility,
+    enforce static fallibility rules, and buffer C++17 code
+  - Run computeReachableFunctions() and assemble final Unity C++17 build.cpp;
 }
 
 stop

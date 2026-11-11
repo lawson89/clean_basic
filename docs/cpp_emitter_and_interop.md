@@ -1,6 +1,6 @@
 # Unity C++17 Code Generation, Runtime Preamble & C/C++ Interop
 
-This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/runtime_preamble.hpp` and `src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, RAII `defer` guards, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
+This document details CleanBasic's fused Unity C++17 code emitter (`src/cleanbasic/runtime_preamble.hpp`, `src/cleanbasic/analyzer.hpp`, and `src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
 
 ### Related Documentation
 * [CleanBasic Transpiler Architecture & Arena Design](transpiler_architecture.md)
