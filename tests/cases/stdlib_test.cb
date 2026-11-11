@@ -1,0 +1,44 @@
+' EXPECT_CPP: struct cb_std_test__TestSuite
+' EXPECT_OUT: === Test Suite: Failure Recording Suite ===
+' EXPECT_OUT: [FAIL] top-level failure
+' EXPECT_OUT: [FAIL] [math] eqInt failed: expected 42, got 41
+' EXPECT_OUT: [FAIL] [strings] eqStr failed: expected "bar", got "foo"
+' EXPECT_OUT: [FAIL] [strings] contains failed: expected "xyz" in "hello world"
+' EXPECT_OUT: Passed: 1, Failed: 4
+' EXPECT_OUT: === Test Suite: Primary Suite ===
+' EXPECT_OUT: Passed: 9, Failed: 0
+
+import "std/test"
+
+fn main() as int
+    dim t = test.newSuite("Primary Suite")
+
+    t.section("booleans")
+    t.isTrue(1 + 1 == 2, "1 + 1 should equal 2")
+    t.isFalse(2 > 5, "2 should not be greater than 5")
+    t.eqBool(true, true)
+    t.eqBool(false, false)
+
+    t.section("numbers")
+    t.eqInt(6 * 7, 42)
+    t.eqFloat(1.5 + 2.25, 3.75)
+
+    t.section("strings")
+    t.eqStr("clean" & "basic", "cleanbasic")
+    t.contains("cleanbasic compiler", "basic")
+
+    ' Verify deliberate failure recording on a secondary TestSuite
+    dim failSuite = test.newSuite("Failure Recording Suite")
+    failSuite.isTrue(false, "top-level failure")
+    failSuite.section("math")
+    failSuite.eqInt(41, 42)
+    failSuite.eqInt(10, 10)
+    failSuite.section("strings")
+    failSuite.eqStr("foo", "bar")
+    failSuite.contains("hello world", "xyz")
+
+    dim failCode = failSuite.summary()
+    t.eqInt(failCode, 1)
+
+    return t.summary()
+end fn

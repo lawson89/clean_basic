@@ -841,6 +841,10 @@ TEST_CASE("End-to-end fixture: std/cli standard library", "[e2e]") {
     cb::testE2E::runE2EFixture("stdlibCli", "tests/cases/stdlib_cli.cb");
 }
 
+TEST_CASE("End-to-end fixture: std/test standard library", "[e2e]") {
+    cb::testE2E::runE2EFixture("stdlibTest", "tests/cases/stdlib_test.cb");
+}
+
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
     const std::string artifactDir = "build/testArtifacts/cliBuild";
     std::error_code ec;

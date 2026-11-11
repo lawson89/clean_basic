@@ -1,0 +1,113 @@
+' CleanBasic Standard Library: std/test
+' Bare-bones stateful unit test framework with UFCS assertion helpers
+
+'' Stateful unit test suite tracking passed/failed counts, active section, and failure diagnostics.
+public type TestSuite
+    name as str
+    currentSection as str
+    passed as int
+    failed as int
+    failures as list[str]
+end type
+
+'' Creates a new TestSuite with the given suite name.
+public fn newSuite(name as str) as TestSuite
+    dim failures as list[str] = []
+    return TestSuite(name, "", 0, 0, failures)
+end fn
+
+'' Sets the active test section label for subsequent failure diagnostics.
+public fn section(byref t as TestSuite, name as str)
+    t.currentSection = name
+end fn
+
+'' Records a passing assertion on the test suite.
+public fn recordPass(byref t as TestSuite)
+    t.passed = t.passed + 1
+end fn
+
+'' Records a failing assertion with a diagnostic message on the test suite.
+public fn recordFail(byref t as TestSuite, msg as str)
+    t.failed = t.failed + 1
+    if t.currentSection != ""
+        t.failures.push($"[FAIL] [{t.currentSection}] {msg}")
+    else
+        t.failures.push($"[FAIL] {msg}")
+    end if
+end fn
+
+'' Prints the test suite summary and any recorded failure messages, returning 0 if all tests passed or 1 if any failed.
+public fn summary(t as TestSuite) as int
+    print($"=== Test Suite: {t.name} ===")
+    for f in t.failures
+        print(f)
+    end for
+    print($"Passed: {t.passed}, Failed: {t.failed}")
+    if t.failed > 0
+        return 1
+    end if
+    return 0
+end fn
+
+'' Asserts that cond is true, recording msg on failure.
+public fn isTrue(byref t as TestSuite, cond as bool, msg as str)
+    if cond
+        t.recordPass()
+    else
+        t.recordFail(msg)
+    end if
+end fn
+
+'' Asserts that cond is false, recording msg on failure.
+public fn isFalse(byref t as TestSuite, cond as bool, msg as str)
+    if not cond
+        t.recordPass()
+    else
+        t.recordFail(msg)
+    end if
+end fn
+
+'' Asserts that two int values are equal.
+public fn eqInt(byref t as TestSuite, actual as int, expected as int)
+    if actual == expected
+        t.recordPass()
+    else
+        t.recordFail($"eqInt failed: expected {expected}, got {actual}")
+    end if
+end fn
+
+'' Asserts that two float values are equal.
+public fn eqFloat(byref t as TestSuite, actual as float, expected as float)
+    if actual == expected
+        t.recordPass()
+    else
+        t.recordFail($"eqFloat failed: expected {expected}, got {actual}")
+    end if
+end fn
+
+'' Asserts that two str values are equal.
+public fn eqStr(byref t as TestSuite, actual as str, expected as str)
+    if actual == expected
+        t.recordPass()
+    else
+        t.recordFail($"eqStr failed: expected \"{expected}\", got \"{actual}\"")
+    end if
+end fn
+
+'' Asserts that two bool values are equal.
+public fn eqBool(byref t as TestSuite, actual as bool, expected as bool)
+    if actual == expected
+        t.recordPass()
+    else
+        t.recordFail($"eqBool failed: expected {expected}, got {actual}")
+    end if
+end fn
+
+'' Asserts that haystack contains needle as a substring.
+public fn contains(byref t as TestSuite, haystack as str, needle as str)
+    if haystack.contains(needle)
+        t.recordPass()
+    else
+        t.recordFail($"contains failed: expected \"{needle}\" in \"{haystack}\"")
+    end if
+end fn
