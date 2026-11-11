@@ -125,12 +125,12 @@ Circular module import detected when importing '<target>' (module '<targetModule
 
 ## 3. Visibility Rules (`public` vs. Private)
 
-By default, every `type`, `enum`, `union`, `alias`, `const`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`).
+By default, every `type`, `enum`, `union`, `const`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`).
 
 | Access Context | Private Symbol (`isPub == false`) | Public Symbol (`isPub == true`) |
 | :--- | :--- | :--- |
 | **Same Module (`currentModuleId == decl.moduleId`)** | Allowed (direct unqualified access & local UFCS). | Allowed. |
-| **Cross-Module Qualified Call/Type (`modAlias.Symbol`)** | **Rejected** by `analyzeProgram()` with `AnalyzerError: Function/Type/Alias '<name>' is private to module '<mod>' (missing 'public').` | Allowed if `modAlias` is imported in the current module. |
+| **Cross-Module Qualified Call/Type (`modAlias.Symbol`)** | **Rejected** by `analyzeProgram()` with `AnalyzerError: Function/Type/Enum/Union/Constant '<name>' is private to module '<mod>' (missing 'public').` | Allowed if `modAlias` is imported in the current module. |
 | **Cross-Module UFCS Call (`recv.method()`)** | **Rejected** (`resolveFuncCall` requires `isPub == true` for functions in the receiver's defining module or imported modules). | Allowed if the receiver's defining module or a directly imported module defines `public fn method(recv, ...)`. |
 | **Transitive (Unimported) Module Access** | **Rejected.** | **Rejected** for direct qualified `unimportedAlias.fn()`, because `isModuleAliasInScope` only checks `symbols.modules[currentModuleId]`. |
 
@@ -153,7 +153,6 @@ Inside `GlobalSymbolTable`, declarations are indexed by `symbolKey(moduleId, nam
 | Declaration Kind | Root Module (`moduleId == ""`) | Imported Module (`moduleId == "entities/hero"`) | `extern` Declaration (`isExtern == true`) |
 | :--- | :--- | :--- | :--- |
 | **`type Hero`** | `struct Hero` | `struct cb_entities_hero__Hero` | Unmangled (`Hero`, not re-emitted as a struct if extern) |
-| **`alias Id = int`** | `using Id = int64_t;` | `using cb_entities_hero__Id = int64_t;` | N/A (`extern alias` is forbidden) |
 | **`fn makeHero()`** | `makeHero(...)` | `cb_entities_hero__makeHero(...)` | Unmangled (`makeHero(...)`) |
 | **`fn main()`** | `cbMain()` (called by generated `int main()`) | `cb_entities_hero__main()` | Unmangled |
 

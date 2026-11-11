@@ -222,11 +222,6 @@ inline void collectModuleSymbolCompletions(const LspDocumentSnapshot& snap, std:
         if (us.moduleId != targetModuleId || (requirePub && !us.isPub)) continue;
         if (matchesCompletionPrefix(us.name, prefix)) addCompletionEntry(items, seen, us.name, 22, "union " + us.name, us.name, formatUnionHoverMarkdown(snap.arena, us));
     }
-    for (const auto& kv : snap.symbols.aliases) {
-        const AliasSymbol& al = kv.second;
-        if (al.moduleId != targetModuleId || (requirePub && !al.isPub)) continue;
-        if (matchesCompletionPrefix(al.name, prefix)) addCompletionEntry(items, seen, al.name, 25, "alias " + al.name + " = " + formatCleanbasicType(snap.arena, al.targetType), al.name, formatAliasHoverMarkdown(snap.arena, snap.symbols, al));
-    }
     if (includeFunctions) {
         for (const auto& kv : snap.symbols.constants) {
             const ConstSymbol& cs = kv.second;
@@ -449,7 +444,7 @@ inline void collectGeneralScopeCompletions(const LspDocumentSnapshot& snap, std:
         if (docOpt.has_value()) doc = docOpt.value();
         addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
     }
-    const std::vector<std::string> keywords = {"fn", "end fn", "public", "extern", "type", "end type", "enum", "end enum", "union", "end union", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
+    const std::vector<std::string> keywords = {"fn", "end fn", "public", "extern", "type", "end type", "enum", "end enum", "union", "end union", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
     for (const auto& kw : keywords) if (matchesCompletionPrefix(kw, prefix)) addCompletionEntry(items, seen, kw, 14, "keyword");
 }
 
@@ -495,6 +490,39 @@ inline void handleCompletionRequest(LspServerState& state, const JsonArena& reqA
 
 struct SignatureHelpData { std::string label; std::string documentation; std::vector<std::string> paramLabels; uint32_t activeParameter = 0; };
 
+inline SignatureHelpData buildFnSignatureHelp(
+    const AstArena& arena,
+    const FnSymbol& fn,
+    bool skipFirstParam,
+    std::string_view labelPrefix,
+    std::string documentation,
+    uint32_t activeParam
+) {
+    std::vector<Param> visibleParams;
+    size_t startIdx = 0;
+    if (skipFirstParam) {
+        startIdx = 1;
+    }
+    for (size_t i = startIdx; i < fn.params.size(); ++i) {
+        visibleParams.push_back(fn.params[i]);
+    }
+    SignatureHelpData sig{};
+    sig.label = std::string(labelPrefix) + fn.name + formatFnDetailSignature(arena, visibleParams, fn.returnType, fn.isFallible);
+    sig.documentation = std::move(documentation);
+    for (const auto& p : visibleParams) {
+        std::string byrefPrefix;
+        if (p.isByref) {
+            byrefPrefix = "byref ";
+        }
+        sig.paramLabels.push_back(byrefPrefix + p.name + " as " + formatCleanbasicType(arena, p.typeId));
+    }
+    sig.activeParameter = activeParam;
+    if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) {
+        sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
+    }
+    return sig;
+}
+
 inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSnapshot& snap, std::string_view currentModuleId, const std::optional<std::string>& enclosingFnKey, const CallSiteContext& callCtx) {
     if (!callCtx.insideCall) return std::nullopt;
     if (!callCtx.hasReceiver) {
@@ -526,25 +554,10 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
             const auto builtinMethods = getBuiltinReceiverMethods(snap.arena, snap.symbols, currentModuleId, vOpt.value());
             for (const auto& fn : builtinMethods) {
                 if (fn.name == callCtx.calleeName) {
-                    SignatureHelpData sig{};
-                    std::vector<Param> visibleParams;
-                    for (size_t i = 1; i < fn.params.size(); ++i) {
-                        visibleParams.push_back(fn.params[i]);
-                    }
-                    sig.label = "fn ." + fn.name + formatFnDetailSignature(snap.arena, visibleParams, fn.returnType, fn.isFallible);
+                    std::string doc;
                     const auto docOpt = formatBuiltinHoverMarkdown(fn.name);
-                    if (docOpt.has_value()) sig.documentation = docOpt.value();
-
-                    for (const auto& p : visibleParams) {
-                        std::string pLabel = p.name + " as " + formatCleanbasicType(snap.arena, p.typeId);
-                        if (p.isByref) pLabel = "byref " + pLabel;
-                        sig.paramLabels.push_back(pLabel);
-                    }
-                    sig.activeParameter = callCtx.activeParam;
-                    if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) {
-                        sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
-                    }
-                    return sig;
+                    if (docOpt.has_value()) doc = docOpt.value();
+                    return buildFnSignatureHelp(snap.arena, fn, true, "fn .", std::move(doc), callCtx.activeParam);
                 }
             }
         }
@@ -590,27 +603,7 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
     const auto fnOpt = resolveCallFnSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
     if (fnOpt.has_value()) {
         const FnSymbol& fn = fnOpt.value().fn;
-        std::vector<Param> visibleParams;
-        size_t startIdx = 0;
-        if (fnOpt.value().isUfcs) {
-            startIdx = 1;
-        }
-        for (size_t i = startIdx; i < fn.params.size(); ++i) {
-            visibleParams.push_back(fn.params[i]);
-        }
-        SignatureHelpData sig{};
-        sig.label = "fn " + fn.name + formatFnDetailSignature(snap.arena, visibleParams, fn.returnType, fn.isFallible);
-        sig.documentation = formatFnHoverMarkdown(snap.arena, fn);
-        for (const auto& p : visibleParams) {
-            std::string byrefPrefix;
-            if (p.isByref) {
-                byrefPrefix = "byref ";
-            }
-            sig.paramLabels.push_back(byrefPrefix + p.name + " as " + formatCleanbasicType(snap.arena, p.typeId));
-        }
-        sig.activeParameter = callCtx.activeParam;
-        if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
-        return sig;
+        return buildFnSignatureHelp(snap.arena, fn, fnOpt.value().isUfcs, "fn ", formatFnHoverMarkdown(snap.arena, fn), callCtx.activeParam);
     }
     return std::nullopt;
 }

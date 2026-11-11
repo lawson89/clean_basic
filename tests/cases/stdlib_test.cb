@@ -9,10 +9,6 @@
 
 import "std/test"
 
-alias BinaryOp = fn(int, int) as int
-alias NamedBinaryOp = fn(lhs as int, rhs as int) as int
-alias Mutator = fn(byref target as int, delta as int)
-
 fn addInts(a as int, b as int) as int
     return a + b
 end fn
@@ -21,7 +17,7 @@ fn mulInts(a as int, b as int) as int
     return a * b
 end fn
 
-fn applyOp(op as NamedBinaryOp, x as int, y as int) as int
+fn applyOp(op as fn(int, int) as int, x as int, y as int) as int
     return op(x, y)
 end fn
 
@@ -33,11 +29,11 @@ fn testAssert() can error
     assert(1 == 1)
     assert(2 + 2 == 4)
 
-    dim op as BinaryOp = addInts
+    dim op as fn(int, int) as int = addInts
     assert(op(10, 20) == 30)
     assert(applyOp(mulInts, 6, 7) == 42)
 
-    dim mut as Mutator = addInPlace
+    dim mut as fn(byref int, int) = addInPlace
     dim counter = 10
     mut(counter, 15)
     assert(counter == 25)

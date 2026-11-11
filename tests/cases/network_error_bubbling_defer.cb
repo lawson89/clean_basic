@@ -32,15 +32,10 @@ public enum Status
     bad = 20
 end enum
 
-public alias StatusAlias = Status
-
 public enum Mode
     fast
     safe
 end enum
-
-public alias ModeAlias = Mode
-public alias IntList = list[int]
 
 public type Connection
     id as int
@@ -169,7 +164,7 @@ fn decodeTextDirect(raw as str) as str can error
     return raw
 end fn
 
-fn parseAndSumMode(raw as str, nums as IntList) as ModeAlias can error
+fn parseAndSumMode(raw as str, nums as list[int]) as Mode can error
     dim decoded = decodeTextDirect(raw)
     dim total = 0
     for n in nums
@@ -244,7 +239,7 @@ fn testNestedTryAndControlFlow() as str
 
     ' 3. Calling error(...) directly inside try/catch in an infallible function
     try
-        if StatusAlias.bad == Status.bad
+        if Status.bad == Status.bad
             error("directRaise", code=422)
         end if
         log &= "UNREACHABLE_DIRECT|"

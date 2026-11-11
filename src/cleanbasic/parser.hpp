@@ -505,10 +505,6 @@ public:
                     match("KEYWORD", "byref");
                     isByref = true;
                 }
-                if (checkAnyIdentOrType() && peekOffset(1).kind == "KEYWORD" && peekOffset(1).value == "as") {
-                    matchIdentOrType();
-                    match("KEYWORD", "as");
-                }
                 const TypeId paramTid = parseType();
                 fnNode.typeArgs.push_back(paramTid);
                 fnNode.paramByref.push_back(isByref);
@@ -887,61 +883,24 @@ public:
     // ==========================================
 
     DeclId parseImportDecl() {
-        const Token start = match("KEYWORD", "import");
+        const Token start = match("KEYWORD");
+        std::string kind = "module";
+        if (start.value == "import header") {
+            kind = "header";
+        } else if (start.value == "import link") {
+            kind = "link";
+        }
         const Token strTok = match("STRING");
-        std::string modulePath = stripQuotes(strTok.value);
-
-        bool hasAlias = false;
-        std::string alias;
-        if (check("KEYWORD", "as")) {
+        ImportDecl decl{};
+        decl.kind = std::move(kind);
+        decl.target = stripQuotes(strTok.value);
+        if (decl.kind == "module" && check("KEYWORD", "as")) {
             match("KEYWORD", "as");
-            hasAlias = true;
-            alias = match("IDENT").value;
+            decl.hasAlias = true;
+            decl.alias = match("IDENT").value;
         }
         expectNewlineOrEof();
-
-        ImportDecl decl{};
-        decl.kind = "module";
-        decl.target = std::move(modulePath);
-        decl.hasAlias = hasAlias;
-        decl.alias = std::move(alias);
         return arena.addDecl(start.line, start.col, std::move(decl));
-    }
-
-    DeclId parseImportHeaderDecl() {
-        const Token start = match("KEYWORD", "import header");
-        const Token strTok = match("STRING");
-        expectNewlineOrEof();
-
-        ImportDecl decl{};
-        decl.kind = "header";
-        decl.target = stripQuotes(strTok.value);
-        return arena.addDecl(start.line, start.col, std::move(decl));
-    }
-
-    DeclId parseImportLinkDecl() {
-        const Token start = match("KEYWORD", "import link");
-        const Token strTok = match("STRING");
-        expectNewlineOrEof();
-
-        ImportDecl decl{};
-        decl.kind = "link";
-        decl.target = stripQuotes(strTok.value);
-        return arena.addDecl(start.line, start.col, std::move(decl));
-    }
-
-    DeclId parseAliasDecl(bool isPub, const Token& startTok) {
-        match("KEYWORD", "alias");
-        const Token nameTok = match("IDENT");
-        match("ASSIGN");
-        const TypeId targetType = parseType();
-        expectNewlineOrEof();
-
-        AliasDecl decl{};
-        decl.name = nameTok.value;
-        decl.targetType = targetType;
-        decl.isPub = isPub;
-        return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, nameTok.line, nameTok.line, nameTok.col);
     }
 
     DeclId parseTypeDecl(bool isPub, bool isExtern, const Token& startTok) {
@@ -1128,9 +1087,6 @@ public:
         bool isFallible = false;
         if (check("KEYWORD", "as")) {
             match("KEYWORD", "as");
-            if (check("TYPE_KW", "err")) {
-                setParseError(current(), "Return type 'as err' is removed; use 'can error' at the end of the function signature instead.");
-            }
             returnType = parseType();
         }
         if (check("KEYWORD", "can error")) {
@@ -1171,14 +1127,8 @@ public:
     DeclId parseTopLevelDecl() {
         const Token tok = current();
 
-        if (check("KEYWORD", "import")) {
+        if (check("KEYWORD", "import") || check("KEYWORD", "import header") || check("KEYWORD", "import link")) {
             return parseImportDecl();
-        }
-        if (check("KEYWORD", "import header")) {
-            return parseImportHeaderDecl();
-        }
-        if (check("KEYWORD", "import link")) {
-            return parseImportLinkDecl();
         }
 
         bool isPub = false;
@@ -1191,13 +1141,6 @@ public:
                 match("KEYWORD", "extern");
                 isExtern = true;
             }
-        }
-
-        if (check("KEYWORD", "alias")) {
-            if (isExtern) {
-                setParseError(current(), "'extern' cannot be applied to 'alias'");
-            }
-            return parseAliasDecl(isPub, tok);
         }
 
         if (check("KEYWORD", "type")) {
@@ -1229,7 +1172,7 @@ public:
             return parseFnDecl(isPub, isExtern, tok);
         }
 
-        setParseError(current(), "Expected top-level declaration ('import', 'const', 'alias', 'type', 'enum', 'union', or 'fn')");
+        setParseError(current(), "Expected top-level declaration ('import', 'const', 'type', 'enum', 'union', or 'fn')");
     }
 
     Program parseProgram() {

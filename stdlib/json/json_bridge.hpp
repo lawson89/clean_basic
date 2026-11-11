@@ -19,6 +19,9 @@ struct CbJsonVal {
     int64_t id = -1;
 };
 
+using JsonDoc = CbJsonDoc;
+using JsonVal = CbJsonVal;
+
 inline CbJsonDoc cbJsonNewDoc() {
     CbJsonDoc doc{};
     doc.root = -1;

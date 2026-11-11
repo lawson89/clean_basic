@@ -79,26 +79,11 @@ struct UnionSymbol {
     std::string docComment;
 };
 
-struct AliasSymbol {
-    std::string name;
-    std::string moduleId;
-    std::string key;
-    TypeId targetType;
-    bool isPub = false;
-    std::string cppName;
-    std::string fileName = "main.cb";
-    uint32_t line = 1;
-    uint32_t col = 1;
-    uint32_t endLine = 1;
-    std::string docComment;
-};
-
 struct ConstSymbol {
     std::string name;
     std::string moduleId;
     std::string key;
     TypeId typeId = INVALID_ID;
-    ExprId value = INVALID_ID;
     bool isPub = false;
     std::string cppName;
     std::string fileName = "main.cb";
@@ -224,7 +209,6 @@ struct VarSymbol {
 
 struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
-    std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, EnumSymbol> enums;
     std::unordered_map<std::string, UnionSymbol> unions;
     std::unordered_map<std::string, ConstSymbol> constants;
@@ -275,6 +259,35 @@ inline TypeId addFnTypeId(AstArena& arena, const FnSymbol& fn) {
     return arena.addType(buildFnTypeNode(arena, fn));
 }
 
+inline Param makeBuiltinParam(std::string_view name, TypeId tid, bool isByref = false) {
+    Param p{};
+    p.name = std::string(name);
+    p.typeId = tid;
+    p.isByref = isByref;
+    return p;
+}
+
+inline FnSymbol makeBuiltinReceiverMethod(
+    std::string_view name,
+    TypeId recvTid,
+    bool mutatesRecv,
+    TypeId returnType,
+    std::vector<Param> extraParams = {},
+    bool isFallible = false
+) {
+    FnSymbol fs{};
+    fs.name = std::string(name);
+    fs.returnType = returnType;
+    fs.isFallible = isFallible;
+    fs.isBuiltinReceiver = true;
+    fs.params.reserve(1 + extraParams.size());
+    fs.params.push_back(makeBuiltinParam("self", recvTid, mutatesRecv));
+    for (auto& ep : extraParams) {
+        fs.params.push_back(std::move(ep));
+    }
+    return fs;
+}
+
 inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     symbols.typeInt = arena.findOrAddType("int");
     symbols.typeFloat = arena.findOrAddType("float");
@@ -318,54 +331,33 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     printFn.cppName = "cbPrint";
     symbols.functions[printFn.key] = std::move(printFn);
 
-    auto makeParam = [](std::string_view name, TypeId tid, bool isByref = false) {
-        Param p{};
-        p.name = std::string(name);
-        p.typeId = tid;
-        p.isByref = isByref;
-        return p;
-    };
-    auto makeMethod = [&](std::string_view name, TypeId recvTid, bool mutatesRecv, TypeId returnType, std::vector<Param> extraParams = {}, bool isFallible = false) {
-        FnSymbol fs{};
-        fs.name = std::string(name);
-        fs.returnType = returnType;
-        fs.isFallible = isFallible;
-        fs.isBuiltinReceiver = true;
-        fs.params.reserve(1 + extraParams.size());
-        fs.params.push_back(makeParam("self", recvTid, mutatesRecv));
-        for (auto& ep : extraParams) {
-            fs.params.push_back(std::move(ep));
-        }
-        return fs;
-    };
-
     symbols.builtinReceiverCache["int"] = {
-        makeMethod("toStr", symbols.typeInt, false, symbols.typeStr),
-        makeMethod("toInt", symbols.typeInt, false, symbols.typeInt),
-        makeMethod("toFloat", symbols.typeInt, false, symbols.typeFloat),
-        makeMethod("bitAnd", symbols.typeInt, false, symbols.typeInt, {makeParam("y", symbols.typeInt)}),
-        makeMethod("bitOr", symbols.typeInt, false, symbols.typeInt, {makeParam("y", symbols.typeInt)}),
-        makeMethod("bitXor", symbols.typeInt, false, symbols.typeInt, {makeParam("y", symbols.typeInt)}),
-        makeMethod("bitNot", symbols.typeInt, false, symbols.typeInt),
-        makeMethod("shl", symbols.typeInt, false, symbols.typeInt, {makeParam("bits", symbols.typeInt)}),
-        makeMethod("shr", symbols.typeInt, false, symbols.typeInt, {makeParam("bits", symbols.typeInt)})
+        makeBuiltinReceiverMethod("toStr", symbols.typeInt, false, symbols.typeStr),
+        makeBuiltinReceiverMethod("toInt", symbols.typeInt, false, symbols.typeInt),
+        makeBuiltinReceiverMethod("toFloat", symbols.typeInt, false, symbols.typeFloat),
+        makeBuiltinReceiverMethod("bitAnd", symbols.typeInt, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}),
+        makeBuiltinReceiverMethod("bitOr", symbols.typeInt, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}),
+        makeBuiltinReceiverMethod("bitXor", symbols.typeInt, false, symbols.typeInt, {makeBuiltinParam("y", symbols.typeInt)}),
+        makeBuiltinReceiverMethod("bitNot", symbols.typeInt, false, symbols.typeInt),
+        makeBuiltinReceiverMethod("shl", symbols.typeInt, false, symbols.typeInt, {makeBuiltinParam("bits", symbols.typeInt)}),
+        makeBuiltinReceiverMethod("shr", symbols.typeInt, false, symbols.typeInt, {makeBuiltinParam("bits", symbols.typeInt)})
     };
     symbols.builtinReceiverCache["float"] = {
-        makeMethod("toStr", symbols.typeFloat, false, symbols.typeStr),
-        makeMethod("toInt", symbols.typeFloat, false, symbols.typeInt),
-        makeMethod("toFloat", symbols.typeFloat, false, symbols.typeFloat)
+        makeBuiltinReceiverMethod("toStr", symbols.typeFloat, false, symbols.typeStr),
+        makeBuiltinReceiverMethod("toInt", symbols.typeFloat, false, symbols.typeInt),
+        makeBuiltinReceiverMethod("toFloat", symbols.typeFloat, false, symbols.typeFloat)
     };
     symbols.builtinReceiverCache["bool"] = {
-        makeMethod("toStr", symbols.typeBool, false, symbols.typeStr),
-        makeMethod("toInt", symbols.typeBool, false, symbols.typeInt)
+        makeBuiltinReceiverMethod("toStr", symbols.typeBool, false, symbols.typeStr),
+        makeBuiltinReceiverMethod("toInt", symbols.typeBool, false, symbols.typeInt)
     };
     symbols.builtinReceiverCache["err"] = {
-        makeMethod("toStr", symbols.typeErr, false, symbols.typeStr)
+        makeBuiltinReceiverMethod("toStr", symbols.typeErr, false, symbols.typeStr)
     };
     symbols.builtinReceiverCache["str"] = {
-        makeMethod("len", symbols.typeStr, false, symbols.typeInt),
-        makeMethod("byteAt", symbols.typeStr, false, symbols.typeInt, {makeParam("idx", symbols.typeInt)}),
-        makeMethod("toStr", symbols.typeStr, false, symbols.typeStr)
+        makeBuiltinReceiverMethod("len", symbols.typeStr, false, symbols.typeInt),
+        makeBuiltinReceiverMethod("byteAt", symbols.typeStr, false, symbols.typeInt, {makeBuiltinParam("idx", symbols.typeInt)}),
+        makeBuiltinReceiverMethod("toStr", symbols.typeStr, false, symbols.typeStr)
     };
 }
 
@@ -439,7 +431,7 @@ inline std::string resolveSymbolKey(
     }
 
     const std::string key = symbolKey(currentModuleId, name);
-    if (symbols.types.count(key) > 0 || symbols.enums.count(key) > 0 || symbols.unions.count(key) > 0 || symbols.aliases.count(key) > 0 || symbols.functions.count(key) > 0 || symbols.constants.count(key) > 0) {
+    if (symbols.types.count(key) > 0 || symbols.enums.count(key) > 0 || symbols.unions.count(key) > 0 || symbols.functions.count(key) > 0 || symbols.constants.count(key) > 0) {
         return key;
     }
     if (isBuiltinSymbolName(name)) {
@@ -459,51 +451,18 @@ inline TypeNode resolveAliasNode(
     const AstArena& arena,
     const GlobalSymbolTable& symbols,
     std::string_view currentModuleId,
-    TypeId tid,
-    std::string* outResolvedModId = nullptr
+    TypeId tid
 ) {
     if (tid >= arena.types.size()) {
-        if (outResolvedModId != nullptr) {
-            *outResolvedModId = std::string(currentModuleId);
-        }
         return TypeNode{};
     }
     TypeNode curr = arena.types[tid];
     if (curr.typeArgs.empty() && curr.returnType == INVALID_ID && isBuiltinTypeName(curr.name)) {
-        if (outResolvedModId != nullptr) {
-            *outResolvedModId = std::string(currentModuleId);
-        }
         return curr;
     }
 
-    std::unordered_set<std::string> seen;
-    std::string activeModId(currentModuleId);
-
-    while (!curr.name.empty()) {
-        const std::string key = resolveSymbolKey(symbols, activeModId, curr.name);
-        const auto it = symbols.aliases.find(key);
-        if (it == symbols.aliases.end()) {
-            break;
-        }
-        if (seen.find(key) != seen.end()) {
-            break;
-        }
-        seen.insert(key);
-        activeModId = it->second.moduleId;
-        const TypeId aliasedId = it->second.targetType;
-        if (aliasedId >= arena.types.size()) {
-            break;
-        }
-        const TypeNode& aliased = arena.types[aliasedId];
-        curr.name = aliased.name;
-        curr.typeArgs = aliased.typeArgs;
-        curr.paramByref = aliased.paramByref;
-        curr.returnType = aliased.returnType;
-        curr.isFallible = aliased.isFallible;
-    }
-
     if (!curr.name.empty() && !isBuiltinTypeName(curr.name)) {
-        const std::string typeKey = resolveSymbolKey(symbols, activeModId, curr.name);
+        const std::string typeKey = resolveSymbolKey(symbols, currentModuleId, curr.name);
         const auto tit = symbols.types.find(typeKey);
         if (tit != symbols.types.end()) {
             curr.name = tit->second.key;
@@ -521,18 +480,15 @@ inline TypeNode resolveAliasNode(
     }
 
     for (TypeId& argTid : curr.typeArgs) {
-        argTid = resolveAlias(arena, symbols, activeModId, argTid);
+        argTid = resolveAlias(arena, symbols, currentModuleId, argTid);
     }
     if (curr.returnType != INVALID_ID) {
-        curr.returnType = resolveAlias(arena, symbols, activeModId, curr.returnType);
+        curr.returnType = resolveAlias(arena, symbols, currentModuleId, curr.returnType);
         if (arena.isVoid(curr.returnType)) {
             curr.returnType = INVALID_ID;
         }
     }
 
-    if (outResolvedModId != nullptr) {
-        *outResolvedModId = activeModId;
-    }
     return curr;
 }
 
@@ -626,31 +582,17 @@ inline std::optional<TypeSymbol> resolveTypeSymbolByName(
     std::string_view rawName,
     bool requireFirstHopPub = false
 ) {
+    (void)arena;
     const std::string firstKey = resolveSymbolKey(symbols, currentModuleId, rawName);
     if (symbols.functions.find(firstKey) != symbols.functions.end()) {
         return std::nullopt;
     }
-    if (requireFirstHopPub) {
-        const auto ait = symbols.aliases.find(firstKey);
-        if (ait != symbols.aliases.end() && !ait->second.isPub && ait->second.moduleId != currentModuleId) {
-            return std::nullopt;
-        }
-        const auto tit = symbols.types.find(firstKey);
-        if (tit != symbols.types.end() && !tit->second.isPub && tit->second.moduleId != currentModuleId) {
-            return std::nullopt;
-        }
-    }
     const auto tit = symbols.types.find(firstKey);
     if (tit != symbols.types.end()) {
-        return tit->second;
-    }
-    const auto ait = symbols.aliases.find(firstKey);
-    if (ait != symbols.aliases.end()) {
-        const TypeNode resolved = resolveAliasNode(arena, symbols, ait->second.moduleId, ait->second.targetType);
-        const auto it = symbols.types.find(resolved.name);
-        if (it != symbols.types.end()) {
-            return it->second;
+        if (requireFirstHopPub && !tit->second.isPub && tit->second.moduleId != currentModuleId) {
+            return std::nullopt;
         }
+        return tit->second;
     }
     return std::nullopt;
 }
@@ -737,35 +679,6 @@ inline bool ufcsParamMatchesReceiver(
     }
     const TypeNode p0Resolved = resolveAliasNode(arena, symbols, fn.moduleId, p0Tid);
     return p0Resolved.name == recvTypeKey;
-}
-
-inline Param makeBuiltinParam(std::string_view name, TypeId tid, bool isByref = false) {
-    Param p{};
-    p.name = std::string(name);
-    p.typeId = tid;
-    p.isByref = isByref;
-    return p;
-}
-
-inline FnSymbol makeBuiltinReceiverMethod(
-    std::string_view name,
-    TypeId recvTid,
-    bool mutatesRecv,
-    TypeId returnType,
-    std::vector<Param> extraParams = {},
-    bool isFallible = false
-) {
-    FnSymbol fs{};
-    fs.name = std::string(name);
-    fs.returnType = returnType;
-    fs.isFallible = isFallible;
-    fs.isBuiltinReceiver = true;
-    fs.params.reserve(1 + extraParams.size());
-    fs.params.push_back(makeBuiltinParam("self", recvTid, mutatesRecv));
-    for (auto& ep : extraParams) {
-        fs.params.push_back(std::move(ep));
-    }
-    return fs;
 }
 
 inline std::vector<FnSymbol> getBuiltinReceiverMethods(
@@ -906,6 +819,7 @@ inline std::optional<SymbolT> resolveSymbolInTable(
     std::string_view currentModuleId,
     std::string_view typeName
 ) {
+    (void)arena;
     const std::string localKey = symbolKey(currentModuleId, typeName);
     const auto it = table.find(localKey);
     if (it != table.end()) {
@@ -920,14 +834,6 @@ inline std::optional<SymbolT> resolveSymbolInTable(
     const auto it3 = table.find(normKey);
     if (it3 != table.end()) {
         return it3->second;
-    }
-    const auto ait = symbols.aliases.find(normKey);
-    if (ait != symbols.aliases.end()) {
-        const TypeNode resolved = resolveAliasNode(arena, symbols, ait->second.moduleId, ait->second.targetType);
-        const auto it4 = table.find(resolved.name);
-        if (it4 != table.end()) {
-            return it4->second;
-        }
     }
     return std::nullopt;
 }

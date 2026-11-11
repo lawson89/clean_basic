@@ -39,7 +39,7 @@ types | exprs | stmts | decls" as Arena
 (analyzer.hpp, symbols.hpp)" as Analyzer
     database "GlobalSymbolTable
 (symbols.hpp)
-types | aliases | functions | modules" as SymTab
+types | enums | unions | functions | modules" as SymTab
     component "5. Unity C++17 Emitter
 (emitter.hpp, runtime_preamble.hpp)" as Emitter
 }
@@ -76,7 +76,7 @@ Gpp --> Bin : "Links -pthread & import link libs"
 | **1. Lexical Analysis** | `src/cleanbasic/lexer.hpp`<br>`cb::tokenize()` | Raw source (`std::string_view`), filename | `LexResult` (`std::vector<Token>` or `DiagnosticError`) | Scans characters into tokens, coalesces two-word keywords (`end if`, `select case`, `can error`, etc.), collapses consecutive newlines, and rejects C-style `&&`, `\|\|`, `!` operators. |
 | **2. Syntax Analysis** | `src/cleanbasic/parser.hpp`<br>`cb::parseTokens()` / `cb::parseTokensWithArena()` | `std::vector<Token>`, `AstArena` | `ParseResult` (`Program`, `AstArena`, or `DiagnosticError`) | Recursive-descent parsing of top-level declarations, statements, and precedence-climbed expressions into flat arena vectors. |
 | **3. Module Resolution** | `src/cleanbasic/pipeline.hpp`<br>`cb::loadModuleDeclarationsRecursive()` | Root `Program`, `AstArena`, file path | Merged `std::vector<DeclId>` in topological dependency order | Recursively lexes and parses imported `.cb` modules into the **same** `AstArena`, deduplicates diamond dependencies, and detects circular import chains. |
-| **4. Semantic Analysis** | `src/cleanbasic/analyzer.hpp`<br>(umbrella for `symbols.hpp`) | Unified `AstArena` & `Program` | `AnalysisResult` (`GlobalSymbolTable` or `DiagnosticError`) | Two-pass registration of types, aliases, functions, and module scopes; type inference; UFCS resolution; `const`/`dim` mutability checks; and static `can error` / `try / catch` verification. |
+| **4. Semantic Analysis** | `src/cleanbasic/analyzer.hpp`<br>(umbrella for `symbols.hpp`) | Unified `AstArena` & `Program` | `AnalysisResult` (`GlobalSymbolTable` or `DiagnosticError`) | Two-pass registration of types, enums, unions, constants, functions, and module scopes; type inference; UFCS resolution; `const`/`dim` mutability checks; and static `can error` / `try / catch` verification. |
 | **5. C++17 Emission** | `src/cleanbasic/emitter.hpp`<br>(with `runtime_preamble.hpp`) | `AstArena`, `GlobalSymbolTable`, `Program` | `std::string` (complete `build.cpp` source) | Emits the C++17 runtime preamble, `#include` headers, forward declarations, POD `struct` definitions, free functions, RAII `cbDefer` guards, tuple error propagation, and `int main()`. |
 
 ---
@@ -189,7 +189,6 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
    ```cpp
    using DeclVariant = std::variant<
        ImportDecl,
-       AliasDecl,
        TypeDecl,
        EnumDecl,
        UnionDecl,

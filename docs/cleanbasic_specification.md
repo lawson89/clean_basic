@@ -7,7 +7,7 @@ For deep-dive technical documentation on each compiler stage, consult:
 * [Transpiler Architecture & Arena Design](transpiler_architecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
 * [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
 * [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `public` visibility, and C++ identifier mangling.
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `try / catch` verification.
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md) — Two-pass `GlobalSymbolTable` registration, canonical type normalization, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `try / catch` verification.
 * [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cpp_emitter_and_interop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
 * [C++17 Strict Data-Oriented Subset](cpp_subset.md) — Coding standards for the transpiler implementation.
 
@@ -23,15 +23,13 @@ For deep-dive technical documentation on each compiler stage, consult:
 ```ebnf
 Program         ::= TopLevelDecl*
 
-TopLevelDecl    ::= ImportDecl | ConstDecl | AliasDecl | TypeDecl | EnumDecl | UnionDecl | FnDecl
+TopLevelDecl    ::= ImportDecl | ConstDecl | TypeDecl | EnumDecl | UnionDecl | FnDecl
 
 ImportDecl      ::= "import" StringLiteral ["as" Identifier] NEWLINE
                   | "import header" StringLiteral NEWLINE
                   | "import link" StringLiteral NEWLINE
 
 ConstDecl       ::= ["public"] "const" Identifier ["as" Type] "=" Expr NEWLINE
-
-AliasDecl       ::= ["public"] "alias" Identifier "=" Type NEWLINE
 
 EnumDecl        ::= ["public"] "enum" Identifier NEWLINE EnumMember* "end enum" NEWLINE
 EnumMember      ::= Identifier ["=" ["+" | "-"] NumberLiteral] NEWLINE
@@ -119,7 +117,7 @@ Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err"
                   | FnType
                   | QualifiedIdent
 FnType          ::= "fn" "(" [FnTypeParam ("," FnTypeParam)* [","]] ")" ["as" Type] ["can error"]
-FnTypeParam     ::= ["byref"] [Identifier "as"] Type
+FnTypeParam     ::= ["byref"] Type
 
 IdentList       ::= Identifier ("," Identifier)*
 QualifiedIdent  ::= Identifier ("." Identifier)*
@@ -131,7 +129,7 @@ QualifiedIdent  ::= Identifier ("." Identifier)*
 
 ### 1. Multi-File Modules, Nested Folder Imports & Visibility
 
-Every `.cb` file is implicitly a module. Everything is private by default; the `public` keyword exposes types, aliases, and functions to the importer.
+Every `.cb` file is implicitly a module. Everything is private by default; the `public` keyword exposes types, enums, unions, constants, and functions to the importer.
 * **Relative Nested Paths:** Module imports (`import "entities/hero.cb"` or `import "../shared/math.cb"`) are resolved relative to the directory of the importing file and normalized to canonical project-relative module IDs (e.g., `entities/hero`).
 * **Default & Explicit Aliases (`as`):** `import "entities/hero.cb"` binds the module alias `hero` (the filename stem). When two modules share a stem (e.g., `ui/button.cb` and `input/button.cb`), use `import "input/button.cb" as inputBtn` to disambiguate. Duplicate module aliases in the same file are rejected at compile time.
 * **Diamond Deduplication & Circular Import Rejection:** Shared dependencies imported across multiple modules are loaded once in topological order; circular import chains are rejected with a clear diagnostic.

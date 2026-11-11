@@ -94,12 +94,8 @@ public:
     void checkFallibleUsage(
         const FnDecl& fn,
         ExprId exprId,
-        const std::unordered_map<std::string, VarSymbol>& scope,
-        bool& outImplicitBubble,
-        bool& outBreaksToCatch
-    ) {
-        outImplicitBubble = false;
-        outBreaksToCatch = false;
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) const {
         if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
             bool isFallible = false;
             std::string calleeName = "";
@@ -107,7 +103,6 @@ public:
                 isFallible = true;
                 calleeName = "assert";
             } else if (isErrorBuiltinCall(arena, *call) && activeTryDepth > 0) {
-                outBreaksToCatch = true;
                 return;
             } else {
                 const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
@@ -117,20 +112,50 @@ public:
                 }
             }
 
-            if (isFallible) {
-                if (activeTryDepth > 0) {
-                    outBreaksToCatch = true;
-                } else {
-                    if (fn.isFallible) {
-                        outImplicitBubble = true;
-                    } else {
-                        const auto& exprNode = arena.exprs[exprId];
-                        std::string msg = "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '" +
-                            fn.name + "' calls fallible function '" + calleeName + "').";
-                        setAnalyzerError(exprNode.line, exprNode.col, msg);
-                    }
-                }
+            if (isFallible && activeTryDepth <= 0 && !fn.isFallible) {
+                const auto& exprNode = arena.exprs[exprId];
+                std::string msg = "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '" +
+                    fn.name + "' calls fallible function '" + calleeName + "').";
+                setAnalyzerError(exprNode.line, exprNode.col, msg);
             }
+        }
+    }
+
+    template <typename Sym>
+    void checkCrossModuleAccess(
+        uint32_t line,
+        uint32_t col,
+        std::string_view kindLabel,
+        const Sym& sym,
+        std::string_view displayName = ""
+    ) {
+        if (!sym.moduleId.empty() && sym.moduleId != moduleId) {
+            symbols.referencedModules.insert(sym.moduleId);
+        }
+        if (sym.moduleId != moduleId && !sym.isPub) {
+            std::string_view label = sym.name;
+            if (!displayName.empty()) {
+                label = displayName;
+            }
+            setAnalyzerError(line, col, std::string(kindLabel) + " '" + std::string(label) + "' is private to module '" + sym.moduleId + "' (missing 'public').");
+        }
+    }
+
+    void validateByrefArg(
+        uint32_t line,
+        uint32_t col,
+        ExprId argExprId,
+        const std::unordered_map<std::string, VarSymbol>& scope,
+        const FnSymbol& fnSym,
+        std::string_view paramName,
+        bool isUfcsRecv = false
+    ) const {
+        const auto root = findRootVar(argExprId, scope);
+        if (root.found && root.isConst) {
+            if (isUfcsRecv && fnSym.isBuiltinReceiver) {
+                setAnalyzerError(line, col, "Cannot call '." + fnSym.name + "()' on const variable '" + root.name + "'.");
+            }
+            setAnalyzerError(line, col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + std::string(paramName) + "'.");
         }
     }
 
@@ -155,27 +180,12 @@ public:
             const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, moduleId);
             if (bareFnOpt.has_value()) {
                 recordCalleeEdge(*bareFnOpt);
-                if (!bareFnOpt->moduleId.empty() && bareFnOpt->moduleId != moduleId) {
-                    symbols.referencedModules.insert(bareFnOpt->moduleId);
-                }
-                if (bareFnOpt->moduleId != moduleId && !bareFnOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Function '" + bareFnOpt->name + "' is private to module '" + bareFnOpt->moduleId + "' (missing 'public').");
-                }
+                checkCrossModuleAccess(exprNode.line, exprNode.col, "Function", *bareFnOpt);
             }
             return;
         }
 
         if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-            // Help users migrate from removed globals
-            if (const auto* ident = arena.getExpr<Identifier>(call->callee)) {
-                if (ident->name == "len") {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Global 'len()' is removed; use 'x.len()'.");
-                }
-                if (ident->name == "str") {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Global 'str()' is removed; use 'x.toStr()'.");
-                }
-            }
-
             if (isAssertBuiltinCall(arena, *call)) {
                 if (!allowTopLevelFallible) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Fallible call to 'assert' must be assigned to a variable, returned directly, or called as a standalone statement.");
@@ -231,13 +241,7 @@ public:
                 const bool isUfcs = isUfcsCallExpr(arena, *call, symbols, moduleId, scope, &ufcsRecv);
 
                 if (isUfcs && !fnSym.params.empty() && fnSym.params[0].isByref) {
-                    const auto root = findRootVar(ufcsRecv, scope);
-                    if (root.found && root.isConst) {
-                        if (fnSym.isBuiltinReceiver) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Cannot call '." + fnSym.name + "()' on const variable '" + root.name + "'.");
-                        }
-                        setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + fnSym.params[0].name + "'.");
-                    }
+                    validateByrefArg(exprNode.line, exprNode.col, ufcsRecv, scope, fnSym, fnSym.params[0].name, true);
                 }
 
                 size_t paramOffset = 0;
@@ -260,10 +264,7 @@ public:
                             }
                         }
                         if (fnSym.params[pIdx].isByref) {
-                            const auto root = findRootVar(call->args[aIdx], scope);
-                            if (root.found && root.isConst) {
-                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + fnSym.params[pIdx].name + "'.");
-                            }
+                            validateByrefArg(exprNode.line, exprNode.col, call->args[aIdx], scope, fnSym, fnSym.params[pIdx].name);
                         }
                     }
                 }
@@ -276,10 +277,7 @@ public:
                             foundParam = true;
                             validateNonNullTarget(exprNode.line, exprNode.col, p.typeId, namedArg.value);
                             if (p.isByref) {
-                                const auto root = findRootVar(namedArg.value, scope);
-                                if (root.found && root.isConst) {
-                                    setAnalyzerError(exprNode.line, exprNode.col, "Cannot pass const variable '" + root.name + "' to byref parameter '" + p.name + "'.");
-                                }
+                                validateByrefArg(exprNode.line, exprNode.col, namedArg.value, scope, fnSym, p.name);
                             }
                             break;
                         }
@@ -324,23 +322,14 @@ public:
                     if (const auto* tgtIdent = arena.getExpr<Identifier>(calleeFa->target)) {
                         std::string targetModId;
                         if (isModuleAliasInScope(symbols, moduleId, tgtIdent->name, scope, targetModId)) {
-                            if (!fnSym.isPub && fnSym.moduleId != moduleId) {
-                                std::string msg = "Function '" + calleeFa->fieldName + "' is private to module '" + targetModId + "' (missing 'public').";
-                                setAnalyzerError(exprNode.line, exprNode.col, msg);
-                            }
+                            checkCrossModuleAccess(exprNode.line, exprNode.col, "Function", fnSym, calleeFa->fieldName);
                         }
                     }
                 }
             } else {
                 const auto structOpt = resolveStructConstructor(arena, *call, symbols, moduleId, scope);
                 if (structOpt.has_value()) {
-                    if (!structOpt->moduleId.empty() && structOpt->moduleId != moduleId) {
-                        symbols.referencedModules.insert(structOpt->moduleId);
-                    }
-                    if (!structOpt->isPub && structOpt->moduleId != moduleId) {
-                        std::string msg = "Type '" + structOpt->name + "' is private to module '" + structOpt->moduleId + "' (missing 'public').";
-                        setAnalyzerError(exprNode.line, exprNode.col, msg);
-                    }
+                    checkCrossModuleAccess(exprNode.line, exprNode.col, "Type", *structOpt);
                     if (structOpt->isExtern && structOpt->fieldOrder.empty()) {
                         setAnalyzerError(exprNode.line, exprNode.col, "Cannot directly construct opaque extern type '" + structOpt->name + "'.");
                     }
@@ -360,12 +349,7 @@ public:
                 if (const auto* fa = arena.getExpr<FieldAccess>(call->callee)) {
                     const auto uOpt = resolveUnionVariantAccess(arena, symbols, moduleId, scope, *fa);
                     if (uOpt.has_value()) {
-                        if (!uOpt->moduleId.empty() && uOpt->moduleId != moduleId) {
-                            symbols.referencedModules.insert(uOpt->moduleId);
-                        }
-                        if (!uOpt->isPub && uOpt->moduleId != moduleId) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Union '" + uOpt->name + "' is private to module '" + uOpt->moduleId + "' (missing 'public').");
-                        }
+                        checkCrossModuleAccess(exprNode.line, exprNode.col, "Union", *uOpt);
                         const auto vTypeIt = uOpt->variantTypes.find(fa->fieldName);
                         if (vTypeIt == uOpt->variantTypes.end()) {
                             setAnalyzerError(exprNode.line, exprNode.col, "Union '" + uOpt->name + "' has no variant '" + fa->fieldName + "'.");
@@ -378,15 +362,6 @@ public:
                         const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[0], scope));
                         if (expectedPayloadTid != symbols.typeAuto && actualArgTid != symbols.typeAuto && expectedPayloadTid != actualArgTid) {
                             setAnalyzerError(exprNode.line, exprNode.col, "Argument type does not match payload type for union variant '" + uOpt->name + "." + fa->fieldName + "'.");
-                        }
-                    }
-                    if (fa->fieldName == "append") {
-                        const TypeId recvTid = inferExpr(fa->target, scope);
-                        if (recvTid < arena.types.size()) {
-                            const TypeNode recvT = resolveAliasNode(arena, symbols, moduleId, recvTid);
-                            if (recvT.name == "list") {
-                                setAnalyzerError(exprNode.line, exprNode.col, "'.append()' is removed; use '.push()'.");
-                            }
                         }
                     }
                 }
@@ -439,12 +414,7 @@ public:
         if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
             const auto enumOpt = resolveEnumMemberAccess(arena, symbols, moduleId, scope, *faccess);
             if (enumOpt.has_value()) {
-                if (!enumOpt->moduleId.empty() && enumOpt->moduleId != moduleId) {
-                    symbols.referencedModules.insert(enumOpt->moduleId);
-                }
-                if (enumOpt->moduleId != moduleId && !enumOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'public').");
-                }
+                checkCrossModuleAccess(exprNode.line, exprNode.col, "Enum", *enumOpt);
                 if (enumOpt->memberValues.count(faccess->fieldName) == 0) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' has no member '" + faccess->fieldName + "'.");
                 }
@@ -452,23 +422,13 @@ public:
             }
             const auto cOpt = resolveModuleConstAccess(arena, symbols, moduleId, scope, *faccess);
             if (cOpt.has_value()) {
-                if (!cOpt->moduleId.empty() && cOpt->moduleId != moduleId) {
-                    symbols.referencedModules.insert(cOpt->moduleId);
-                }
-                if (cOpt->moduleId != moduleId && !cOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Constant '" + cOpt->name + "' is private to module '" + cOpt->moduleId + "' (missing 'public').");
-                }
+                checkCrossModuleAccess(exprNode.line, exprNode.col, "Constant", *cOpt);
                 return;
             }
             const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, moduleId);
             if (bareFnOpt.has_value()) {
                 recordCalleeEdge(*bareFnOpt);
-                if (!bareFnOpt->moduleId.empty() && bareFnOpt->moduleId != moduleId) {
-                    symbols.referencedModules.insert(bareFnOpt->moduleId);
-                }
-                if (bareFnOpt->moduleId != moduleId && !bareFnOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Function '" + bareFnOpt->name + "' is private to module '" + bareFnOpt->moduleId + "' (missing 'public').");
-                }
+                checkCrossModuleAccess(exprNode.line, exprNode.col, "Function", *bareFnOpt);
                 return;
             }
             const TypeId targetTid = inferExpr(faccess->target, scope);
@@ -625,8 +585,8 @@ public:
 
         const auto& stmtNode = arena.stmts[stmtId];
 
-        if (auto* vassign = arena.getStmtMut<VarAssignment>(stmtId)) {
-            checkFallibleUsage(fn, vassign->value, scope, vassign->implicitBubble, vassign->breaksToCatch);
+        if (const auto* vassign = arena.getStmt<VarAssignment>(stmtId)) {
+            checkFallibleUsage(fn, vassign->value, scope);
 
             const TypeId valType = inferExpr(vassign->value, scope);
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
@@ -693,8 +653,8 @@ public:
             return;
         }
 
-        if (auto* estmt = arena.getStmtMut<ExprStmt>(stmtId)) {
-            checkFallibleUsage(fn, estmt->expr, scope, estmt->implicitBubble, estmt->breaksToCatch);
+        if (const auto* estmt = arena.getStmt<ExprStmt>(stmtId)) {
+            checkFallibleUsage(fn, estmt->expr, scope);
             validateExprCalls(fn, estmt->expr, scope, true);
             return;
         }
@@ -726,7 +686,7 @@ public:
             return;
         }
 
-        if (auto* forStmt = arena.getStmtMut<ForStmt>(stmtId)) {
+        if (const auto* forStmt = arena.getStmt<ForStmt>(stmtId)) {
             loopDepth += 1;
             auto loopScope = scope;
             if (forStmt->rangeSpec.hasRange) {
@@ -835,16 +795,13 @@ public:
             return;
         }
 
-        if (auto* retStmt = arena.getStmtMut<ReturnStmt>(stmtId)) {
+        if (const auto* retStmt = arena.getStmt<ReturnStmt>(stmtId)) {
             bool isReturnErrorCall = false;
             bool isReturnVoidFallibleCall = false;
             if (retStmt->hasValue) {
                 if (const auto* call = arena.getExpr<FuncCall>(retStmt->value)) {
                     if (isErrorBuiltinCall(arena, *call) || isAssertBuiltinCall(arena, *call)) {
                         isReturnErrorCall = true;
-                        if (activeTryDepth > 0) {
-                            retStmt->breaksToCatch = true;
-                        }
                     } else {
                         const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, moduleId, scope);
                         if (fnSymOpt.has_value() && fnSymOpt->isFallible &&
@@ -854,7 +811,7 @@ public:
                     }
                 }
                 if (!isReturnErrorCall) {
-                    checkFallibleUsage(fn, retStmt->value, scope, retStmt->implicitBubble, retStmt->breaksToCatch);
+                    checkFallibleUsage(fn, retStmt->value, scope);
                 }
                 validateExprCalls(fn, retStmt->value, scope, true);
             }
@@ -995,11 +952,6 @@ public:
                         symbols.hasStdStr = true;
                     }
                 }
-            } else if (const auto* adecl = arena.getDecl<AliasDecl>(did)) {
-                AliasSymbol asym{};
-                populateSymbolMeta(asym, declNode, adecl->name, adecl->isPub, makeCppTypeName(declNode.moduleId, adecl->name, false));
-                asym.targetType = adecl->targetType;
-                symbols.aliases[asym.key] = std::move(asym);
             } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
                 TypeSymbol tsym{};
                 populateSymbolMeta(tsym, declNode, tdecl->name, tdecl->isPub, makeCppTypeName(declNode.moduleId, tdecl->name, tdecl->isExtern));
@@ -1064,10 +1016,6 @@ public:
             }
         }
 
-        for (auto& kv : symbols.aliases) {
-            kv.second.targetType = canonicalizeType(arena, symbols, kv.second.moduleId, kv.second.targetType);
-        }
-
         // Pass 1b: Resolve struct field types, union variant types, constants, and function signatures
         for (const DeclId did : program.declarations) {
             if (did >= arena.decls.size()) continue;
@@ -1115,7 +1063,6 @@ public:
                 ConstSymbol csym{};
                 populateSymbolMeta(csym, declNode, cdecl->name, cdecl->isPub, makeCppConstName(declNode.moduleId, cdecl->name));
                 csym.typeId = constTid;
-                csym.value = cdecl->value;
                 symbols.constants[key] = std::move(csym);
             } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 FnSymbol fsym{};

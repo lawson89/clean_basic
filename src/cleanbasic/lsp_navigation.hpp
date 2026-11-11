@@ -44,8 +44,6 @@ inline void handleDocumentSymbolRequest(LspServerState& state, const JsonArena& 
                     }
                     jsonObjectSet(outArena, symObj, "children", childrenArr);
                     jsonArrayPush(outArena, symbolsArr, symObj);
-                } else if (const auto* al = snap.arena.getDecl<AliasDecl>(did)) {
-                    jsonArrayPush(outArena, symbolsArr, makeLspDocSymbol(outArena, al->name, "= " + formatCleanbasicType(snap.arena, al->targetType), 26, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
                 } else if (const auto* cd = snap.arena.getDecl<ConstDecl>(did)) {
                     std::string detail = "const";
                     const std::string cKey = symbolKey(dn.moduleId, cd->name);
@@ -124,6 +122,41 @@ inline CursorTokenContext resolveCursorToken(std::string_view sourceText, std::s
     return ctx;
 }
 
+inline bool tryBindSymbolByKey(
+    const LspDocumentSnapshot& snap,
+    const std::string& key,
+    std::string_view rawTokenName,
+    bool skipBuiltins,
+    ResolvedCursorSymbol& res
+) {
+    const auto fnIt = snap.symbols.functions.find(key);
+    if (fnIt != snap.symbols.functions.end() && (!skipBuiltins || !isBuiltinSymbolName(rawTokenName))) {
+        bindSymbolTarget(res, fnIt->second, formatFnHoverMarkdown(snap.arena, fnIt->second));
+        return true;
+    }
+    const auto tyIt = snap.symbols.types.find(key);
+    if (tyIt != snap.symbols.types.end() && (!skipBuiltins || !isBuiltinTypeName(rawTokenName))) {
+        bindSymbolTarget(res, tyIt->second, formatTypeHoverMarkdown(snap.arena, tyIt->second));
+        return true;
+    }
+    const auto enIt = snap.symbols.enums.find(key);
+    if (enIt != snap.symbols.enums.end()) {
+        bindSymbolTarget(res, enIt->second, formatEnumHoverMarkdown(enIt->second));
+        return true;
+    }
+    const auto unIt = snap.symbols.unions.find(key);
+    if (unIt != snap.symbols.unions.end()) {
+        bindSymbolTarget(res, unIt->second, formatUnionHoverMarkdown(snap.arena, unIt->second));
+        return true;
+    }
+    const auto coIt = snap.symbols.constants.find(key);
+    if (coIt != snap.symbols.constants.end()) {
+        bindSymbolTarget(res, coIt->second, formatConstHoverMarkdown(snap.arena, coIt->second));
+        return true;
+    }
+    return false;
+}
+
 inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& snap, std::string_view filePath, const CursorTokenContext& cursorCtx) {
     ResolvedCursorSymbol res{};
     if (!snap.valid || !cursorCtx.found) return res;
@@ -146,29 +179,15 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         if (scopeIt != snap.symbols.fnScopes.end()) activeScope = scopeIt->second;
     }
     const auto bindFn = [&](const FnSymbol& fn) { bindSymbolTarget(res, fn, formatFnHoverMarkdown(snap.arena, fn)); };
-    const auto bindType = [&](const TypeSymbol& ts) { bindSymbolTarget(res, ts, formatTypeHoverMarkdown(snap.arena, ts)); };
-    const auto bindAlias = [&](const AliasSymbol& al) { bindSymbolTarget(res, al, formatAliasHoverMarkdown(snap.arena, snap.symbols, al)); };
-    const auto bindEnum = [&](const EnumSymbol& es) { bindSymbolTarget(res, es, formatEnumHoverMarkdown(es)); };
-    const auto bindUnion = [&](const UnionSymbol& us) { bindSymbolTarget(res, us, formatUnionHoverMarkdown(snap.arena, us)); };
-    const auto bindConst = [&](const ConstSymbol& cs) { bindSymbolTarget(res, cs, formatConstHoverMarkdown(snap.arena, cs)); };
     if (cursorCtx.hasDotReceiver) {
         const std::string& recv = cursorCtx.receiverName;
         const std::string& member = tok.value;
         std::string targetModId;
         if (isModuleAliasInScope(snap.symbols, currentModId, recv, activeScope, targetModId)) {
             const std::string qkey = symbolKey(targetModId, member);
-            const auto fnIt = snap.symbols.functions.find(qkey);
-            if (fnIt != snap.symbols.functions.end()) { bindFn(fnIt->second); return res; }
-            const auto tyIt = snap.symbols.types.find(qkey);
-            if (tyIt != snap.symbols.types.end()) { bindType(tyIt->second); return res; }
-            const auto enIt = snap.symbols.enums.find(qkey);
-            if (enIt != snap.symbols.enums.end()) { bindEnum(enIt->second); return res; }
-            const auto unIt = snap.symbols.unions.find(qkey);
-            if (unIt != snap.symbols.unions.end()) { bindUnion(unIt->second); return res; }
-            const auto alIt = snap.symbols.aliases.find(qkey);
-            if (alIt != snap.symbols.aliases.end()) { bindAlias(alIt->second); return res; }
-            const auto coIt = snap.symbols.constants.find(qkey);
-            if (coIt != snap.symbols.constants.end()) { bindConst(coIt->second); return res; }
+            if (tryBindSymbolByKey(snap, qkey, member, false, res)) {
+                return res;
+            }
         }
         if (activeScope.find(recv) == activeScope.end()) {
             const auto enumOpt = resolveEnumSymbol(snap.arena, snap.symbols, currentModId, recv);
@@ -249,18 +268,9 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         return res;
     }
     const std::string symKey = resolveSymbolKey(snap.symbols, currentModId, tok.value);
-    const auto fnIt = snap.symbols.functions.find(symKey);
-    if (fnIt != snap.symbols.functions.end() && !isBuiltinSymbolName(tok.value)) { bindFn(fnIt->second); return res; }
-    const auto alIt = snap.symbols.aliases.find(symKey);
-    if (alIt != snap.symbols.aliases.end()) { bindAlias(alIt->second); return res; }
-    const auto tyIt = snap.symbols.types.find(symKey);
-    if (tyIt != snap.symbols.types.end() && !isBuiltinTypeName(tok.value)) { bindType(tyIt->second); return res; }
-    const auto enIt = snap.symbols.enums.find(symKey);
-    if (enIt != snap.symbols.enums.end()) { bindEnum(enIt->second); return res; }
-    const auto unIt = snap.symbols.unions.find(symKey);
-    if (unIt != snap.symbols.unions.end()) { bindUnion(unIt->second); return res; }
-    const auto coIt = snap.symbols.constants.find(symKey);
-    if (coIt != snap.symbols.constants.end()) { bindConst(coIt->second); return res; }
+    if (tryBindSymbolByKey(snap, symKey, tok.value, true, res)) {
+        return res;
+    }
     for (const auto& kv : snap.symbols.types) {
         const auto fit = kv.second.fields.find(tok.value);
         if (fit != kv.second.fields.end()) {

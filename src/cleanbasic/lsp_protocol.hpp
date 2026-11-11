@@ -343,18 +343,6 @@ inline std::string formatUnionHoverMarkdown(const AstArena& arena, const UnionSy
     return appendDocCommentMarkdown(wrapVbCodeBlock(code), us.docComment);
 }
 
-inline std::string formatAliasHoverMarkdown(const AstArena& arena, const GlobalSymbolTable& symbols, const AliasSymbol& al) {
-    const std::string nl(1, static_cast<char>(10));
-    const std::string rawTarget = formatCleanbasicType(arena, al.targetType);
-    const TypeId resolvedTid = resolveAlias(arena, symbols, al.moduleId, al.targetType);
-    const std::string resolvedTarget = formatCleanbasicType(arena, resolvedTid);
-    std::string code = buildHoverHeader("alias", al.name, al.isPub) + " = " + rawTarget;
-    std::string md = wrapVbCodeBlock(code);
-    if (resolvedTarget != rawTarget) {
-        md += nl + "Resolved type: " + wrapInlineCode(resolvedTarget);
-    }
-    return appendDocCommentMarkdown(md, al.docComment);
-}
 
 inline std::string formatConstHoverMarkdown(const AstArena& arena, const ConstSymbol& cs) {
     std::string code = buildHoverHeader("const", cs.name, cs.isPub) + " as " + formatCleanbasicType(arena, cs.typeId);

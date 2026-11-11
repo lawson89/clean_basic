@@ -17,7 +17,6 @@ This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/sy
 ```cpp
 struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
-    std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, EnumSymbol> enums;
     std::unordered_map<std::string, UnionSymbol> unions;
     std::unordered_map<std::string, ConstSymbol> constants;
@@ -50,7 +49,6 @@ struct GlobalSymbolTable {
 * **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
 * **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `members`, `memberValues` map, `cppName`).
 * **`unions` (`key -> UnionSymbol`)**: Stores every `union Name` declaration (`name`, `moduleId`, `key`, `isPub`, `variants`, `variantTypes` map, `variantIndices` map, `cppName`).
-* **`aliases` (`key -> AliasSymbol`)**: Stores every `alias Name = TargetType` declaration (`name`, `moduleId`, `key`, `targetType`, `isPub`, `cppName`).
 * **`constants` (`key -> ConstSymbol`)**: Stores every module-level `const name = expr` declaration (`name`, `moduleId`, `key`, `typeId`, `isPub`, `cppName`).
 * **`functions` (`key -> FnSymbol`)**: Stores every function signature (`name`, `moduleId`, `key`, resolved `params`, resolved `returnType`, `isFallible`, `isPub`, `isExtern`, `cppName`).
 * **`headers` & `linkLibs`**: Deduplicated ordered lists of `import header "..."` and `import link "..."` targets across all loaded modules.
@@ -120,25 +118,22 @@ title Two-Pass Semantic Analysis (cb::analyzeProgram)
 start
 :registerBuiltins(arena, symbols);
 
-partition "Pass 1a: Module Imports, Aliases & Type Headers" {
+partition "Pass 1a: Module Imports & Type Headers" {
   :Iterate over program.declarations:
   1. ImportDecl ("header", "link", "module"):
      - Deduplicate headers & linkLibs
      - Register modules[moduleId][alias] = resolvedMod
      - Reject duplicate module aliases in same module
-  2. AliasDecl:
-     - Register AliasSymbol in symbols.aliases[key]
-  3. TypeDecl:
+  2. TypeDecl:
      - Register TypeSymbol shell in symbols.types[key]
      - Pre-register canonical TypeNode in arena.types
-  4. EnumDecl:
+  3. EnumDecl:
      - Register EnumSymbol shell in symbols.enums[key]
      - Pre-register canonical TypeNode in arena.types
-  5. UnionDecl:
+  4. UnionDecl:
      - Register UnionSymbol shell in symbols.unions[key]
      - Pre-register canonical TypeNode in arena.types;
 }
-
 partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
   :Iterate over program.declarations:
   1. TypeDecl:
@@ -170,20 +165,12 @@ stop
 
 ---
 
-## 4. Type Alias Resolution & Cycle Detection (`resolveAliasNode` & `resolveAlias`)
+## 4. Canonical Type Normalization (`resolveAliasNode` & `resolveAlias`)
 
-Modules can define local or public type aliases (`alias UserId = int` or `public alias HeroList = list[hero.Hero]`), including chains of aliases across modules.
-
-`cb::resolveAliasNode(arena, symbols, currentModuleId, tid)` unwraps alias chains safely:
-1. Starts with `curr = arena.types[tid]` and `activeModId = currentModuleId`.
-2. Maintains a `std::unordered_set<std::string> seen` of visited alias symbol keys.
-3. In a `while` loop, computes `key = resolveSymbolKey(symbols, activeModId, curr.name)` and looks up `key` in `symbols.aliases`:
-   * If not an alias, stops unwrapping (cross-module `isPub` visibility is enforced by `resolveTypeSymbolByName`).
-   * **Cycle Detection:** If `key` is already in `seen` (e.g., `alias A = B` and `alias B = A`), breaks out of the loop immediately to prevent infinite recursion.
-   * Otherwise, inserts `key` into `seen`, updates `activeModId = aliasSym.moduleId` (so relative type references inside the alias resolve in the alias's defining module), and advances `curr` to the target `TypeNode`.
-4. Finally, if `curr.name` resolves to a user-defined `TypeSymbol` in `symbols.types`, `EnumSymbol` in `symbols.enums`, or `UnionSymbol` in `symbols.unions`, normalizes `curr.name` to its canonical symbol key (e.g., `"entities/hero::Hero"`).
-
----
+`cb::resolveAliasNode(arena, symbols, currentModuleId, tid)` normalizes user-defined type references in a single step:
+1. Short-circuits immediately for built-in types (`int`, `float`, `str`, `bool`, `cptr`, `err`, `list`, `dict`, `fn`, `void`, `auto`, `null`).
+2. Computes `key = resolveSymbolKey(symbols, currentModuleId, curr.name)`.
+3. If `key` resolves to a user-defined `TypeSymbol` in `symbols.types`, `EnumSymbol` in `symbols.enums`, or `UnionSymbol` in `symbols.unions`, normalizes `curr.name` to its canonical symbol key (e.g., `"entities/hero::Hero"`).
 
 ## 5. Function Call, UFCS & Struct Constructor Resolution
 
@@ -258,7 +245,7 @@ When a UFCS call matches a free function `fn(firstParam, ...)`, the emitter prep
 
 CleanBasic uses pure value semantics for struct instantiation: `Player(name="Alice", health=100)` or `player.Player(name="Alice", health=100)`.
 * `resolveStructConstructor()` checks whether `call.callee` is an `Identifier` or module-qualified `FieldAccess` (`modAlias.TypeName`).
-* If the resolved symbol key does not match a function in `symbols.functions`, it unwraps any type aliases (checking `isPub` on cross-module hops) and looks up the key in `symbols.types`.
+* If the resolved symbol key does not match a function in `symbols.functions`, it looks up the key directly in `symbols.types`.
 * When matched, `inferExprType()` infers the expression type as the canonical struct `TypeId`, and the emitter lowers the call to a C++ aggregate initializer `cppName{field1, field2, ...}` ordered according to `TypeSymbol::fieldOrder` (filling any omitted fields with `defaultValueForType()`).
 
 ---

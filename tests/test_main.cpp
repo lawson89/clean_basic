@@ -209,7 +209,7 @@ end defer
 
 TEST_CASE("Parser builds AST for control flow, ranges, and fallible signatures", "[parser]") {
     const std::string code = R"(
-public alias ScoreMap = dict[str, list[int]]
+public const defaultTag = "score"
 
 fn compute(byref items as list[int], tag as str) as int
     dim total = 0
@@ -481,9 +481,7 @@ end fn
         REQUIRE(mainFn.body.size() >= 2);
         const auto& tryCatch = *parseFt.arena.getStmt<cb::TryCatchStmt>(mainFn.body[1]);
         REQUIRE(!tryCatch.tryBody.empty());
-        const auto& innerAssign = *parseFt.arena.getStmt<cb::VarAssignment>(tryCatch.tryBody[0]);
-        CHECK(innerAssign.breaksToCatch);
-        CHECK_FALSE(innerAssign.implicitBubble);
+        CHECK(parseFt.arena.getStmt<cb::VarAssignment>(tryCatch.tryBody[0]) != nullptr);
     }
 
     SECTION("Rejects calling error(...) inside an infallible function or with invalid named args") {
@@ -566,8 +564,7 @@ end fn
         const auto& middleFn = *parseGood.arena.getDecl<cb::FnDecl>(middleDeclId);
         REQUIRE(!middleFn.body.empty());
         const cb::StmtId valStmtId = middleFn.body[0];
-        const auto& valAssign = *parseGood.arena.getStmt<cb::VarAssignment>(valStmtId);
-        CHECK(valAssign.implicitBubble);
+        CHECK(parseGood.arena.getStmt<cb::VarAssignment>(valStmtId) != nullptr);
     }
 }
 
@@ -1502,7 +1499,7 @@ inline bool hasCompletionItem(
 
 }  // namespace cb::testLsp
 
-TEST_CASE("LSP DocumentSymbol Provider outlines types, fields, aliases, and functions", "[lsp][documentSymbol]") {
+TEST_CASE("LSP DocumentSymbol Provider outlines types, fields, constants, and functions", "[lsp][documentSymbol]") {
     std::stringstream clientToServer;
     std::stringstream serverToClient;
 
@@ -1511,7 +1508,7 @@ TEST_CASE("LSP DocumentSymbol Provider outlines types, fields, aliases, and func
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public const maxScore = 100
 public type Player
     name as str
     health as int
@@ -1545,9 +1542,9 @@ end fn
     const auto& symElems = std::get<cb::JsonArray>(docSymResp.arena.nodes[symArrId]).elements;
     REQUIRE(symElems.size() == 3);
 
-    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "name")) == "Score");
-    CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "kind")) == 26);
-    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "detail")) == "= int");
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "name")) == "maxScore");
+    CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "kind")) == 14);
+    CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[0], "detail")) == "as int");
 
     CHECK(cb::jsonGetString(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "name")) == "Player");
     CHECK(cb::jsonGetInt(docSymResp.arena, cb::jsonGetField(docSymResp.arena, symElems[1], "kind")) == 23);
@@ -1575,7 +1572,7 @@ TEST_CASE("LSP Hover Provider resolves variables, UFCS methods, struct fields, a
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public const maxScore = 100
 public type Player
     name as str
     health as int
@@ -1667,7 +1664,7 @@ TEST_CASE("LSP Definition Provider resolves same-file, cross-module UFCS, struct
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public const maxScore = 100
 public type Player
     name as str
     health as int
@@ -1815,7 +1812,7 @@ TEST_CASE("LSP Completion Provider resolves UFCS and fields", "[lsp][completion]
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public const maxScore = 100
 public type Player
     name as str
     health as int
@@ -1914,7 +1911,7 @@ end fn
     const auto compMod = cb::testLsp::readResponseForId(serverToClient, 3);
     const cb::JsonId modItems = cb::jsonGetField(compMod.arena, compMod.root, "result");
     CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "Player", 22, "type Player"));
-    CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "Score", 25, "alias Score = int"));
+    CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "maxScore", 21, "const as int"));
     CHECK(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "heal", 3));
     CHECK_FALSE(cb::testLsp::hasCompletionItem(compMod.arena, modItems, "secretHelper"));
 
@@ -2714,41 +2711,7 @@ TEST_CASE("examples/cbgrep.cb and piped standard streams E2E verification", "[st
 
 
 
-TEST_CASE("Analyzer rejects removed global len() and str() functions", "[analyzer]") {
-    SECTION("Rejects global len()") {
-        const std::string code = R"(
-fn main()
-    dim x = [1, 2]
-    print(len(x))
-end fn
-)";
-        const auto res = cb::transpileSource(code, "badLen.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.message.find("Global 'len()' is removed; use 'x.len()'") != std::string::npos);
-    }
-    SECTION("Rejects global str()") {
-        const std::string code = R"(
-fn main()
-    dim x = 42
-    print(str(x))
-end fn
-)";
-        const auto res = cb::transpileSource(code, "badStr.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.message.find("Global 'str()' is removed; use 'x.toStr()'") != std::string::npos);
-    }
-    SECTION("Rejects list.append()") {
-        const std::string code = R"(
-fn main()
-    dim x as list[int] = []
-    x.append(1)
-end fn
-)";
-        const auto res = cb::transpileSource(code, "badAppend.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.message.find("'.append()' is removed; use '.push()'") != std::string::npos);
-    }
-}
+
 
 TEST_CASE("Analyzer enforces non-byref parameter and const mutability rules", "[analyzer]") {
     SECTION("Analyzer rejects reassigning non-byref parameter") {
@@ -3113,17 +3076,7 @@ end fn
         CHECK(badRemRes.error.message.find("Cannot call '.remove()' on const variable 'd'") != std::string::npos);
     }
 
-    SECTION("Guardrails: retired 'as err' return shorthand, untyped empty []/{}, and non-cptr null") {
-        const std::string legacyAsErr = R"CB(
-fn checkVal(x as int) as err
-    return
-end fn
-)CB";
-        const auto errRes = cb::transpileSource(legacyAsErr, "legacyAsErr.cb");
-        CHECK_FALSE(errRes.ok);
-        CHECK(errRes.error.kind == "ParseError");
-        CHECK(errRes.error.message.find("Return type 'as err' is removed; use 'can error'") != std::string::npos);
-
+    SECTION("Guardrails: untyped empty []/{} and non-cptr null") {
         const std::string untypedEmptyList = R"CB(
 fn main()
     dim items = []
@@ -3422,14 +3375,12 @@ end fn
         CHECK(res2.error.message.find("First argument to 'assert(...)' must be of type 'bool'") != std::string::npos);
 
         const std::string mismatchedFn = R"(
-alias UnaryOp = fn(x as int) as int
-
 fn add(a as int, b as int) as int
     return a + b
 end fn
 
 fn main()
-    dim f as UnaryOp = add
+    dim f as fn(int) as int = add
 end fn
 )";
         const auto res3 = cb::transpileSource(mismatchedFn, "bad_fn_sig.cb");
@@ -4043,25 +3994,26 @@ end fn
 }
 
 TEST_CASE("Fast linker detection, built-in type alias fast path, and PCH hash stability", "[pipeline][symbols][optimization]") {
-    SECTION("Built-in type alias resolution fast path preserves primitive TypeIds and unwraps user aliases") {
-        const std::string src = R"CB(alias MyInt = int
-alias IntList = list[MyInt]
+    SECTION("Built-in type normalization fast path preserves primitive TypeIds and normalizes user types") {
+        const std::string src = R"CB(public type Box
+    v as int
+end type
 
 fn main() as int
-    dim a as MyInt = 10
-    dim b as IntList = [a, 20]
-    return b[0]
+    dim a as int = 10
+    dim b as list[Box] = [Box(v=a)]
+    return b[0].v
 end fn
 )CB";
-        const auto checkRes = cb::checkSource(src, "alias_fastpath.cb");
+        const auto checkRes = cb::checkSource(src, "type_fastpath.cb");
         REQUIRE(checkRes.ok);
 
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeInt) == checkRes.symbols.typeInt);
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeStr) == checkRes.symbols.typeStr);
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeBool) == checkRes.symbols.typeBool);
-        const cb::TypeId myIntTid = checkRes.arena.findType("MyInt");
-        REQUIRE(myIntTid != cb::INVALID_ID);
-        CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", myIntTid) == checkRes.symbols.typeInt);
+        const cb::TypeId boxTid = checkRes.arena.findType("Box");
+        REQUIRE(boxTid != cb::INVALID_ID);
+        CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", boxTid) == boxTid);
     }
 
     SECTION("findExecutableInPath, detectFastLinkerFlag, and stat-based computeBackendPchHash") {
@@ -4172,7 +4124,7 @@ end fn
 )CB";
         const auto resFs = cb::checkSource(badFsHandle, "bad_fs.cb");
         REQUIRE_FALSE(resFs.ok);
-        CHECK(resFs.error.message.find("Type 'CbFile' has no field 'handle'.") != std::string::npos);
+        CHECK(resFs.error.message.find("Type 'File' has no field 'handle'.") != std::string::npos);
 
         const std::string badJsonConstruct = R"CB(import "std/json"
 fn main() as int
@@ -4182,7 +4134,7 @@ end fn
 )CB";
         const auto resJson = cb::checkSource(badJsonConstruct, "bad_json.cb");
         REQUIRE_FALSE(resJson.ok);
-        CHECK(resJson.error.message.find("Cannot directly construct opaque extern type 'CbJsonDoc'.") != std::string::npos);
+        CHECK(resJson.error.message.find("Cannot directly construct opaque extern type 'JsonDoc'.") != std::string::npos);
     }
 
     SECTION("Detects direct by-value recursive cycles in structs and unions while allowing list[T] and dict[K, V] self-references") {

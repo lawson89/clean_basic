@@ -23,6 +23,8 @@ struct CbFile {
     int64_t handle = cbFsClosedHandle;
 };
 
+using File = CbFile;
+
 struct CbFileSlot {
     std::fstream stream;
     bool inUse = false;

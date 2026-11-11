@@ -20,10 +20,9 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
    Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`, `<variant>`, `<algorithm>`, `<type_traits>`) plus `CbError`, `cbToStr`, `cbHasError`, `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`.
 3. **External C/C++ Headers** (from `import header "..."`):
    Deduplicated `#include "<header>"` directives for reachable modules.
-4. **Enums, Struct & Union Forward Declarations & Type Aliases**:
+4. **Enums, Struct & Union Forward Declarations**:
    * `enum class <cppName> : int64_t;` forward declarations, `enum class <cppName> : int64_t { ... };` definitions, and `cbToStr` stringifier helpers for every `EnumDecl`.
    * `struct <cppName>;` forward declarations for every non-`extern` `TypeDecl` and `UnionDecl`.
-   * `using <cppName> = <mappedTargetType>;` for every `AliasDecl`.
 5. **Topological POD Struct & Tagged Union Definitions + Module Constants**:
    * Full `struct <cppName> { <Type> <field>{}; ... };` and tagged union `std::variant` wrapper definitions ordered topologically by value-type dependencies.
    * Module constants (`ConstDecl`) once all composite types are complete.
@@ -147,7 +146,7 @@ Inside a `fn connect(ip as str) as Connection can error`:
   return CbError{"", 0};
   ```
 
-### 4.2 Implicit Error Bubbling (`emitFallibleAssignment`, `emitExprStmt` & `emitReturn`)
+### 4.2 Implicit Error Bubbling (`emitVarAssignment`, `emitExprStmt` & `emitReturn`)
 Fallible calls at the root of a variable assignment (`dim x = f()`), standalone call (`f()`), or direct return (`return f()`) are unpacked into temporary `auto [_val, _err]` bindings and checked via `emitErrorCheck()`.
 When a `can error` function calls another fallible function outside of a `try / catch` block:
 

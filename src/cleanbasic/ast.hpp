@@ -177,14 +177,10 @@ struct VarAssignment {
     bool hasDeclaredType = false;
     TypeId declaredType = INVALID_ID;
     ExprId value = INVALID_ID;
-    bool implicitBubble = false;
-    bool breaksToCatch = false;
 };
 
 struct ExprStmt {
     ExprId expr = INVALID_ID;
-    bool implicitBubble = false;
-    bool breaksToCatch = false;
 };
 
 struct ElseIfBranch {
@@ -246,8 +242,6 @@ struct WhileStmt {
 struct ReturnStmt {
     bool hasValue = false;
     ExprId value = INVALID_ID;
-    bool implicitBubble = false;
-    bool breaksToCatch = false;
 };
 
 struct BreakStmt {};
@@ -277,11 +271,6 @@ struct StmtNode {
     const T* getIf() const {
         return std::get_if<T>(&payload);
     }
-
-    template <typename T>
-    T* getIfMut() {
-        return std::get_if<T>(&payload);
-    }
 };
 
 // ==========================================
@@ -294,12 +283,6 @@ struct ImportDecl {
     bool hasAlias = false;
     std::string alias;
     std::string resolvedModuleId = "";
-};
-
-struct AliasDecl {
-    std::string name;
-    TypeId targetType = INVALID_ID;
-    bool isPub = false;
 };
 
 struct TypeDecl {
@@ -354,7 +337,6 @@ struct FnDecl {
 
 using DeclVariant = std::variant<
     ImportDecl,
-    AliasDecl,
     TypeDecl,
     EnumDecl,
     UnionDecl,
@@ -421,14 +403,6 @@ struct AstArena {
             return nullptr;
         }
         return stmts[id].getIf<T>();
-    }
-
-    template <typename T>
-    T* getStmtMut(StmtId id) {
-        if (id >= stmts.size()) {
-            return nullptr;
-        }
-        return stmts[id].getIfMut<T>();
     }
 
     template <typename T>

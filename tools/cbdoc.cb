@@ -46,7 +46,7 @@ fn extractDeclHeader(line as str, includePrivate as bool) as str
     end if
     if includePrivate
         const stripped = stripModifiers(t)
-        if stripped.startsWith("fn ") or stripped.startsWith("type ") or stripped.startsWith("enum ") or stripped.startsWith("union ") or stripped.startsWith("alias ") or stripped.startsWith("const ")
+        if stripped.startsWith("fn ") or stripped.startsWith("type ") or stripped.startsWith("enum ") or stripped.startsWith("union ") or stripped.startsWith("const ")
             return t
         end if
     end if
@@ -56,7 +56,7 @@ end fn
 '' Parses the declaration kind (e.g., "fn") and identifier name from a header line.
 fn parseDeclKindAndName(header as str) as list[str]
     const work = stripModifiers(header)
-    const kinds as list[str] = ["fn", "type", "enum", "union", "alias", "const"]
+    const kinds as list[str] = ["fn", "type", "enum", "union", "const"]
     for k in kinds
         const prefix = k & " "
         if work.startsWith(prefix)

@@ -3,12 +3,9 @@
 
 import header "fs/fs_bridge.hpp"
 
-'' Opaque value-semantic handle to an open streaming file slot.
-public extern type CbFile
-end type
-
 '' Value-semantic handle to an open streaming file.
-public alias File = CbFile
+public extern type File
+end type
 
 ' Whole-file operations
 extern fn cbFsRead(path as str) as str can error
@@ -19,18 +16,18 @@ extern fn cbFsCopy(src as str, dst as str) can error
 extern fn cbFsRename(src as str, dst as str) can error
 
 ' Streaming File operations
-extern fn cbFsStdin() as CbFile
-extern fn cbFsStdout() as CbFile
-extern fn cbFsStderr() as CbFile
-extern fn cbFsOpen(path as str) as CbFile can error
-extern fn cbFsOpenMode(path as str, mode as str) as CbFile can error
-extern fn cbFsReadLine(f as CbFile, byref outLine as str) as bool can error
-extern fn cbFsEof(f as CbFile) as bool
-extern fn cbFsWriteStream(f as CbFile, text as str) can error
-extern fn cbFsWriteLine(f as CbFile, text as str) can error
-extern fn cbFsFlush(f as CbFile) can error
-extern fn cbFsIsOpen(f as CbFile) as bool
-extern fn cbFsClose(byref f as CbFile)
+extern fn cbFsStdin() as File
+extern fn cbFsStdout() as File
+extern fn cbFsStderr() as File
+extern fn cbFsOpen(path as str) as File can error
+extern fn cbFsOpenMode(path as str, mode as str) as File can error
+extern fn cbFsReadLine(f as File, byref outLine as str) as bool can error
+extern fn cbFsEof(f as File) as bool
+extern fn cbFsWriteStream(f as File, text as str) can error
+extern fn cbFsWriteLine(f as File, text as str) can error
+extern fn cbFsFlush(f as File) can error
+extern fn cbFsIsOpen(f as File) as bool
+extern fn cbFsClose(byref f as File)
 
 ' Metadata, directories, and paths
 extern fn cbFsExists(path as str) as bool

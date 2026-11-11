@@ -194,9 +194,7 @@ public:
         if (symbols.unions.count(key)) {
             return symbols.unions.at(key).cppName;
         }
-        if (symbols.aliases.count(key)) {
-            return symbols.aliases.at(key).cppName;
-        }
+
         std::string sanitized = t.name;
         for (char& c : sanitized) {
             if (c == '.') c = '_';
@@ -750,8 +748,8 @@ public:
     }
 }
 
-    void emitErrorCheck(uint32_t line, const FnDecl& fn, const std::string& errTmp, bool breaksToCatch) {
-        if (breaksToCatch) {
+    void emitErrorCheck(uint32_t line, const FnDecl& fn, const std::string& errTmp) {
+        if (!catchErrStack.empty()) {
             const std::string& catchVar = catchErrStack.back();
             emitLine("if (cbHasError(" + errTmp + ")) {");
             indentLevel += 1;
@@ -781,8 +779,7 @@ public:
         uint32_t line,
         const FnDecl& fn,
         const std::string& callCpp,
-        bool hasReturnValue,
-        bool breaksToCatch
+        bool hasReturnValue
     ) {
         const auto [valTmp, errVar] = nextValErrTemps();
         if (hasReturnValue) {
@@ -790,103 +787,58 @@ public:
         } else {
             emitLine("auto " + errVar + " = " + callCpp + ";");
         }
-        emitErrorCheck(line, fn, errVar, breaksToCatch);
+        emitErrorCheck(line, fn, errVar);
         return valTmp;
     }
 
-    void emitFallibleAssignment(uint32_t line, 
+    void emitVarAssignment(
+        uint32_t line,
         const FnDecl& fn,
         const VarAssignment& stmt,
-        const FnSymbol& fnSym,
         std::unordered_map<std::string, VarSymbol>& scope
     ) {
-        const std::string callCpp = emitExpr(stmt.value, scope);
-        const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
-        const std::string valTmp = emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
+        std::string valCpp;
+        TypeId valType = INVALID_ID;
+        bool isFallibleCall = false;
 
-    if (stmt.target != INVALID_ID) {
-        const ExprId tid = stmt.target;
-        std::string rhs = "0";
-        if (hasValue) {
-            rhs = valTmp;
-        }
-        if (const auto* ident = arena.getExpr<Identifier>(tid)) {
-            const std::string& name = ident->name;
-            TypeId retT = symbols.typeAuto;
-            if (stmt.hasDeclaredType) {
-                retT = resolveAlias(arena, symbols, currentModuleId, stmt.declaredType);
-            } else if (hasValue) {
-                retT = resolveAlias(arena, symbols, fnSym.moduleId, fnSym.returnType);
-            }
-            const bool isNewDecl = stmt.isDim || stmt.isConst;
-            if (isNewDecl) {
-                scope[name] = VarSymbol{name, retT, false, stmt.isConst};
-            }
-            const std::string cppVarName = sanitizeCppIdent(name);
-            if (isNewDecl) {
-                std::string prefix = "auto ";
-                if (stmt.isConst) {
-                    prefix = "const auto ";
-                }
-                emitLine(prefix + cppVarName + " = " + rhs + ";");
-            } else {
-                emitLine(cppVarName + " = " + rhs + ";");
+        if (const auto fnSym = resolveFallibleCallExpr(stmt.value, scope)) {
+            isFallibleCall = true;
+            const std::string callCpp = emitExpr(stmt.value, scope);
+            const bool hasValue = (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType));
+            const std::string valTmp = emitFallibleCallUnpack(line, fn, callCpp, hasValue);
+            valCpp = "0";
+            if (hasValue) {
+                valCpp = valTmp;
+                valType = resolveAlias(arena, symbols, fnSym->moduleId, fnSym->returnType);
             }
         } else {
-            const std::string lhsCpp = emitExpr(tid, scope, true);
-            emitLine(lhsCpp + " = " + rhs + ";");
+            valCpp = emitExpr(stmt.value, scope);
+            valType = exprType(stmt.value, scope);
         }
-    }
-}
 
-    void emitVarAssignment(uint32_t line, 
-    const FnDecl& fn,
-    const VarAssignment& stmt,
-    std::unordered_map<std::string, VarSymbol>& scope
-) {
-    if (const auto fnSym = resolveFallibleCallExpr(stmt.value, scope)) {
-        emitFallibleAssignment(line, fn, stmt, *fnSym, scope);
-        return;
-    }
-
-    std::string valCpp = emitExpr(stmt.value, scope);
-    const TypeId valType = exprType(stmt.value, scope);
-
-    if (stmt.hasDeclaredType && stmt.target != INVALID_ID) {
-        const ExprId targetId = stmt.target;
-        if (const auto* ident = arena.getExpr<Identifier>(targetId)) {
-            const std::string& name = ident->name;
-            const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, stmt.declaredType);
-            scope[name] = VarSymbol{name, resolvedT, false, stmt.isConst};
-            const std::string cppType = mapTypeNode(currentModuleId, arena.getType(resolvedT));
-            std::string prefix;
-            if (stmt.isConst) {
-                prefix = "const ";
-            }
-            emitLine(prefix + cppType + " " + sanitizeCppIdent(name) + " = " + valCpp + ";");
+        if (stmt.target == INVALID_ID) {
             return;
         }
-    }
 
-    if (stmt.target != INVALID_ID) {
         const ExprId targetId = stmt.target;
-        TypeId inferredT = symbols.typeAuto;
-        if (valType != INVALID_ID) {
-            inferredT = valType;
-        }
-
         if (const auto* ident = arena.getExpr<Identifier>(targetId)) {
             const std::string& name = ident->name;
             const std::string cppVarName = sanitizeCppIdent(name);
             if (stmt.isDim || stmt.isConst) {
-                scope[name] = VarSymbol{name, inferredT, false, stmt.isConst};
-                std::string inferredName = "auto";
-                if (inferredT < arena.types.size()) {
-                    inferredName = arena.types[inferredT].name;
+                TypeId boundTid = symbols.typeAuto;
+                if (stmt.hasDeclaredType) {
+                    boundTid = resolveAlias(arena, symbols, currentModuleId, stmt.declaredType);
+                } else if (valType != INVALID_ID) {
+                    boundTid = valType;
                 }
+                scope[name] = VarSymbol{name, boundTid, false, stmt.isConst};
                 std::string cppT = "auto";
-                if (inferredName != "auto") {
-                    cppT = mapType(currentModuleId, inferredT);
+                if (!isFallibleCall) {
+                    if (stmt.hasDeclaredType) {
+                        cppT = mapTypeNode(currentModuleId, arena.getType(boundTid));
+                    } else if (boundTid < arena.types.size() && arena.types[boundTid].name != "auto") {
+                        cppT = mapType(currentModuleId, boundTid);
+                    }
                 }
                 std::string prefix;
                 if (stmt.isConst) {
@@ -901,27 +853,25 @@ public:
             emitLine(lhsCpp + " = " + valCpp + ";");
         }
     }
-}
 
     bool emitIntrinsicFallibleOrErrorCall(
         uint32_t line,
         const FnDecl& fn,
         const FuncCall& call,
-        bool breaksToCatch,
         std::unordered_map<std::string, VarSymbol>& scope
     ) {
         if (cb::isAssertBuiltinCall(arena, call)) {
             const auto [discardTmp, errVar] = nextValErrTemps();
             emitLine("auto " + errVar + " = " + buildAssertCallValue(call, scope) + ";");
-            emitErrorCheck(line, fn, errVar, breaksToCatch);
+            emitErrorCheck(line, fn, errVar);
             return true;
         }
         if (cb::isErrorBuiltinCall(arena, call)) {
             const std::string errVal = buildErrorCallValue(call, scope);
-            if (breaksToCatch && !catchErrStack.empty()) {
+            if (!catchErrStack.empty()) {
                 const auto [discardTmp, errVar] = nextValErrTemps();
                 emitLine("auto " + errVar + " = " + errVal + ";");
-                emitErrorCheck(line, fn, errVar, true);
+                emitErrorCheck(line, fn, errVar);
             } else {
                 emitLine(buildErrorBubbleReturn(fn, errVal));
             }
@@ -937,14 +887,14 @@ public:
         std::unordered_map<std::string, VarSymbol>& scope
     ) {
         if (const auto* call = arena.getExpr<FuncCall>(stmt.expr)) {
-            if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, stmt.breaksToCatch, scope)) {
+            if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, scope)) {
                 return;
             }
         }
         if (const auto fnSym = resolveFallibleCallExpr(stmt.expr, scope)) {
             const std::string callCpp = emitExpr(stmt.expr, scope);
             const bool hasValue = (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType));
-            emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
+            emitFallibleCallUnpack(line, fn, callCpp, hasValue);
             return;
         }
 
@@ -973,13 +923,13 @@ public:
 
         const ExprId firstId = stmt.value;
         if (const auto* call = arena.getExpr<FuncCall>(firstId)) {
-            if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, stmt.breaksToCatch, scope)) {
+            if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, scope)) {
                 return;
             }
         }
         if (const auto calleeSym = resolveFallibleCallExpr(firstId, scope)) {
             const bool hasValue = (calleeSym->returnType != INVALID_ID && !arena.isVoid(calleeSym->returnType));
-            const std::string valTmp = emitFallibleCallUnpack(line, fn, emitExpr(stmt.value, scope), hasValue, stmt.breaksToCatch);
+            const std::string valTmp = emitFallibleCallUnpack(line, fn, emitExpr(stmt.value, scope), hasValue);
             if (!hasValue) {
                 if (fn.isFallible) {
                     emitLine(R"(return CbError{"", 0};)");
@@ -1525,7 +1475,6 @@ public:
     std::vector<std::pair<std::string, TypeDecl>> structDecls;
     std::vector<std::pair<std::string, UnionDecl>> unionDecls;
     std::vector<std::pair<std::string, DeclId>> orderedCompositeDecls;
-    std::vector<std::pair<std::string, AliasDecl>> aliasDecls;
     std::vector<std::pair<std::string, ConstDecl>> constDecls;
     struct EmittedFnEntry {
         std::string moduleId;
@@ -1549,8 +1498,6 @@ public:
             orderedCompositeDecls.push_back({declNode.moduleId, did});
         } else if (const auto* ed = arena.getDecl<EnumDecl>(did)) {
             enumDecls.push_back({declNode.moduleId, *ed});
-        } else if (const auto* ad = arena.getDecl<AliasDecl>(did)) {
-            aliasDecls.push_back({declNode.moduleId, *ad});
         } else if (const auto* cd = arena.getDecl<ConstDecl>(did)) {
             constDecls.push_back({declNode.moduleId, *cd});
         } else if (const auto* fd = arena.getDecl<FnDecl>(did)) {
@@ -1577,7 +1524,7 @@ public:
         }
     }
 
-    if (!structDecls.empty() || !unionDecls.empty() || !aliasDecls.empty()) {
+    if (!structDecls.empty() || !unionDecls.empty()) {
         emitLine();
         for (const auto& pair : structDecls) {
             currentModuleId = pair.first;
@@ -1586,10 +1533,6 @@ public:
         for (const auto& pair : unionDecls) {
             currentModuleId = pair.first;
             emitLine("struct " + lookupSymbolCppName(symbols.unions, currentModuleId, pair.second.name) + ";");
-        }
-        for (const auto& pair : aliasDecls) {
-            currentModuleId = pair.first;
-            emitLine("using " + lookupSymbolCppName(symbols.aliases, currentModuleId, pair.second.name) + " = " + mapType(currentModuleId, pair.second.targetType) + ";");
         }
     }
 

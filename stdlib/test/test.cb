@@ -1,13 +1,10 @@
 ' CleanBasic Standard Library: std/test
 ' Lightweight unit testing runner with assertion failure reporting
 
-'' Stateless function reference type for a fallible test case body.
-public alias TestFn = fn() can error
-
 '' Represents a single named test case and its callback function.
 public type TestCase
     name as str
-    runFn as TestFn
+    runFn as fn() can error
 end type
 
 '' Represents a named collection of test cases to execute together.
@@ -22,7 +19,7 @@ public fn newSuite(name as str) as Suite
 end fn
 
 '' Registers a named test case function in the suite.
-public fn add(byref s as Suite, name as str, runFn as TestFn)
+public fn add(byref s as Suite, name as str, runFn as fn() can error)
     s.cases.push(TestCase(name=name, runFn=runFn))
 end fn
 

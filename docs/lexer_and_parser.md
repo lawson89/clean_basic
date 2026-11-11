@@ -139,26 +139,23 @@ L8 --> L9
 ## 3. Statement & Declaration Disambiguation
 
 ### 3.1 Top-Level Declarations (`parseTopLevelDecl`)
-At the top level of a `.cb` file, seven declaration families are supported:
+At the top level of a `.cb` file, six declaration families are supported:
 1. **Imports (`ImportDecl`)**:
    * `import "path/to/mod.cb" [as alias]` (`kind = "module"`)
    * `import header "header.hpp"` (`kind = "header"`)
    * `import link "m"` (`kind = "link"`)
-2. **Type Aliases (`AliasDecl`)**:
-   * `[public] alias Name = Type` (Applying `extern` to an `alias` is rejected with a `ParseError`).
-3. **Struct / Extern Types (`TypeDecl`)**:
+2. **Struct / Extern Types (`TypeDecl`)**:
    * `[public] [extern] type Name ... end type` for struct definitions with `field as Type` declarations (or zero fields for opaque `extern type Name ... end type` handles).
-4. **Enums (`EnumDecl`)**:
+3. **Enums (`EnumDecl`)**:
    * `[public] enum Name ... end enum` for 64-bit integer-backed enumeration types.
-5. **Tagged Unions (`UnionDecl`)**:
+4. **Tagged Unions (`UnionDecl`)**:
    * `[public] union Name ... end union` for sum types with `VariantName as Type` variant declarations.
-6. **Module Constants (`ConstDecl`)**:
+5. **Module Constants (`ConstDecl`)**:
    * `[public] const name [as Type] = Expr` declares a module-level constant.
-7. **Functions (`FnDecl`)**:
+6. **Functions (`FnDecl`)**:
    * `[public] [extern] fn name([byref] p as Type [= defaultExpr], ...) [as ReturnType] [can error]`
-   * Fallible functions declare `can error` at the end of the signature (the legacy `as err` return shorthand is rejected with a `ParseError`).
+   * Fallible functions declare `can error` at the end of the signature.
    * If `isExtern` is true and `end fn` is not present, `parseFnDecl()` returns a bodyless extern `FnDecl` immediately after the signature line.
-
 ### 3.2 Statements (`parseStatement`)
 
 Inside a function body, `parseStatement()` dispatches on leading keywords:

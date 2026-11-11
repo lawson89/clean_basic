@@ -3,48 +3,42 @@
 
 import header "json/json_bridge.hpp"
 
-'' External arena-backed JSON document value type.
-public extern type CbJsonDoc
-end type
-
-'' External handle to a node within a JSON document arena.
-public extern type CbJsonVal
-end type
-
 '' Value-semantic RFC 8259 JSON document owning an internal node arena.
-public alias JsonDoc = CbJsonDoc
+public extern type JsonDoc
+end type
 
 '' Lightweight value handle referencing a JSON node inside a JsonDoc.
-public alias JsonVal = CbJsonVal
+public extern type JsonVal
+end type
 
-extern fn cbJsonNewDoc() as CbJsonDoc
-extern fn cbJsonParse(text as str) as CbJsonDoc can error
-extern fn cbJsonRoot(doc as CbJsonDoc) as CbJsonVal
-extern fn cbJsonSetRoot(byref doc as CbJsonDoc, val as CbJsonVal)
-extern fn cbJsonStringify(doc as CbJsonDoc) as str
-extern fn cbJsonStringifyVal(doc as CbJsonDoc, val as CbJsonVal) as str
+extern fn cbJsonNewDoc() as JsonDoc
+extern fn cbJsonParse(text as str) as JsonDoc can error
+extern fn cbJsonRoot(doc as JsonDoc) as JsonVal
+extern fn cbJsonSetRoot(byref doc as JsonDoc, val as JsonVal)
+extern fn cbJsonStringify(doc as JsonDoc) as str
+extern fn cbJsonStringifyVal(doc as JsonDoc, val as JsonVal) as str
 
-extern fn cbJsonNewObject(byref doc as CbJsonDoc) as CbJsonVal
-extern fn cbJsonNewArray(byref doc as CbJsonDoc) as CbJsonVal
-extern fn cbJsonNewStr(byref doc as CbJsonDoc, val as str) as CbJsonVal
-extern fn cbJsonNewInt(byref doc as CbJsonDoc, val as int) as CbJsonVal
-extern fn cbJsonNewFloat(byref doc as CbJsonDoc, val as float) as CbJsonVal
-extern fn cbJsonNewBool(byref doc as CbJsonDoc, val as bool) as CbJsonVal
-extern fn cbJsonNewNull(byref doc as CbJsonDoc) as CbJsonVal
-extern fn cbJsonObjectSet(byref doc as CbJsonDoc, obj as CbJsonVal, key as str, val as CbJsonVal)
-extern fn cbJsonArrayPush(byref doc as CbJsonDoc, arr as CbJsonVal, elem as CbJsonVal)
+extern fn cbJsonNewObject(byref doc as JsonDoc) as JsonVal
+extern fn cbJsonNewArray(byref doc as JsonDoc) as JsonVal
+extern fn cbJsonNewStr(byref doc as JsonDoc, val as str) as JsonVal
+extern fn cbJsonNewInt(byref doc as JsonDoc, val as int) as JsonVal
+extern fn cbJsonNewFloat(byref doc as JsonDoc, val as float) as JsonVal
+extern fn cbJsonNewBool(byref doc as JsonDoc, val as bool) as JsonVal
+extern fn cbJsonNewNull(byref doc as JsonDoc) as JsonVal
+extern fn cbJsonObjectSet(byref doc as JsonDoc, obj as JsonVal, key as str, val as JsonVal)
+extern fn cbJsonArrayPush(byref doc as JsonDoc, arr as JsonVal, elem as JsonVal)
 
-extern fn cbJsonHasField(doc as CbJsonDoc, obj as CbJsonVal, key as str) as bool
-extern fn cbJsonGetField(doc as CbJsonDoc, obj as CbJsonVal, key as str) as CbJsonVal can error
-extern fn cbJsonGetStr(doc as CbJsonDoc, val as CbJsonVal) as str can error
-extern fn cbJsonGetInt(doc as CbJsonDoc, val as CbJsonVal) as int can error
-extern fn cbJsonGetFloat(doc as CbJsonDoc, val as CbJsonVal) as float can error
-extern fn cbJsonGetBool(doc as CbJsonDoc, val as CbJsonVal) as bool can error
-extern fn cbJsonIsNull(doc as CbJsonDoc, val as CbJsonVal) as bool
-extern fn cbJsonArrayLen(doc as CbJsonDoc, arr as CbJsonVal) as int
-extern fn cbJsonArrayAt(doc as CbJsonDoc, arr as CbJsonVal, index as int) as CbJsonVal can error
-extern fn cbJsonKind(doc as CbJsonDoc, val as CbJsonVal) as str
-extern fn cbJsonObjectKeys(doc as CbJsonDoc, obj as CbJsonVal) as list[str]
+extern fn cbJsonHasField(doc as JsonDoc, obj as JsonVal, key as str) as bool
+extern fn cbJsonGetField(doc as JsonDoc, obj as JsonVal, key as str) as JsonVal can error
+extern fn cbJsonGetStr(doc as JsonDoc, val as JsonVal) as str can error
+extern fn cbJsonGetInt(doc as JsonDoc, val as JsonVal) as int can error
+extern fn cbJsonGetFloat(doc as JsonDoc, val as JsonVal) as float can error
+extern fn cbJsonGetBool(doc as JsonDoc, val as JsonVal) as bool can error
+extern fn cbJsonIsNull(doc as JsonDoc, val as JsonVal) as bool
+extern fn cbJsonArrayLen(doc as JsonDoc, arr as JsonVal) as int
+extern fn cbJsonArrayAt(doc as JsonDoc, arr as JsonVal, index as int) as JsonVal can error
+extern fn cbJsonKind(doc as JsonDoc, val as JsonVal) as str
+extern fn cbJsonObjectKeys(doc as JsonDoc, obj as JsonVal) as list[str]
 
 '' Creates a new empty JsonDoc ready for building JSON nodes.
 public fn newDoc() as JsonDoc

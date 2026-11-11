@@ -48,7 +48,7 @@ inline bool isBinDigitChar(char c) {
 
 inline bool isSingleKeyword(std::string_view word) {
     static const std::vector<std::string_view> keywords = {
-        "import", "as", "public", "extern", "alias", "type", "enum", "union", "fn",
+        "import", "as", "public", "extern", "type", "enum", "union", "fn",
         "dim", "const", "byref", "if", "else",
         "for", "in", "to", "step", "while", "case", "defer", "try", "catch", "error",
         "return", "break", "continue", "and", "or", "not",
