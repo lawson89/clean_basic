@@ -179,8 +179,6 @@ struct VarAssignment {
     bool hasDeclaredType = false;
     TypeId declaredType = INVALID_ID;
     ExprId value = INVALID_ID;
-    std::string compoundOp;
-    ExprId compoundRhs = INVALID_ID;
     bool implicitBubble = false;
     bool breaksToCatch = false;
 };

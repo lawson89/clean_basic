@@ -130,18 +130,6 @@ public:
         return std::string(name);
     }
 
-    std::string lookupTypeCppName(std::string_view modId, std::string_view name) const {
-        return lookupSymbolCppName(symbols.types, modId, name);
-    }
-
-    std::string lookupEnumCppName(std::string_view modId, std::string_view name) const {
-        return lookupSymbolCppName(symbols.enums, modId, name);
-    }
-
-    std::string lookupUnionCppName(std::string_view modId, std::string_view name) const {
-        return lookupSymbolCppName(symbols.unions, modId, name);
-    }
-
     std::string unionDataVariantCppType(const UnionSymbol& usym) const {
         std::vector<std::string> varCppTypes;
         varCppTypes.reserve(usym.variants.size());
@@ -152,10 +140,6 @@ public:
             varCppTypes.push_back("int64_t");
         }
         return "std::variant<" + joinStrings(varCppTypes) + ">";
-    }
-
-    std::string lookupAliasCppName(std::string_view modId, std::string_view name) const {
-        return lookupSymbolCppName(symbols.aliases, modId, name);
     }
 
     std::string mapBaseType(std::string_view modId, const TypeNode& t) const {
@@ -265,14 +249,13 @@ public:
         return wrapFallibleReturnCppType(modId, fn.returnType, fn.isFallible);
     }
 
-    bool isPassByConstRefType(std::string_view modId, const TypeNode& resolved) const {
-        const TypeNode actual = resolveAliasFromNode(arena, symbols, modId, resolved);
-        if (actual.name == "int" || actual.name == "float" ||
-            actual.name == "bool" || actual.name == "cptr" ||
-            actual.name == "void" || actual.name == "auto") {
+    bool isPassByConstRefType(const TypeNode& resolved) const {
+        if (resolved.name == "int" || resolved.name == "float" ||
+            resolved.name == "bool" || resolved.name == "cptr" ||
+            resolved.name == "void" || resolved.name == "auto") {
             return false;
         }
-        if (symbols.enums.count(actual.name) > 0) {
+        if (symbols.enums.count(resolved.name) > 0) {
             return false;
         }
         return true;
@@ -284,7 +267,7 @@ public:
         if (p.isByref) {
             return baseCpp + "&";
         }
-        if (isPassByConstRefType(modId, resolved)) {
+        if (isPassByConstRefType(resolved)) {
             return "const " + baseCpp + "&";
         }
         return baseCpp;
@@ -880,11 +863,7 @@ public:
         std::unordered_map<std::string, VarSymbol>& scope,
         std::unordered_set<std::string>& declaredVars
     ) {
-        ExprId callExprId = stmt.value;
-        if (stmt.compoundRhs != INVALID_ID) {
-            callExprId = stmt.compoundRhs;
-        }
-        const std::string callCpp = emitExpr(callExprId, scope);
+        const std::string callCpp = emitExpr(stmt.value, scope);
         const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
         const std::string valTmp = emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
 
@@ -893,15 +872,6 @@ public:
         std::string rhs = "0";
         if (hasValue) {
             rhs = valTmp;
-        }
-        if (stmt.compoundRhs != INVALID_ID) {
-            const std::string lhsCpp = emitExpr(tid, scope, true);
-            if (stmt.compoundOp == "&") {
-                emitLine(lhsCpp + " += cbToStr(" + rhs + ");");
-            } else {
-                emitLine(lhsCpp + " " + stmt.compoundOp + "= " + rhs + ";");
-            }
-            return;
         }
         if (const auto* ident = arena.getExpr<Identifier>(tid)) {
             const std::string& name = ident->name;
@@ -937,11 +907,7 @@ public:
     std::unordered_map<std::string, VarSymbol>& scope,
     std::unordered_set<std::string>& declaredVars
 ) {
-    ExprId checkExprId = stmt.value;
-    if (stmt.compoundRhs != INVALID_ID) {
-        checkExprId = stmt.compoundRhs;
-    }
-    if (const auto* call = arena.getExpr<FuncCall>(checkExprId)) {
+    if (const auto* call = arena.getExpr<FuncCall>(stmt.value)) {
         const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
         if (fnSym.has_value() && fnSym->isFallible) {
             emitFallibleAssignment(line, fn, stmt, *fnSym, scope, declaredVars);
@@ -1355,14 +1321,9 @@ public:
                 auto caseScope = scope;
                 auto cDecls = declaredVars;
                 if (!c.bindingName.empty()) {
-                    caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, false};
+                    caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, true};
                     cDecls.insert(c.bindingName);
-                    const bool isMutated = isVarReassignedInStmts(c.body, c.bindingName, caseScope);
-                    std::string bindPrefix = "const auto& ";
-                    if (isMutated) {
-                        bindPrefix = "auto ";
-                    }
-                    emitLine(bindPrefix + sanitizeCppIdent(c.bindingName) + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
+                    emitLine("const auto& " + sanitizeCppIdent(c.bindingName) + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
                 }
                 emitStmtList(fn, c.body, caseScope, cDecls);
                 emitLine("break;");
@@ -1542,7 +1503,7 @@ public:
 }
 
     void emitEnumDecl(const EnumDecl& ed) {
-        const std::string cppName = lookupEnumCppName(currentModuleId, ed.name);
+        const std::string cppName = lookupSymbolCppName(symbols.enums, currentModuleId, ed.name);
     emitLine("enum class " + cppName + " : int64_t {");
     indentLevel += 1;
     for (size_t i = 0; i < ed.members.size(); ++i) {
@@ -1573,7 +1534,7 @@ public:
     emitLine("}");
 }
     void emitStructDecl(const TypeDecl& td) {
-        const std::string cppName = lookupTypeCppName(currentModuleId, td.name);
+        const std::string cppName = lookupSymbolCppName(symbols.types, currentModuleId, td.name);
         emitLine("struct " + cppName + " {");
         indentLevel += 1;
         for (const auto& f : td.fields) {
@@ -1680,194 +1641,6 @@ public:
 
         indentLevel -= 1;
         emitLine("}");
-    }
-
-    bool isRootExprOfVar(ExprId exprId, std::string_view varName) const {
-        if (exprId >= arena.exprs.size()) {
-            return false;
-        }
-        if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
-            return ident->name == varName;
-        }
-        if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
-            return isRootExprOfVar(fa->target, varName);
-        }
-        if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
-            return isRootExprOfVar(ia->target, varName);
-        }
-        return false;
-    }
-
-    bool isVarMutatedInExpr(
-        ExprId exprId,
-        std::string_view varName,
-        const std::unordered_map<std::string, VarSymbol>& scope
-    ) const {
-        if (exprId >= arena.exprs.size()) {
-            return false;
-        }
-        if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
-            return isVarMutatedInExpr(uop->operand, varName, scope);
-        }
-        if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
-            return isVarMutatedInExpr(bop->left, varName, scope) || isVarMutatedInExpr(bop->right, varName, scope);
-        }
-        if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
-            return isVarMutatedInExpr(fa->target, varName, scope);
-        }
-        if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
-            return isVarMutatedInExpr(ia->target, varName, scope) || isVarMutatedInExpr(ia->index, varName, scope);
-        }
-        if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
-            for (const ExprId elem : llit->elements) {
-                if (isVarMutatedInExpr(elem, varName, scope)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
-            for (const auto& ent : dlit->entries) {
-                if (isVarMutatedInExpr(ent.key, varName, scope) || isVarMutatedInExpr(ent.value, varName, scope)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-            if (isVarMutatedInExpr(call->callee, varName, scope)) {
-                return true;
-            }
-            for (const ExprId argId : call->args) {
-                if (isVarMutatedInExpr(argId, varName, scope)) {
-                    return true;
-                }
-            }
-            for (const auto& na : call->namedArgs) {
-                if (isVarMutatedInExpr(na.value, varName, scope)) {
-                    return true;
-                }
-            }
-            const auto fnSymOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-            if (fnSymOpt.has_value()) {
-                ExprId ufcsRecv = INVALID_ID;
-                const bool isUfcs = isUfcsCallExpr(arena, *call, symbols, currentModuleId, scope, &ufcsRecv);
-                if (isUfcs && !fnSymOpt->params.empty() && fnSymOpt->params[0].isByref && isRootExprOfVar(ufcsRecv, varName)) {
-                    return true;
-                }
-                size_t paramOffset = 0;
-                if (isUfcs) {
-                    paramOffset = 1;
-                }
-                for (size_t aIdx = 0; aIdx < call->args.size(); ++aIdx) {
-                    const size_t pIdx = paramOffset + aIdx;
-                    if (pIdx < fnSymOpt->params.size() && fnSymOpt->params[pIdx].isByref && isRootExprOfVar(call->args[aIdx], varName)) {
-                        return true;
-                    }
-                }
-                for (const auto& na : call->namedArgs) {
-                    for (const auto& p : fnSymOpt->params) {
-                        if (p.name == na.name && p.isByref && isRootExprOfVar(na.value, varName)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    bool isVarReassignedInStmts(
-        const std::vector<StmtId>& stmts,
-        std::string_view varName,
-        const std::unordered_map<std::string, VarSymbol>& scope
-    ) const {
-        for (const StmtId sid : stmts) {
-            if (sid >= arena.stmts.size()) {
-                continue;
-            }
-            if (const auto* vassign = arena.getStmt<VarAssignment>(sid)) {
-                if (isRootExprOfVar(vassign->target, varName) || isVarMutatedInExpr(vassign->value, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* estmt = arena.getStmt<ExprStmt>(sid)) {
-                if (isVarMutatedInExpr(estmt->expr, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* ifS = arena.getStmt<IfStmt>(sid)) {
-                if (isVarMutatedInExpr(ifS->condition, varName, scope) || isVarReassignedInStmts(ifS->thenBody, varName, scope)) {
-                    return true;
-                }
-                for (const auto& branch : ifS->elifBranches) {
-                    if (isVarMutatedInExpr(branch.condition, varName, scope) || isVarReassignedInStmts(branch.body, varName, scope)) {
-                        return true;
-                    }
-                }
-                if (ifS->hasElse && isVarReassignedInStmts(ifS->elseBody, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* forS = arena.getStmt<ForStmt>(sid)) {
-                if (forS->rangeSpec.hasRange) {
-                    if (isVarMutatedInExpr(forS->rangeSpec.start, varName, scope) ||
-                        isVarMutatedInExpr(forS->rangeSpec.end, varName, scope) ||
-                        (forS->rangeSpec.hasStep && isVarMutatedInExpr(forS->rangeSpec.step, varName, scope))) {
-                        return true;
-                    }
-                } else if (forS->iterable != INVALID_ID && isVarMutatedInExpr(forS->iterable, varName, scope)) {
-                    return true;
-                }
-                if (isVarReassignedInStmts(forS->body, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* whileS = arena.getStmt<WhileStmt>(sid)) {
-                if (isVarMutatedInExpr(whileS->condition, varName, scope) || isVarReassignedInStmts(whileS->body, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* selS = arena.getStmt<SelectStmt>(sid)) {
-                if (isVarMutatedInExpr(selS->target, varName, scope)) {
-                    return true;
-                }
-                for (const auto& c : selS->cases) {
-                    if (c.bindingName != varName && isVarReassignedInStmts(c.body, varName, scope)) {
-                        return true;
-                    }
-                }
-                if (selS->hasCaseElse && isVarReassignedInStmts(selS->caseElse, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* tryCatch = arena.getStmt<TryCatchStmt>(sid)) {
-                if (isVarReassignedInStmts(tryCatch->tryBody, varName, scope) ||
-                    (tryCatch->catchVarName != varName && isVarReassignedInStmts(tryCatch->catchBody, varName, scope))) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* defS = arena.getStmt<DeferStmt>(sid)) {
-                if (isVarReassignedInStmts(defS->body, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-            if (const auto* retS = arena.getStmt<ReturnStmt>(sid)) {
-                if (retS->hasValue && isVarMutatedInExpr(retS->value, varName, scope)) {
-                    return true;
-                }
-                continue;
-            }
-        }
-        return false;
     }
 
     std::unordered_set<std::string> computeReachableFunctions() const {
@@ -1982,7 +1755,7 @@ public:
         emitLine();
         for (const auto& pair : enumDecls) {
             currentModuleId = pair.first;
-            emitLine("enum class " + lookupEnumCppName(currentModuleId, pair.second.name) + " : int64_t;");
+            emitLine("enum class " + lookupSymbolCppName(symbols.enums, currentModuleId, pair.second.name) + " : int64_t;");
         }
         emitLine();
         for (const auto& pair : enumDecls) {
@@ -1996,15 +1769,15 @@ public:
         emitLine();
         for (const auto& pair : structDecls) {
             currentModuleId = pair.first;
-            emitLine("struct " + lookupTypeCppName(currentModuleId, pair.second.name) + ";");
+            emitLine("struct " + lookupSymbolCppName(symbols.types, currentModuleId, pair.second.name) + ";");
         }
         for (const auto& pair : unionDecls) {
             currentModuleId = pair.first;
-            emitLine("struct " + lookupUnionCppName(currentModuleId, pair.second.name) + ";");
+            emitLine("struct " + lookupSymbolCppName(symbols.unions, currentModuleId, pair.second.name) + ";");
         }
         for (const auto& pair : aliasDecls) {
             currentModuleId = pair.first;
-            emitLine("using " + lookupAliasCppName(currentModuleId, pair.second.name) + " = " + mapType(currentModuleId, pair.second.targetType) + ";");
+            emitLine("using " + lookupSymbolCppName(symbols.aliases, currentModuleId, pair.second.name) + " = " + mapType(currentModuleId, pair.second.targetType) + ";");
         }
     }
 

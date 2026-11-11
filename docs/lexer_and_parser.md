@@ -151,7 +151,7 @@ At the top level of a `.cb` file, seven declaration families are supported:
    * `[public] [extern] type Name ... end type` for struct definitions with `[private] field as Type [= defaultExpr]` declarations.
    * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `enum`, `union`, `const`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
 4. **Enums (`EnumDecl`)**:
-   * `[public] enum Name [as int] ... end enum` for 64-bit integer-backed enumeration types.
+   * `[public] enum Name ... end enum` for 64-bit integer-backed enumeration types.
 5. **Tagged Unions (`UnionDecl`)**:
    * `[public] union Name ... end union` for sum types with `VariantName as Type` variant declarations.
 6. **Module Constants (`ConstDecl`)**:

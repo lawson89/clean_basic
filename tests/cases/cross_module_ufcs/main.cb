@@ -3,7 +3,7 @@
 ' EXPECT_CPP: struct cb_ast__SharedCfg {
 ' EXPECT_CPP: struct cb_ast__AstArena {
 ' EXPECT_CPP: cb_symbols__resolveAlias(arena, 0)
-' EXPECT_CPP: cb_symbols__resolveAlias(arena, 99, std::string("void"))
+' EXPECT_CPP: cb_symbols__resolveAliasOr(arena, 99, std::string("void"))
 ' FORBID_CPP: throw
 ' EXPECT_OUT: constAndDiamond: port=8180, scale=7, secretLen=6
 ' EXPECT_OUT: crossUfcs: t0=int, fallback=void, node=intVal:42
@@ -31,7 +31,7 @@ fn main() as int
 
     dim arena = ast.AstArena(types=["int", "str"])
     dim t0 = arena.resolveAlias(0)
-    dim tFallback = arena.resolveAlias(99, "void")
+    dim tFallback = arena.resolveAliasOr(99, "void")
     dim node = ast.AstNode.intVal(42)
     print($"crossUfcs: t0={t0}, fallback={tFallback}, node={describeNode(node)}")
     return 0

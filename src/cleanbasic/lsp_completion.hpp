@@ -287,9 +287,6 @@ inline void collectUfcsCompletionsForType(const LspDocumentSnapshot& snap, std::
     };
     for (const auto& kv : snap.symbols.functions) {
         checkAndAddCandidate(kv.second);
-        for (const auto& ov : kv.second.overloads) {
-            checkAndAddCandidate(ov);
-        }
     }
 }
 

@@ -3,9 +3,9 @@
 ' EXPECT_CPP: auto _err2 = voidFallible();
 ' EXPECT_CPP: if (cbHasError(_err2)) {
 ' EXPECT_CPP: return _err2;
-' EXPECT_CPP: void overload(int64_t x) {
+' EXPECT_CPP: void overloadInt(int64_t x) {
 ' EXPECT_CPP: int64_t local = 10;
-' EXPECT_CPP: void overload(const std::string& x) {
+' EXPECT_CPP: void overloadStr(const std::string& x) {
 ' EXPECT_CPP: std::string local = std::string("hi");
 ' EXPECT_OUT: Connect success
 ' EXPECT_OUT: Void fallible success
@@ -38,12 +38,12 @@ fn testReturnFallible() can error
     return voidFallible()
 end fn
 
-fn overload(x as int)
+fn overloadInt(x as int)
     dim local = 10
     print("Overload int: ", local)
 end fn
 
-fn overload(x as str)
+fn overloadStr(x as str)
     dim local = "hi"
     print("Overload str: ", local)
 end fn
@@ -54,8 +54,8 @@ fn main() as int
         print("Connect success")
         print("Void fallible success")
 
-        overload(1)
-        overload("test")
+        overloadInt(1)
+        overloadStr("test")
 
         dim s = State(val=Status.Active)
         s.val = Status.Inactive

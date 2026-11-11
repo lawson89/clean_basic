@@ -186,7 +186,8 @@ fn testFallibleLoopsAndCompound() can error
     dim total = 0
     dim label = "items:"
     for item in loadItems()
-        total += countItem(item)
+        dim delta = countItem(item)
+        total += delta
         label &= item.left(1)
     end for
     dim m = parseAndSumMode(b"ok", [1, 2])

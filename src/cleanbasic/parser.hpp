@@ -693,8 +693,6 @@ public:
             stmt.hasDeclaredType = false;
             stmt.declaredType = INVALID_ID;
             stmt.value = valExpr;
-            stmt.compoundOp = binOp;
-            stmt.compoundRhs = rhsExpr;
             return arena.addStmt(start.line, start.col, std::move(stmt));
         }
 
@@ -967,17 +965,8 @@ public:
 
     DeclId parseImportDecl() {
         const Token start = match("KEYWORD", "import");
-        std::string modulePath;
-        if (check("STRING")) {
-            const Token strTok = match("STRING");
-            modulePath = stripQuotes(strTok.value);
-        } else {
-            modulePath = match("IDENT").value;
-            while (check("DOT")) {
-                match("DOT");
-                modulePath += "." + match("IDENT").value;
-            }
-        }
+        const Token strTok = match("STRING");
+        std::string modulePath = stripQuotes(strTok.value);
 
         bool hasAlias = false;
         std::string alias;
@@ -1104,10 +1093,6 @@ public:
     DeclId parseEnumDecl(bool isPub, const Token& startTok) {
         match("KEYWORD", "enum");
         const Token nameTok = match("IDENT");
-        if (check("KEYWORD", "as")) {
-            match("KEYWORD", "as");
-            match("TYPE_KW", "int");
-        }
         expectNewlineOrEof();
 
         std::vector<EnumMember> members;

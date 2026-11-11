@@ -28,7 +28,7 @@ enum HttpMethod
     delete
 end enum
 
-enum FileAccess as int
+enum FileAccess
     read = 0b0001
     write = 0b0010
     readWrite = 0x03
@@ -180,15 +180,15 @@ fn testBinaryFiles() can error
     defer
         writer.close()
     end defer
-    writer.writeBytes(b"\xaa\xbb\xcc\xdd")
+    writer.writeFileBytes(b"\xaa\xbb\xcc\xdd")
     writer.close()
 
     dim reader = fs.open(streamPath)
     defer
         reader.close()
     end defer
-    dim chunk1 = reader.readBytes(2)
-    dim chunk2 = reader.readBytes(2)
+    dim chunk1 = reader.readFileBytes(2)
+    dim chunk2 = reader.readFileBytes(2)
     reader.close()
 
     print("Streamed bytes match: " & chunk1.toHex() & " and " & chunk2.toHex())

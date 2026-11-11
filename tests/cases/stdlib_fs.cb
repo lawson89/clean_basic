@@ -100,7 +100,8 @@ fn testWalkFiles(baseDir as str) can error
             firstVisible = path
         end if
         visibleCount += 1
-        totalVisibleBytes += fs.size(path)
+        dim fileSize = fs.size(path)
+        totalVisibleBytes += fileSize
     end for
 
     dim allFiles = fs.walkFiles(baseDir, includeHidden=true)
@@ -151,7 +152,7 @@ end fn
 
 fn writeBannerToStream(out as fs.File, msg as str) can error
     out.writeStr("Stdout stream write: ")
-    out.writeBytes(b"he")
+    out.writeFileBytes(b"he")
     out.writeLine(msg)
     out.flush()
 end fn

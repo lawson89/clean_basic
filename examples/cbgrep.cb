@@ -86,13 +86,15 @@ fn main() as int
                 if fs.isDir(target)
                     for path in fs.walkFiles(target)
                         try
-                            totalMatches += search(path, args)
+                            dim matches = search(path, args)
+                            totalMatches += matches
                         catch e2
                             os.eprint($"cbgrep: {path}: {e2.msg}")
                         end try
                     end for
                 else
-                    totalMatches += search(target, args)
+                    dim matches = search(target, args)
+                    totalMatches += matches
                 end if
             catch e
                 os.eprint($"cbgrep: {target}: {e.msg}")

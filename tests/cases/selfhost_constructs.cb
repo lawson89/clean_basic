@@ -83,7 +83,7 @@ fn stampExprLine(byref node as ExprNode, newLine as int)
     node.line = newLine
 end fn
 
-fn formatNodeTag(arena as MiniArena, target as int) as str
+fn formatNodeId(arena as MiniArena, target as int) as str
     return "id=" & target.toStr() & "(exprs=" & arena.exprs.len().toStr() & ")"
 end fn
 
@@ -159,7 +159,7 @@ fn runCompilerSim() can error
     print($"exec_stmts: x={vx}, y={vy}, module_hero={mHero}, sym_x_const={xConst}")
 
     arena.exprs[0].stampExprLine(99)
-    print("overloads: " & arena.formatNodeTag(7) & ", " & arena.formatNodeTag("custom", 7) & ", stamped_line=" & arena.exprs[0].line.toStr())
+    print("overloads: " & arena.formatNodeId(7) & ", " & arena.formatNodeTag("custom", 7) & ", stamped_line=" & arena.exprs[0].line.toStr())
 
     ' Trigger an unresolved identifier error and recover via try / catch
     dim eBad = arena.addExpr(25, ExprPayload.ident(IdentExpr(name="missingVar")))

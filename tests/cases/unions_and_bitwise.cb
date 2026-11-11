@@ -30,7 +30,7 @@ fn findType(reg as TypeRegistry, target as str) as int
     return target.len() + reg.items.len()
 end fn
 
-fn findType(byref reg as TypeRegistry, target as list[int], tag as str) as int
+fn findOrRegisterType(byref reg as TypeRegistry, target as list[int], tag as str) as int
     reg.items.push(tag)
     return target.len() + reg.items.len()
 end fn
@@ -74,7 +74,7 @@ fn main() as int
 
     dim reg = TypeRegistry(items=["int", "str"])
     dim ovA = reg.findType("float")
-    dim ovB = reg.findType([10, 20], "list")
+    dim ovB = reg.findOrRegisterType([10, 20], "list")
     print($"overloads: a={ovA}, b={ovB}")
     return 0
 end fn

@@ -227,7 +227,7 @@ void startServer() {
 * **Integral, Boolean & Enum Targets (`int`, `bool`, `enum`):** Emitted as a native C++ `switch` statement. Multi-value clauses (`case 1, 2:`) emit stacked case labels (`case 1:
 case 2: {`) sharing a scoped compound block with an implicit `break;`.
 * **String Targets (`str`):** Emitted inside a scoped compound block by evaluating `target` once into a temporary variable (`const auto _sel_1 = <target>;`) followed by an `if (_sel_1 == <m1> || _sel_1 == <m2>) { ... } else if (...) { ... } else { ... }` equality chain.
-* **Tagged Union Targets (`union`):** Binds `target` by `const` reference (`const auto& _sel_1 = <target>;`) and switches on `static_cast<int64_t>(_sel_1._data.index())`, binding `const auto& <binding> = std::get<Idx>(_sel_1._data);` when `<binding>` is not mutated in the case body (or `auto <binding> = std::get<Idx>(_sel_1._data);` when mutated).
+* **Tagged Union Targets (`union`):** Binds `target` by `const` reference (`const auto& _sel_1 = <target>;`) and switches on `static_cast<int64_t>(_sel_1._data.index())`, binding `const auto& <binding> = std::get<Idx>(_sel_1._data);` as a zero-copy read-only (`const`) reference.
 
 **CleanBasic Source:**
 ```vb

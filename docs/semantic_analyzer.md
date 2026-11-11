@@ -157,7 +157,7 @@ partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
      - Infer or canonicalize constant TypeId and register ConstSymbol in symbols.constants[key]
   5. FnDecl:
      - Canonicalize parameter TypeIds and returnType through canonicalizeType()
-     - Register FnSymbol (and overloads) in symbols.functions[key];
+     - Reject duplicate function names in the same module and register FnSymbol in symbols.functions[key];
 }
 
 partition "Pass 2: Function Body & Statement Validation" {
@@ -290,7 +290,7 @@ In `analyzeStmt()` (`VarAssignment`):
 ### 6.3 `select case` Target and Case Expression Constraints
 `select case <target>` supports `int`, `bool`, `str`, `enum`, and tagged `union` expressions. The analyzer validates that:
 1. The target expression is of type `int`, `bool`, `str`, an `enum`, or a `union` (reporting an error otherwise).
-2. Every match expression in each `case expr1, expr2` clause matches the target type (or names a valid variant of the target `union`, supporting `case Variant as payload` binding on single-variant clauses).
+2. Every match expression in each `case expr1, expr2` clause matches the target type (or names a valid variant of the target `union`, supporting read-only `const` `case Variant as payload` binding on single-variant clauses).
 Integral, boolean, and enum targets lower to native C++ `switch` jump tables with stacked `case` labels, string targets lower to a single-evaluation temporary variable paired with an `if / else if / else` equality chain, and union targets switch on `_data.index()` with `std::get<Idx>` payload extraction.
 
 ### 6.4 Loop Nesting Depth & `break` / `continue` Validation
@@ -319,7 +319,7 @@ When function `caller` invokes a fallible function `callee` (`callee.isFallible 
   Compilation fails immediately with an `AnalyzerError`:
   `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '<caller>' calls fallible function '<callee>').`
 * **Top-Level Statement Rule for Fallible Calls:**
-  Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()`, `x = fallible()`, or compound assignment `x += fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignment sub-expressions `x += 1 + fallible()`, or `if` conditions) is rejected with:
+  Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if` conditions) is rejected with:
   `AnalyzerError: Fallible call to '<name>' must be assigned to a variable, returned directly, or called as a standalone statement.`
 
 ### 7.3 `try / catch` Block Scoping (`TryCatchStmt`)

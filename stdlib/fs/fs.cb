@@ -159,12 +159,12 @@ public fn close(byref f as File)
 end fn
 
 '' Reads up to count raw bytes from an open File handle.
-public fn readBytes(f as File, count as int) as bytes can error
+public fn readFileBytes(f as File, count as int) as bytes can error
     return cbFsReadFileBytes(f, count)
 end fn
 
 '' Writes a raw bytes buffer to an open File handle.
-public fn writeBytes(f as File, data as bytes) can error
+public fn writeFileBytes(f as File, data as bytes) can error
     cbFsWriteFileBytes(f, data)
 end fn
 

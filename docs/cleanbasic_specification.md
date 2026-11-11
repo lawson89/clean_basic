@@ -25,7 +25,7 @@ Program         ::= TopLevelDecl*
 
 TopLevelDecl    ::= ImportDecl | ConstDecl | AliasDecl | TypeDecl | EnumDecl | UnionDecl | FnDecl
 
-ImportDecl      ::= "import" (StringLiteral | QualifiedIdent) ["as" Identifier] NEWLINE
+ImportDecl      ::= "import" StringLiteral ["as" Identifier] NEWLINE
                   | "import header" StringLiteral NEWLINE
                   | "import link" StringLiteral NEWLINE
 
@@ -33,7 +33,7 @@ ConstDecl       ::= ["public"] "const" Identifier ["as" Type] "=" Expr NEWLINE
 
 AliasDecl       ::= ["public"] "alias" Identifier "=" Type NEWLINE
 
-EnumDecl        ::= ["public"] "enum" Identifier ["as" "int"] NEWLINE EnumMember* "end enum" NEWLINE
+EnumDecl        ::= ["public"] "enum" Identifier NEWLINE EnumMember* "end enum" NEWLINE
 EnumMember      ::= Identifier ["=" ["+" | "-"] NumberLiteral] NEWLINE
 
 UnionDecl       ::= ["public"] "union" Identifier NEWLINE UnionVariant+ "end union" NEWLINE

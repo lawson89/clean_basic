@@ -386,7 +386,7 @@ public:
                     if (fa->fieldName == "append") {
                         const TypeId recvTid = inferExprType(arena, fa->target, symbols, scope, moduleId);
                         if (recvTid < arena.types.size()) {
-                            const TypeNode recvT = resolveAliasFromNode(arena, symbols, moduleId, arena.types[recvTid]);
+                            const TypeNode recvT = resolveAliasNode(arena, symbols, moduleId, recvTid);
                             if (recvT.name == "list") {
                                 setAnalyzerError(exprNode.line, exprNode.col, "'.append()' is removed; use '.push()'.");
                             }
@@ -395,7 +395,7 @@ public:
                     if (fa->fieldName == "fromHex") {
                         const TypeId recvTid = inferExprType(arena, fa->target, symbols, scope, moduleId);
                         if (recvTid < arena.types.size()) {
-                            const TypeNode recvT = resolveAliasFromNode(arena, symbols, moduleId, arena.types[recvTid]);
+                            const TypeNode recvT = resolveAliasNode(arena, symbols, moduleId, recvTid);
                             if (recvT.name == "bytes") {
                                 setAnalyzerError(exprNode.line, exprNode.col, "'.fromHex()' cannot be called on a 'bytes' instance; use 'bytes.fromHex(hex)' or 'hex.fromHex()'.");
                             }
@@ -701,11 +701,7 @@ public:
 
         if (auto* vassign = arena.getStmtMut<VarAssignment>(stmtId)) {
             ensureContainerTypesInExpr(vassign->value, scope);
-            ExprId fallibleCheckExpr = vassign->value;
-            if (vassign->compoundRhs != INVALID_ID) {
-                fallibleCheckExpr = vassign->compoundRhs;
-            }
-            checkFallibleUsage(fn, fallibleCheckExpr, scope, vassign->implicitBubble, vassign->breaksToCatch);
+            checkFallibleUsage(fn, vassign->value, scope, vassign->implicitBubble, vassign->breaksToCatch);
 
             const TypeId valType = inferExprType(arena, vassign->value, symbols, scope, moduleId);
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
@@ -768,12 +764,7 @@ public:
                 validateExprCalls(fn, vassign->target, scope, false);
             }
 
-            if (vassign->compoundRhs != INVALID_ID) {
-                validateExprCalls(fn, vassign->target, scope, false);
-                validateExprCalls(fn, vassign->compoundRhs, scope, true);
-            } else {
-                validateExprCalls(fn, vassign->value, scope, true);
-            }
+            validateExprCalls(fn, vassign->value, scope, true);
             return;
         }
 
@@ -895,7 +886,7 @@ public:
                     }
                     auto caseScope = scope;
                     if (!scase.bindingName.empty() && boundPayloadTid != INVALID_ID) {
-                        bindLocalVar(caseScope, scase.bindingName, boundPayloadTid, false, false, scase.line, scase.col);
+                        bindLocalVar(caseScope, scase.bindingName, boundPayloadTid, false, true, scase.line, scase.col);
                     }
                     analyzeBlock(fn, scase.body, caseScope);
                     for (const auto& kv : caseScope) {
@@ -1293,12 +1284,10 @@ public:
                     fsym.returnType = symbols.typeVoid;
                 }
                 fsym.fnTypeId = addFnTypeId(arena, fsym);
-                const auto existing = symbols.functions.find(fsym.key);
-                if (existing != symbols.functions.end()) {
-                    existing->second.overloads.push_back(std::move(fsym));
-                } else {
-                    symbols.functions[fsym.key] = std::move(fsym);
+                if (symbols.functions.find(fsym.key) != symbols.functions.end()) {
+                    setAnalyzerError(declNode.line, declNode.col, "Duplicate function definition '" + fdecl->name + "'.");
                 }
+                symbols.functions[fsym.key] = std::move(fsym);
             }
         }
 

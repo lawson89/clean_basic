@@ -8,7 +8,7 @@ public fn resolveAlias(arena as ast.AstArena, tid as int) as str
     return arena.types[tid]
 end fn
 
-public fn resolveAlias(arena as ast.AstArena, tid as int, fallback as str) as str
+public fn resolveAliasOr(arena as ast.AstArena, tid as int, fallback as str) as str
     if tid < 0 or tid >= arena.types.len()
         return fallback
     end if

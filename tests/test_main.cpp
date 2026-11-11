@@ -3352,7 +3352,7 @@ end fn
         CHECK(resUtf8.error.message.find("Fallible call to 'toUtf8' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 
-    SECTION("Rejects unhandled fallible iterable in for-in loops and unhandled fallible RHS in compound assignments") {
+    SECTION("Rejects unhandled fallible iterable in for-in loops and fallible calls on RHS of compound assignments") {
         const std::string unhandledFor = R"CB(
 fn loadItems() as list[str] can error
     return ["a"]
@@ -3369,20 +3369,20 @@ end fn
         CHECK(badForRes.error.kind == "AnalyzerError");
         CHECK(badForRes.error.message.find("Unhandled error") != std::string::npos);
 
-        const std::string unhandledCompound = R"CB(
+        const std::string compoundFallible = R"CB(
 fn stepOne() as int can error
     return 1
 end fn
 
-fn badCaller()
+fn badCaller() can error
     dim total = 0
     total += stepOne()
 end fn
 )CB";
-        const auto badCompRes = cb::transpileSource(unhandledCompound, "unhandledCompound.cb");
+        const auto badCompRes = cb::transpileSource(compoundFallible, "compoundFallible.cb");
         CHECK_FALSE(badCompRes.ok);
         CHECK(badCompRes.error.kind == "AnalyzerError");
-        CHECK(badCompRes.error.message.find("Unhandled error") != std::string::npos);
+        CHECK(badCompRes.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 }
 
@@ -3968,8 +3968,8 @@ end fn
         CHECK(varHover.definition->line == 2);
     }
 
-    SECTION("Analyzer rejects invalid argument count on overloaded UFCS function and LSP discovers cross-module UFCS") {
-        const std::string badOvCode = R"CB(
+    SECTION("Analyzer rejects duplicate function definitions in the same module and LSP discovers cross-module UFCS") {
+        const std::string badDupCode = R"CB(
 type TypeRegistry
     items as list[str]
 end type
@@ -3981,14 +3981,10 @@ end fn
 fn findType(byref reg as TypeRegistry, target as list[int], tag as str) as int
     return target.len()
 end fn
-
-fn bad(r as TypeRegistry) as int
-    return r.findType("a", "b", "c")
-end fn
 )CB";
-        const auto badOv = cb::checkSource(badOvCode, "bad_ov.cb");
-        CHECK_FALSE(badOv.ok);
-        CHECK(badOv.error.message.find("Too many arguments in call to 'findType'") != std::string::npos);
+        const auto badDup = cb::checkSource(badDupCode, "bad_dup.cb");
+        CHECK_FALSE(badDup.ok);
+        CHECK(badDup.error.message.find("Duplicate function definition 'findType'.") != std::string::npos);
 
         // Verify LSP dot-completion on 'arena' in analyzer.cb discovers 'resolveAlias' from imported symbols.cb
         cb::LspServerState lspState{};
@@ -4559,7 +4555,7 @@ end fn
         CHECK(fromHexSig->paramLabels[0] == "hex as str");
     }
 
-    SECTION("Zero-copy const auto& union select case binding, pre-cached built-in receiver methods, and Analyzer call-graph edges") {
+    SECTION("Zero-copy const auto& union select case binding, const enforcement, pre-cached built-in receiver methods, and Analyzer call-graph edges") {
         const std::string unionSelectSrc = R"CB(
 type Payload
     count as int
@@ -4579,8 +4575,9 @@ fn inspectEvent(ev as Event) as int
         case Event.readOnly as ro
             return ro.count
         case Event.mutated as m
-            bump(m)
-            return m.count
+            dim copy = m
+            bump(copy)
+            return copy.count
     end select
     return 0
 end fn
@@ -4604,6 +4601,48 @@ end fn
         REQUIRE(tpRes.ok);
         CHECK(tpRes.cppCode.find("const auto& _sel_1 = ev;") != std::string::npos);
         CHECK(tpRes.cppCode.find("const auto& ro = std::get<0>(_sel_1._data);") != std::string::npos);
-        CHECK(tpRes.cppCode.find("auto m = std::get<1>(_sel_1._data);") != std::string::npos);
+        CHECK(tpRes.cppCode.find("const auto& m = std::get<1>(_sel_1._data);") != std::string::npos);
+
+        const std::string badReassignUnionBinding = R"CB(
+union Val
+    num as int
+end union
+
+fn bad(v as Val) as int
+    select case v
+        case Val.num as n
+            n = 10
+            return n
+    end select
+    return 0
+end fn
+)CB";
+        const auto badReassignCheck = cb::checkSource(badReassignUnionBinding, "bad_union_reassign.cb");
+        CHECK_FALSE(badReassignCheck.ok);
+        CHECK(badReassignCheck.error.message.find("Cannot reassign const variable 'n'") != std::string::npos);
+
+        const std::string badByrefUnionBinding = R"CB(
+type Payload
+    count as int
+end type
+
+union Event
+    item as Payload
+end union
+
+fn bump(byref p as Payload)
+    p.count += 1
+end fn
+
+fn bad(ev as Event)
+    select case ev
+        case Event.item as p
+            bump(p)
+    end select
+end fn
+)CB";
+        const auto badByrefCheck = cb::checkSource(badByrefUnionBinding, "bad_union_byref.cb");
+        CHECK_FALSE(badByrefCheck.ok);
+        CHECK(badByrefCheck.error.message.find("Cannot pass const variable 'p' to byref parameter 'p'.") != std::string::npos);
     }
 }
