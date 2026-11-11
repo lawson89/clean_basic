@@ -48,10 +48,10 @@ inline std::string percentDecodeUriPath(std::string_view raw) {
     size_t i = 0;
     while (i < raw.size()) {
         if (raw[i] == '%' && i + 2 < raw.size()) {
-            const auto hi = jsonHexDigitValue(raw[i + 1]);
-            const auto lo = jsonHexDigitValue(raw[i + 2]);
-            if (hi.has_value() && lo.has_value()) {
-                const uint32_t byteVal = (hi.value() << 4) | lo.value();
+            const int hi = cbHexDigitValue(raw[i + 1]);
+            const int lo = cbHexDigitValue(raw[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                const uint32_t byteVal = static_cast<uint32_t>((hi << 4) | lo);
                 out.push_back(static_cast<char>(byteVal));
                 i += 3;
                 continue;
@@ -116,13 +116,7 @@ inline std::string readDocumentText(const LspServerState& state, std::string_vie
     if (memOpt.has_value()) {
         return memOpt.value();
     }
-    std::ifstream in(filePath);
-    if (!in.is_open()) {
-        return "";
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
+    return readFileToString(filePath).value_or("");
 }
 
 inline LspDocumentSnapshot makeSnapshotFromCheckResult(CheckSourceResult&& checkRes) {

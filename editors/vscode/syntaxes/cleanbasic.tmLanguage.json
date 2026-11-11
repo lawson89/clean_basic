@@ -86,7 +86,7 @@
           }
         },
         {
-          "match": "\\b(type|alias|enum)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "match": "\\b(type|alias|enum|union)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
           "captures": {
             "1": { "name": "keyword.declaration.type.cleanbasic" },
             "2": { "name": "entity.name.type.cleanbasic" }
@@ -126,11 +126,11 @@
       "patterns": [
         {
           "name": "support.function.builtin.cleanbasic",
-          "match": "\\b(?:print|error)(?=\\s*\\()"
+          "match": "\\b(?:print|error|assert)(?=\\s*\\()"
         },
         {
           "name": "support.function.builtin.method.cleanbasic",
-          "match": "\\.(?:len|toStr|toInt|toFloat|push|pop|clear|has|remove|slice|sliceFrom|toUtf8|toBytes|toHex|fromHex|readU16Le|readU16Be|readU32Le|readU32Be|readU64Le|readU64Be|writeU16Le|writeU16Be|writeU32Le|writeU32Be|writeU64Le|writeU64Be)(?=\\s*\\()"
+          "match": "\\.(?:len|toStr|toInt|toFloat|push|pop|clear|get|has|remove|keys|contains|sort|removeAt|slice|sliceFrom|byteAt|toUtf8|toBytes|toHex|fromHex|bitAnd|bitOr|bitXor|bitNot|shl|shr|kind|readU16Le|readU16Be|readU32Le|readU32Be|readU64Le|readU64Be|writeU16Le|writeU16Be|writeU32Le|writeU32Be|writeU64Le|writeU64Be)(?=\\s*\\()"
         }
       ]
     },

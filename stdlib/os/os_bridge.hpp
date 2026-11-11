@@ -23,6 +23,68 @@
 #include <mach-o/dyld.h>
 #endif
 
+inline std::string cbOsEnv(const std::string& name) {
+    if (name.empty()) {
+        return "";
+    }
+    const char* val = std::getenv(name.c_str());
+    if (val != nullptr) {
+        return std::string(val);
+    }
+    return "";
+}
+
+inline bool cbOsHasEnv(const std::string& name) {
+    if (name.empty()) {
+        return false;
+    }
+    return std::getenv(name.c_str()) != nullptr;
+}
+
+inline std::string cbOsPlatform() {
+#if defined(_WIN32)
+    return "windows";
+#elif defined(__APPLE__)
+    return "macos";
+#else
+    return "linux";
+#endif
+}
+
+inline std::string cbOsExePath() {
+#if defined(_WIN32)
+    std::array<char, 4096> buf{};
+    const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (len > 0 && len < buf.size()) {
+        std::error_code ec;
+        const std::filesystem::path p(std::string(buf.data(), static_cast<size_t>(len)));
+        return p.generic_string();
+    }
+    return "";
+#elif defined(__APPLE__)
+    std::array<char, 4096> buf{};
+    uint32_t size = static_cast<uint32_t>(buf.size());
+    if (_NSGetExecutablePath(buf.data(), &size) == 0) {
+        std::error_code ec;
+        const std::filesystem::path p = std::filesystem::canonical(std::filesystem::path(buf.data()), ec);
+        if (!ec) {
+            return p.generic_string();
+        }
+        return std::filesystem::path(buf.data()).generic_string();
+    }
+    return "";
+#else
+    std::error_code ec;
+    const std::filesystem::path exeP = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !exeP.empty()) {
+        return exeP.generic_string();
+    }
+    return "";
+#endif
+}
+
+#ifdef CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
+
 inline std::vector<std::string> cbOsArgs() {
     return cbRuntimeArgs();
 }
@@ -70,23 +132,6 @@ inline std::string cbOsReadAll() {
     return ss.str();
 }
 
-inline std::string cbOsEnv(const std::string& name) {
-    if (name.empty()) {
-        return "";
-    }
-    if (std::getenv(name.c_str()) != nullptr) {
-        return std::string(std::getenv(name.c_str()));
-    }
-    return "";
-}
-
-inline bool cbOsHasEnv(const std::string& name) {
-    if (name.empty()) {
-        return false;
-    }
-    return std::getenv(name.c_str()) != nullptr;
-}
-
 inline std::tuple<std::string, CbError> cbOsCwd() {
     std::error_code ec;
     const std::filesystem::path p = std::filesystem::current_path(ec);
@@ -106,48 +151,6 @@ inline CbError cbOsChdir(const std::string& path) {
         return CbError{"Failed to change directory to '" + path + "': " + ec.message(), 500};
     }
     return CbError{"", 0};
-}
-
-inline std::string cbOsPlatform() {
-#if defined(_WIN32)
-    return "windows";
-#elif defined(__APPLE__)
-    return "macos";
-#else
-    return "linux";
-#endif
-}
-
-inline std::string cbOsExePath() {
-#if defined(_WIN32)
-    std::array<char, 4096> buf{};
-    const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
-    if (len > 0 && len < buf.size()) {
-        std::error_code ec;
-        const std::filesystem::path p(std::string(buf.data(), static_cast<size_t>(len)));
-        return p.generic_string();
-    }
-    return "";
-#elif defined(__APPLE__)
-    std::array<char, 4096> buf{};
-    uint32_t size = static_cast<uint32_t>(buf.size());
-    if (_NSGetExecutablePath(buf.data(), &size) == 0) {
-        std::error_code ec;
-        const std::filesystem::path p = std::filesystem::canonical(std::filesystem::path(buf.data()), ec);
-        if (!ec) {
-            return p.generic_string();
-        }
-        return std::filesystem::path(buf.data()).generic_string();
-    }
-    return "";
-#else
-    std::error_code ec;
-    const std::filesystem::path exeP = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (!ec && !exeP.empty()) {
-        return exeP.generic_string();
-    }
-    return "";
-#endif
 }
 
 inline int64_t cbOsClock() {
@@ -231,5 +234,7 @@ inline std::tuple<std::string, CbError> cbOsExec(const std::string& cmd) {
 inline void cbOsExit(int64_t code) {
     std::exit(static_cast<int>(code));
 }
+
+#endif // CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 
 #endif // CLEANBASIC_STDLIB_OS_BRIDGE_HPP

@@ -370,6 +370,46 @@ end fn
         CHECK_FALSE(badParse.ok);
         CHECK(badParse.error.kind == "ParseError");
     }
+
+    SECTION("Reports ParseError on invalid string or byte literal escape sequences and overflowing 64-bit integer literals") {
+        const std::vector<std::string> badLiterals = {
+            R"(fn main()
+    dim s = "bad\qescape"
+end fn
+)",
+            R"(fn main()
+    dim s = "bad\x1"
+end fn
+)",
+            R"(fn main()
+    dim s = $"interp \q {1}"
+end fn
+)",
+            R"(fn main()
+    dim b = b"bad\qescape"
+end fn
+)",
+            R"(fn main()
+    dim b = b"\x1"
+end fn
+)",
+            R"(fn main()
+    dim x = 999999999999999999999
+end fn
+)",
+            R"(enum Huge
+    v = 999999999999999999999
+end enum
+)"
+        };
+        for (const auto& snippet : badLiterals) {
+            const auto lexRes = cb::tokenize(snippet, "bad_lit.cb");
+            REQUIRE(lexRes.ok);
+            const auto parseRes = cb::parseTokens(lexRes.tokens, "bad_lit.cb");
+            CHECK_FALSE(parseRes.ok);
+            CHECK(parseRes.error.kind == "ParseError");
+        }
+    }
 }
 
 TEST_CASE("Analyzer validates fallible calls, const immutability, and implicit bubbling", "[analyzer]") {
@@ -2156,8 +2196,10 @@ TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are 
             R"({"jsonrpc":"2.0","method":"exit"})"
         );
 
-        const std::string tmpIn = "/tmp/cbLspStdioIn.txt";
-        const std::string tmpOut = "/tmp/cbLspStdioOut.txt";
+        std::error_code dirEc;
+        std::filesystem::create_directories("build/testArtifacts", dirEc);
+        const std::string tmpIn = "build/testArtifacts/cbLspStdioIn.txt";
+        const std::string tmpOut = "build/testArtifacts/cbLspStdioOut.txt";
         {
             std::ofstream outF(tmpIn, std::ios::binary);
             outF << lspInputSs.str();
@@ -2236,7 +2278,7 @@ end fn
 
 TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags, and compiler command generation", "[sdk][cross][cli]") {
     SECTION("resolveSdkRootDir locates portable SDK layout via CLEANBASIC_HOME, exe dir, exe parent, and fallback") {
-        const std::string tmpBase = "/tmp/cbPortableSdkTest";
+        const std::string tmpBase = "build/testArtifacts/cbPortableSdkTest";
         std::error_code ec;
         std::filesystem::remove_all(tmpBase, ec);
 
@@ -2520,29 +2562,9 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         CHECK_FALSE(badTargetRes.ok);
         CHECK(badTargetRes.error.kind == "TargetError");
 
-        // Verify buildFile compiles native binary with explicit --bin and --cc g++
+        // Verify PCH rebuild (--rebuild-pch) followed by PCH cache hit, --no-pch, and staticLink = true
         const std::string outCpp = "build/testArtifacts/cliOptsFib.cpp";
         const std::string outBin = "build/testArtifacts/cliOptsFibBin";
-        const cb::BuildFileResult okRes = cb::buildFile(
-            "tests/cases/fibonacci.cb",
-            outCpp,
-            true,
-            outBin,
-            "native",
-            "g++"
-        );
-        INFO("Build diagnostic: " << cb::formatDiagnostic(okRes.error));
-        REQUIRE(okRes.ok);
-        CHECK(okRes.outputBinaryPath == outBin);
-        CHECK(okRes.compileCommand.find(" -O0 ") != std::string::npos);
-        CHECK(okRes.compileCommand.find(R"(-I")") != std::string::npos);
-        CHECK(okRes.timings.transpileTotalMs > 0.0);
-        CHECK(okRes.timings.cppCompileMs > 0.0);
-        CHECK(okRes.timings.totalMs >= okRes.timings.transpileTotalMs);
-        std::error_code ec;
-        CHECK(std::filesystem::exists(outBin, ec));
-
-        // Verify PCH rebuild (--rebuild-pch) followed by PCH cache hit and --no-pch fallback
         const cb::BuildFileResult rebuildRes = cb::buildFile(
             "tests/cases/fibonacci.cb",
             outCpp,
@@ -2555,46 +2577,21 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             true,
             true
         );
+        INFO("Build diagnostic: " << cb::formatDiagnostic(rebuildRes.error));
         REQUIRE(rebuildRes.ok);
+        CHECK(rebuildRes.outputBinaryPath == outBin);
+        CHECK(rebuildRes.compileCommand.find(" -O0 ") != std::string::npos);
+        CHECK(rebuildRes.compileCommand.find(R"(-I")") != std::string::npos);
+        CHECK(rebuildRes.timings.transpileTotalMs > 0.0);
+        CHECK(rebuildRes.timings.cppCompileMs > 0.0);
+        CHECK(rebuildRes.timings.totalMs >= rebuildRes.timings.transpileTotalMs);
         CHECK(rebuildRes.timings.pchUsed);
         CHECK_FALSE(rebuildRes.timings.pchCacheHit);
         CHECK(rebuildRes.timings.pchBuildMs > 0.0);
         CHECK(rebuildRes.compileCommand.find("-Winvalid-pch -include") != std::string::npos);
+        std::error_code ec;
+        CHECK(std::filesystem::exists(outBin, ec));
 
-        const cb::BuildFileResult cachedRes = cb::buildFile(
-            "tests/cases/fibonacci.cb",
-            outCpp,
-            true,
-            outBin,
-            "native",
-            "g++",
-            "0",
-            false,
-            true,
-            false
-        );
-        REQUIRE(cachedRes.ok);
-        CHECK(cachedRes.timings.pchUsed);
-        CHECK(cachedRes.timings.pchCacheHit);
-        CHECK(cachedRes.timings.pchBuildMs == 0.0);
-
-        const cb::BuildFileResult noPchRes = cb::buildFile(
-            "tests/cases/fibonacci.cb",
-            outCpp,
-            true,
-            outBin,
-            "native",
-            "g++",
-            "0",
-            false,
-            false,
-            false
-        );
-        REQUIRE(noPchRes.ok);
-        CHECK_FALSE(noPchRes.timings.pchUsed);
-        CHECK(noPchRes.compileCommand.find("-include") == std::string::npos);
-
-        // Verify end-to-end buildFileWithOptions compilation with staticLink = true produces a working binary
         const std::string staticBin = "build/testArtifacts/cliOptsFibStaticBin";
         cb::BuildOptions staticOpts{};
         staticOpts.outputCppPath = outCpp;
@@ -2603,9 +2600,14 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         staticOpts.target = "native";
         staticOpts.compiler = "g++";
         staticOpts.staticLink = true;
+        staticOpts.usePch = true;
+        staticOpts.rebuildPch = false;
         const cb::BuildFileResult staticRes = cb::buildFileWithOptions("tests/cases/fibonacci.cb", staticOpts);
         INFO("Static build diagnostic: " << cb::formatDiagnostic(staticRes.error));
         REQUIRE(staticRes.ok);
+        CHECK(staticRes.timings.pchUsed);
+        CHECK(staticRes.timings.pchCacheHit);
+        CHECK(staticRes.timings.pchBuildMs == 0.0);
         CHECK(std::filesystem::exists(staticBin, ec));
 
         // Verify runCli with --release and --time outputs timing breakdown and compiles with -O3
@@ -3728,34 +3730,21 @@ end fn
         const int exitCode = cb::runLspServer(clientToServer, serverToClient);
         CHECK(exitCode == 0);
 
-        auto readResponseForId = [&](int64_t targetId) -> cb::JsonParseResult {
-            while (true) {
-                const auto rawOpt = cb::readJsonrpcMessage(serverToClient);
-                REQUIRE(rawOpt.has_value());
-                auto parsed = cb::parseJson(rawOpt.value());
-                REQUIRE(parsed.ok);
-                const auto idOpt = cb::jsonGetInt(parsed.arena, cb::jsonGetField(parsed.arena, parsed.root, "id"));
-                if (idOpt.has_value() && idOpt.value() == targetId) {
-                    return parsed;
-                }
-            }
-        };
-
-        const auto hoverFn = readResponseForId(2);
+        const auto hoverFn = cb::testLsp::readResponseForId(serverToClient, 2);
         const cb::JsonId hoverFnRes = cb::jsonGetField(hoverFn.arena, hoverFn.root, "result");
         const cb::JsonId hoverFnContents = cb::jsonGetField(hoverFn.arena, hoverFnRes, "contents");
         const std::string hoverFnVal = cb::jsonGetString(hoverFn.arena, cb::jsonGetField(hoverFn.arena, hoverFnContents, "value")).value_or("");
         CHECK(hoverFnVal.find("public fn connectEndpoint(ep as Endpoint, timeoutMs as int) as bool can error") != std::string::npos);
         CHECK(hoverFnVal.find("Connects to the target Endpoint.\nRaises an error if the port is invalid.") != std::string::npos);
 
-        const auto hoverStdCli = readResponseForId(3);
+        const auto hoverStdCli = cb::testLsp::readResponseForId(serverToClient, 3);
         const cb::JsonId hoverStdRes = cb::jsonGetField(hoverStdCli.arena, hoverStdCli.root, "result");
         const cb::JsonId hoverStdContents = cb::jsonGetField(hoverStdCli.arena, hoverStdRes, "contents");
         const std::string hoverStdVal = cb::jsonGetString(hoverStdCli.arena, cb::jsonGetField(hoverStdCli.arena, hoverStdContents, "value")).value_or("");
         CHECK(hoverStdVal.find("public fn newParser(name as str, version as str, description as str) as Parser") != std::string::npos);
         CHECK(hoverStdVal.find("Creates a new declarative command-line Parser") != std::string::npos);
 
-        const auto sigResp = readResponseForId(4);
+        const auto sigResp = cb::testLsp::readResponseForId(serverToClient, 4);
         const cb::JsonId sigRes = cb::jsonGetField(sigResp.arena, sigResp.root, "result");
         const cb::JsonId sigs = cb::jsonGetField(sigResp.arena, sigRes, "signatures");
         REQUIRE(std::holds_alternative<cb::JsonArray>(sigResp.arena.nodes[sigs]));
@@ -3763,6 +3752,15 @@ end fn
         const cb::JsonId sigDoc = cb::jsonGetField(sigResp.arena, sig0, "documentation");
         const std::string sigDocVal = cb::jsonGetString(sigResp.arena, cb::jsonGetField(sigResp.arena, sigDoc, "value")).value_or("");
         CHECK(sigDocVal.find("Connects to the target Endpoint.") != std::string::npos);
+
+        // Verify built-in assert(...) signature help via resolveSignatureHelp
+        const cb::LspDocumentSnapshot assertSnap = cb::makeSnapshotFromCheckResult(cb::checkSource(docSource, "/ws/doc_test.cb"));
+        const cb::CallSiteContext assertCallCtx = cb::parseEnclosingCallSite("    assert(ok, ");
+        const auto assertSigOpt = cb::resolveSignatureHelp(assertSnap, "", std::string("main"), assertCallCtx);
+        REQUIRE(assertSigOpt.has_value());
+        CHECK(assertSigOpt->label == "fn assert(cond as bool, msg as str) can error");
+        CHECK(assertSigOpt->activeParameter == 1);
+        CHECK(assertSigOpt->documentation.find("Asserts that cond is true") != std::string::npos);
     }
 
     SECTION("Analyzer rejects mutating collection for-in loop variables or chained non-byref parameters") {

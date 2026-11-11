@@ -1236,14 +1236,11 @@ public:
 
         if (forS->iterable != INVALID_ID) {
             std::string iterCpp = emitExpr(forS->iterable, scope);
-            if (const auto* call = arena.getExpr<FuncCall>(forS->iterable)) {
-                const auto fnOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-                if (fnOpt.has_value() && fnOpt->isFallible) {
-                    const auto [valTmp, errVar] = nextValErrTemps();
-                    emitLine("auto [" + valTmp + ", " + errVar + "] = " + iterCpp + ";");
-                    emitErrorCheck(stmtNode.line, fn, errVar, forS->breaksToCatch);
-                    iterCpp = valTmp;
-                }
+            if (forS->implicitBubble || forS->breaksToCatch) {
+                const auto [valTmp, errVar] = nextValErrTemps();
+                emitLine("auto [" + valTmp + ", " + errVar + "] = " + iterCpp + ";");
+                emitErrorCheck(stmtNode.line, fn, errVar, forS->breaksToCatch);
+                iterCpp = valTmp;
             }
             const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, currentModuleId);
             const TypeNode iterType = resolveAliasNode(arena, symbols, currentModuleId, iterTid);
@@ -1350,16 +1347,9 @@ public:
     }
 
     if (const auto* whileS = arena.getStmt<WhileStmt>(stmtId)) {
-        std::optional<FnSymbol> fallibleCondFn = std::nullopt;
-        if (const auto* call = arena.getExpr<FuncCall>(whileS->condition)) {
-            const auto fnOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-            if (fnOpt.has_value() && fnOpt->isFallible) {
-                fallibleCondFn = fnOpt;
-            }
-        }
         auto whileScope = scope;
         auto whileDecls = declaredVars;
-        if (fallibleCondFn.has_value()) {
+        if (whileS->implicitBubble || whileS->breaksToCatch) {
             emitLine("while (true) {");
             indentLevel += 1;
             const std::string callCpp = emitExpr(whileS->condition, whileScope);

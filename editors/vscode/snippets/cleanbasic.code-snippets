@@ -81,7 +81,7 @@
       "\t\t",
       "end select"
     ],
-    "description": "Select case block (int or bool)"
+    "description": "Select case block (int, bool, str, enum, or union)"
   },
   "Try Catch Block": {
     "prefix": "try",

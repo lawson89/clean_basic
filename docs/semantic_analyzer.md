@@ -127,22 +127,30 @@ partition "Pass 1a: Module Imports, Aliases & Type Headers" {
      - Register AliasSymbol in symbols.aliases[key]
   3. TypeDecl:
      - Register TypeSymbol shell in symbols.types[key]
-     - Pre-register canonical TypeNode in arena.types;
+     - Pre-register canonical TypeNode in arena.types
   4. EnumDecl:
      - Register EnumSymbol shell in symbols.enums[key]
+     - Pre-register canonical TypeNode in arena.types
+  5. UnionDecl:
+     - Register UnionSymbol shell in symbols.unions[key]
      - Pre-register canonical TypeNode in arena.types;
 }
 
-partition "Pass 1b: Struct Fields & Function Signatures" {
+partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
   :Iterate over program.declarations:
   1. TypeDecl:
      - Resolve each field's TypeId through resolveAlias()
      - Populate TypeSymbol::fields[fieldName]
-  2. FnDecl:
-     - Resolve parameter TypeIds and returnType through resolveAlias()
-     - Register FnSymbol in symbols.functions[key];
+  2. UnionDecl:
+     - Resolve each variant's TypeId through resolveAlias()
+     - Populate UnionSymbol::variants and variantIndex
   3. EnumDecl:
-     - Populate EnumSymbol::members
+     - Populate EnumSymbol::members and memberValues
+  4. ConstDecl:
+     - Infer or resolve constant TypeId and register ConstSymbol in symbols.constants[key]
+  5. FnDecl:
+     - Resolve parameter TypeIds and returnType through resolveAlias()
+     - Register FnSymbol (and overloads) in symbols.functions[key];
 }
 
 partition "Pass 2: Function Body & Statement Validation" {
@@ -206,24 +214,33 @@ partition "UFCS Resolution (target is a value expression)" {
   :Infer receiver type: recvTid = inferExprType(target)
   and resolve alias to canonical recvTypeKey;
 
-  :UFCS Step 1 (Current Module):
+  :UFCS Tier 0 (Built-in Receiver Methods):
+  Check getBuiltinReceiverMethods(recvTid) for matching method name & arg count;
+  if (Matched built-in receiver method?) then (yes)
+    :Return built-in FnSymbol;
+    stop
+  endif
+
+  :UFCS Tier 1 (Current Module):
   Look up symbolKey(currentModuleId, name);
   if (Found in current module AND first param matches recvTypeKey?) then (yes)
     :Return FnSymbol (private or public allowed);
     stop
   endif
 
-  :UFCS Step 2 (Receiver's Defining Module):
+  :UFCS Tier 2 (Receiver's Defining Module):
   Extract defining module recvModId from recvTypeKey
   (or map "str" -> "std/str" via the auto-included std/str prelude);
-  if (recvModId != "" AND symbolKey(recvModId, name) exists?) then (yes)
-    if (Function isPub AND first param matches recvTypeKey?) then (yes)
-      :Return FnSymbol;
-      stop
-    else (no)
-      :Return std::nullopt (private or incompatible receiver);
-      stop
-    endif
+  if (recvModId != "" AND symbolKey(recvModId, name) isPub AND first param matches recvTypeKey?) then (yes)
+    :Return FnSymbol;
+    stop
+  endif
+
+  :UFCS Tier 3 (Directly Imported Modules):
+  Search modules imported by currentModuleId for a unique public fn(recvTypeKey, ...);
+  if (Unique public match found across imported modules?) then (yes)
+    :Return FnSymbol;
+    stop
   endif
 }
 
@@ -247,7 +264,7 @@ CleanBasic uses pure value semantics for struct instantiation: `Player(name="Ali
 
 ### 6.1 Local Type Inference (`cb::inferExprType`)
 When a variable is declared with `dim x = <expr>` or `const x = <expr>` without an explicit `as Type` annotation, `analyzeStmt()` infers the type of `<expr>` via `inferExprType()`:
-* **Literals:** `NumberLiteral` -> `int` or `float` (if `raw` contains `'.'`); `StringLiteral` -> `str`; `BoolLiteral` -> `bool`; `ListLiteral` -> `list[infer(elem[0])]` (defaults to `list[int]` if empty); `DictLiteral` -> `dict[infer(key[0]), infer(val[0])]` (defaults to `dict[str, int]` if empty).
+* **Literals:** `NumberLiteral` -> `int` or `float` (if `raw` contains `'.'`); `StringLiteral` -> `str`; `BytesLiteral` -> `bytes`; `BoolLiteral` -> `bool`; `ListLiteral` -> `list[infer(elem[0])]` (untyped empty `[]` literals are rejected by `validateEmptyContainerInference` and require an explicit type annotation such as `dim xs as list[int] = []`); `DictLiteral` -> `dict[infer(key[0]), infer(val[0])]` (untyped empty `{}` literals similarly require an explicit type annotation).
 * **Variables & Accessors:** `Identifier` -> looks up `scope[name].typeId`; `FieldAccess` -> looks up `TypeSymbol::fields[fieldName]`; `IndexAccess` -> unwraps element type `T` from `list[T]` or value type `V` from `dict[K, V]`.
 * **Calls:** `FuncCall` -> returns resolved `FnSymbol::returnType` or constructed `TypeSymbol` type.
 * **Operators:**

@@ -2,11 +2,11 @@
 
 CleanBasic is a compiled, statically typed language combining the readable, English-like syntax of 90s Basic with the memory-safe, bare-metal execution of modern C++17.
 
-The transpiler, language server, and test suite are implemented in a strict, data-oriented subset of C++17 (`-std=c++17 -fno-exceptions -fno-rtti -Wall -Wextra -Werror`).
+The transpiler, language server, and test suite are built with modern C++17 (`-std=c++17 -fno-rtti -Wall -Wextra -Werror`) and emit pure procedural, exception-free C++17 target code.
 
 ## Building with CMake
 
-Configure and build both the `cleanbasic` transpiler/LSP CLI and the `cleanbasicTests` test executor:
+Configure and build both the `cleanbasic` transpiler/LSP CLI and the `cleanbasic_tests` test executor:
 
 ```bash
 cmake -B build
@@ -15,7 +15,7 @@ cmake --build build
 
 This produces two binaries in the `build/` directory:
 - `build/cleanbasic`: The CleanBasic transpiler and Language Server (`cleanbasic lsp`) CLI executable.
-- `build/cleanbasicTests`: The CleanBasic data-oriented test executor.
+- `build/cleanbasic_tests`: The CleanBasic Catch2 test executor.
 
 ## Running the Transpiler
 
@@ -69,7 +69,7 @@ Compile them into `build/` with:
 Run the test executor directly or via CTest:
 
 ```bash
-./build/cleanbasicTests
+./build/cleanbasic_tests
 # or
 ctest --test-dir build --output-on-failure
 ```

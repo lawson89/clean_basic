@@ -5,6 +5,19 @@
 
 namespace cb {
 
+inline int cbHexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
 constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#ifndef CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 #define CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 #ifndef NOMINMAX

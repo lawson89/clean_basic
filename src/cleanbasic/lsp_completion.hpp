@@ -521,6 +521,16 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
             }
             return SignatureHelpData{"fn error(msg as str, code as int) as err", doc, {"msg as str", "code as int"}, activeIdx};
         }
+        if (callCtx.calleeName == "assert") {
+            std::string doc;
+            const auto docOpt = formatBuiltinHoverMarkdown("assert");
+            if (docOpt.has_value()) doc = docOpt.value();
+            uint32_t activeIdx = callCtx.activeParam;
+            if (activeIdx > 1) {
+                activeIdx = 1;
+            }
+            return SignatureHelpData{"fn assert(cond as bool, msg as str) can error", doc, {"cond as bool", "msg as str"}, activeIdx};
+        }
         if (callCtx.calleeName == "print") return SignatureHelpData{"fn print(values...)", "", {"values..."}, 0};
     } else {
         // Built-in receiver methods

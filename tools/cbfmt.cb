@@ -392,7 +392,11 @@ end fn
 '' Collects all .cb files from a file or directory path.
 fn collectCbFiles(targetPath as str) as list[str] can error
     if fs.isFile(targetPath)
-        return [targetPath]
+        if fs.ext(targetPath) == ".cb"
+            return [targetPath]
+        end if
+        dim empty as list[str] = []
+        return empty
     end if
 
     dim outFiles as list[str] = []

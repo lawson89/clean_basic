@@ -12,26 +12,34 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
 
 ## 1. Structure of Emitted Unity `build.cpp` (`cb::emitProgram`)
 
-`cb::emitProgram(arena, symbols, program)` generates a single self-contained C++17 file in six ordered sections:
+`cb::emitProgram(arena, symbols, program)` generates a single self-contained C++17 file in seven ordered stages:
 
 1. **Linker Flags Comment Header** (when `import link "..."` is used):
    `// CleanBasic Linker Flags: -l<lib1> -l<lib2>`
 2. **C++17 Runtime Preamble (`CPP_RUNTIME_PREAMBLE`)**:
-   Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`) plus `CbError`, `cbToStr`, `cbHasError`, `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`.
+   Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`, `<variant>`, `<algorithm>`, `<type_traits>`) plus `CbError`, `cbToStr`, `cbHasError`, `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`.
 3. **External C/C++ Headers** (from `import header "..."`):
-   Deduplicated `#include "<header>"` directives.
-4. **Struct Forward Declarations, Type Aliases & Enums**:
-   * `struct <cppName>;` for every non-`extern` `TypeDecl`.
-   * `using <cppName> = <mappedTargetType>;` for every `AliasDecl`.
+   Deduplicated `#include "<header>"` directives for reachable modules.
+4. **Struct & Union Forward Declarations, Enums, Type Aliases & Early Module Constants**:
+   * `struct <cppName>;` for every non-`extern` `TypeDecl` and `UnionDecl`.
    * `enum class <cppName> : int64_t { ... };` definitions and stringifier helpers for every `EnumDecl`.
-5. **POD Struct Definitions & Function Forward Declarations**:
-   * Full `struct <cppName> { <Type> <field>{}; ... };` definitions with zero-initialized default member initializers `{}`.
-   * Forward declarations `<retType> <cppFnName>(<params...>);` for every non-`extern` function, eliminating declaration-order constraints across modules.
-6. **Function Definitions & Entry Point Wrapper**:
-   * Full function bodies for all non-`extern` functions across all modules.
-   * If a root-module `fn main()` exists (which is emitted as `cbMain()`), the emitter appends the C++ entry point:
+   * `using <cppName> = <mappedTargetType>;` for every `AliasDecl`.
+   * Early module constants (`ConstDecl` of primitive/enum/container types) so struct default field initializers can reference them.
+5. **Topological POD Struct & Tagged Union Definitions + Struct Constants**:
+   * Full `struct <cppName> { <Type> <field>{}; ... };` and tagged union `std::variant` wrapper definitions ordered topologically by value-type dependencies.
+   * Struct/union-typed module constants (`ConstDecl`) once all composite types are complete.
+6. **Function Forward Declarations**:
+   * Forward declarations `<retType> <cppFnName>(<params...>);` for all reachable non-`extern` functions across modules.
+7. **Function Definitions & Entry Point Wrapper**:
+   * Full function bodies for all reachable non-`extern` functions across modules.
+   * If a root-module `fn main()` exists (emitted as `cbMain()`), the emitter appends the C++ entry point wrapper populating `cbRuntimeArgs()`:
      ```cpp
-     int main() {
+     int main(int argc, char** argv) {
+         auto& _args = cbRuntimeArgs();
+         _args.clear();
+         for (int _i = 0; _i < argc; ++_i) {
+             _args.push_back(std::string(argv[_i]));
+         }
          cbMain();
          return 0;
      }
@@ -85,7 +93,7 @@ template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }
 
 * **`CbError`**: Represents the built-in `err` type. An empty message (`msg == ""`) with `code == 0` denotes success (`cbHasError(err) == false`).
 * **`cbToStr`**: Overloaded helper used by the `&` string concatenation operator, `print(...)` (for `bool` and `err`), and `error(...)` message formatting.
-* **`CbDeferTask<F>` & `cbDefer(F)`**: Zero-overhead RAII scope-exit wrapper that invokes the captured lambda in its destructor `~_DeferTask()` when the enclosing C++ scope exits.
+* **`CbDeferTask<F>` & `cbDefer(F)`**: Zero-overhead RAII scope-exit wrapper that invokes the captured lambda in its destructor `~CbDeferTask()` when the enclosing C++ scope exits.
 
 ---
 

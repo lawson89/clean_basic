@@ -139,14 +139,14 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
     return entries
 end fn
 
-'' Recursively collects all .cb files within targetPath.
+'' Collects all .cb files from a file or directory path.
 fn collectCbFiles(targetPath as str) as list[str] can error
     if fs.isFile(targetPath)
-        dim res as list[str] = []
         if fs.ext(targetPath) == ".cb"
-            res.push(targetPath)
+            return [targetPath]
         end if
-        return res
+        dim empty as list[str] = []
+        return empty
     end if
 
     dim outFiles as list[str] = []

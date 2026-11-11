@@ -4,6 +4,7 @@
 #include "src/cleanbasic/ast.hpp"
 #include "src/cleanbasic/diagnostics.hpp"
 #include "src/cleanbasic/lexer.hpp"
+#include "src/cleanbasic/runtime_preamble.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +32,10 @@ inline std::string stripQuotes(std::string_view raw) {
     return std::string(raw);
 }
 
-inline int64_t parseIntegerLiteral(std::string_view raw) {
+inline int64_t parseIntegerLiteral(std::string_view raw, bool* okOut = nullptr) {
+    if (okOut != nullptr) {
+        *okOut = true;
+    }
     std::string cleaned;
     cleaned.reserve(raw.size());
     for (char c : raw) {
@@ -39,26 +43,88 @@ inline int64_t parseIntegerLiteral(std::string_view raw) {
             cleaned.push_back(c);
         }
     }
-    if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X')) {
-        return static_cast<int64_t>(std::stoull(cleaned.substr(2), nullptr, 16));
+    try {
+        size_t idx = 0;
+        if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X')) {
+            const std::string sub = cleaned.substr(2);
+            const unsigned long long val = std::stoull(sub, &idx, 16);
+            if (idx != sub.size() && okOut != nullptr) {
+                *okOut = false;
+            }
+            return static_cast<int64_t>(val);
+        }
+        if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'b' || cleaned[1] == 'B')) {
+            const std::string sub = cleaned.substr(2);
+            const unsigned long long val = std::stoull(sub, &idx, 2);
+            if (idx != sub.size() && okOut != nullptr) {
+                *okOut = false;
+            }
+            return static_cast<int64_t>(val);
+        }
+        const long long val = std::stoll(cleaned, &idx, 10);
+        if (idx != cleaned.size() && okOut != nullptr) {
+            *okOut = false;
+        }
+        return static_cast<int64_t>(val);
+    } catch (const std::exception&) {
+        if (okOut != nullptr) {
+            *okOut = false;
+        }
+        return 0;
     }
-    if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'b' || cleaned[1] == 'B')) {
-        return static_cast<int64_t>(std::stoull(cleaned.substr(2), nullptr, 2));
-    }
-    return std::stoll(cleaned, nullptr, 10);
 }
 
-inline int hexDigitToInt(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
+inline bool validateStringLiteralEscapes(std::string_view raw, std::string* errorOut = nullptr) {
+    if (raw.size() < 2) {
+        return true;
     }
-    if (c >= 'a' && c <= 'f') {
-        return 10 + (c - 'a');
+    constexpr char backslashChar = 92;
+    constexpr char singleQuote = static_cast<char>(39);
+    size_t i = 1;
+    const size_t end = raw.size() - 1;
+    while (i < end) {
+        if (raw[i] == backslashChar) {
+            if (i + 1 >= end) {
+                if (errorOut != nullptr) {
+                    *errorOut = "Invalid escape sequence in string literal: trailing backslash.";
+                }
+                return false;
+            }
+            const char esc = raw[i + 1];
+            if (esc == 'n' || esc == 'r' || esc == 't' || esc == '0' || esc == backslashChar || esc == '"' || esc == singleQuote) {
+                i += 2;
+                continue;
+            }
+            if (esc == 'x' || esc == 'X') {
+                if (i + 3 >= end) {
+                    if (errorOut != nullptr) {
+                        *errorOut = "Invalid hexadecimal escape in string literal.";
+                    }
+                    return false;
+                }
+                const int v1 = cbHexDigitValue(raw[i + 2]);
+                const int v2 = cbHexDigitValue(raw[i + 3]);
+                if (v1 < 0 || v2 < 0) {
+                    if (errorOut != nullptr) {
+                        *errorOut = "Invalid hexadecimal escape in string literal.";
+                    }
+                    return false;
+                }
+                i += 4;
+                continue;
+            }
+            if (errorOut != nullptr) {
+                std::string msg = "Unknown escape sequence '";
+                msg.push_back(backslashChar);
+                msg.push_back(esc);
+                msg += "' in string literal.";
+                *errorOut = std::move(msg);
+            }
+            return false;
+        }
+        i += 1;
     }
-    if (c >= 'A' && c <= 'F') {
-        return 10 + (c - 'A');
-    }
-    return -1;
+    return true;
 }
 
 inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string* errorOut = nullptr) {
@@ -67,6 +133,7 @@ inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string
         return bytes;
     }
     constexpr char backslashChar = 92;
+    constexpr char singleQuote = static_cast<char>(39);
     size_t i = 2; // skip b" or B"
     size_t end = raw.size() - 1; // skip trailing "
     while (i < end) {
@@ -90,13 +157,16 @@ inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string
             } else if (esc == '"') {
                 bytes.push_back(static_cast<uint8_t>('"'));
                 i += 2;
+            } else if (esc == singleQuote) {
+                bytes.push_back(static_cast<uint8_t>(39));
+                i += 2;
             } else if (esc == 'x' || esc == 'X') {
                 if (i + 3 >= end) {
                     if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
                     return bytes;
                 }
-                const int v1 = hexDigitToInt(raw[i + 2]);
-                const int v2 = hexDigitToInt(raw[i + 3]);
+                const int v1 = cbHexDigitValue(raw[i + 2]);
+                const int v2 = cbHexDigitValue(raw[i + 3]);
                 if (v1 < 0 || v2 < 0) {
                     if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
                     return bytes;
@@ -104,8 +174,14 @@ inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string
                 bytes.push_back(static_cast<uint8_t>((v1 << 4) | v2));
                 i += 4;
             } else {
-                bytes.push_back(static_cast<uint8_t>(esc));
-                i += 2;
+                if (errorOut) {
+                    std::string msg = "Unknown escape sequence '";
+                    msg.push_back(backslashChar);
+                    msg.push_back(esc);
+                    msg += "' in byte string literal.";
+                    *errorOut = std::move(msg);
+                }
+                return bytes;
             }
         } else {
             bytes.push_back(static_cast<uint8_t>(raw[i]));
@@ -276,10 +352,22 @@ public:
 
         if (check("NUMBER")) {
             const Token numTok = match("NUMBER");
-            return arena.addExpr(numTok.line, numTok.col, NumberLiteral{numTok.value, numTok.value.find('.') != std::string::npos});
+            const bool isFloat = numTok.value.find('.') != std::string::npos;
+            if (!isFloat) {
+                bool ok = true;
+                (void)parseIntegerLiteral(numTok.value, &ok);
+                if (!ok) {
+                    setParseError(numTok, "Integer literal '" + numTok.value + "' is out of range for 64-bit integer");
+                }
+            }
+            return arena.addExpr(numTok.line, numTok.col, NumberLiteral{numTok.value, isFloat});
         }
         if (check("STRING")) {
             const Token strTok = match("STRING");
+            std::string errStr;
+            if (!validateStringLiteralEscapes(strTok.value, &errStr)) {
+                setParseError(strTok, errStr);
+            }
             return arena.addExpr(strTok.line, strTok.col, StringLiteral{stripQuotes(strTok.value)});
         }
         if (check("BYTES")) {
@@ -289,7 +377,7 @@ public:
             if (!errStr.empty()) {
                 setParseError(bTok, errStr);
             }
-            return arena.addExpr(bTok.line, bTok.col, BytesLiteral{bTok.value, std::move(decoded)});
+            return arena.addExpr(bTok.line, bTok.col, BytesLiteral{std::move(decoded)});
         }
         if (check("KEYWORD", "true") || check("KEYWORD", "false")) {
             const Token bTok = match("KEYWORD");
@@ -1026,7 +1114,11 @@ public:
                     setParseError(numTok, "Enum member value must be an integer");
                 }
                 hasVal = true;
-                int64_t parsed = parseIntegerLiteral(numTok.value);
+                bool intOk = true;
+                int64_t parsed = parseIntegerLiteral(numTok.value, &intOk);
+                if (!intOk) {
+                    setParseError(numTok, "Enum member integer literal '" + numTok.value + "' is out of range for 64-bit integer");
+                }
                 if (isNeg) {
                     parsed = -parsed;
                 }

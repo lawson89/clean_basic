@@ -41,7 +41,7 @@ UnionVariant    ::= Identifier "as" Type NEWLINE
 
 TypeDecl        ::= ("public" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
                   | ["public"] "extern" "type" Identifier NEWLINE
-FieldDecl       ::= Identifier "as" Type ["=" Expr] NEWLINE
+FieldDecl       ::= ["private"] Identifier "as" Type ["=" Expr] NEWLINE
 
 FnDecl          ::= ("public" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
                     Statement*
@@ -51,7 +51,7 @@ ParamList       ::= Param ("," Param)* [","]
 Param           ::= ["byref"] Identifier "as" Type ["=" Expr]
 
 Statement       ::= VarDecl | Assignment | ExprStmt
-                  | IfStmt | ForStmt | SelectStmt
+                  | IfStmt | ForStmt | WhileStmt | SelectStmt
                   | TryCatchStmt | DeferBlock | ReturnStmt | BreakStmt | ContinueStmt
 
 VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr NEWLINE
@@ -72,6 +72,10 @@ ForStmt         ::= "for" Identifier "=" Expr ("to" | "until") Expr ["step" Expr
                   | "for" IdentList "in" Expr NEWLINE
                     Statement*
                     "end for" NEWLINE
+
+WhileStmt       ::= "while" Expr NEWLINE
+                    Statement*
+                    "end while" NEWLINE
 
 SelectStmt      ::= "select case" Expr NEWLINE
                     ("case" ExprList ["as" Identifier] NEWLINE Statement*)*
