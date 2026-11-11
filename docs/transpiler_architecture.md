@@ -110,7 +110,7 @@ struct AstArena {
 Every parent-to-child edge in the AST is stored as a 32-bit unsigned integer index (`TypeId`, `ExprId`, `StmtId`, or `DeclId`) into the corresponding `AstArena` vector:
 * **Cache Locality & Zero Fragmentation:** Traversing expressions or statements reads contiguous memory blocks rather than chasing heap pointers.
 * **Trivial Multi-Module Merging:** When `loadModuleDeclarationsRecursive` parses an imported `.cb` file, it passes ownership of the existing `AstArena` into `parseTokensWithArena(tokens, std::move(arena), candidatePath)`. New nodes are simply appended to the existing vectors, and existing `TypeId`/`ExprId`/`StmtId`/`DeclId` handles remain valid even as the vectors grow.
-* **Type Interning / Deduplication:** `addType()` and `findOrAddType()` check whether a `TypeNode` with the same `name` and `typeArgs` already exists in `arena.types` via `findType()`, returning the existing `TypeId` so identical types share canonical IDs.
+* **Type Interning / Deduplication:** `addType()` checks whether an identical `TypeNode` (including `paramByref`, `returnType`, and `isFallible` for `fn(...)` types) already exists in `arena.types` via `findTypeNode()`, while `findOrAddType()` checks `name` and `typeArgs` via `findType()`, returning the existing `TypeId` so identical types share canonical IDs.
 
 ```plantuml
 @startuml
@@ -176,10 +176,10 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
        ExprStmt,
        IfStmt,
        ForStmt,
+       WhileStmt,
        SelectStmt,
        TryCatchStmt,
        DeferStmt,
-       WhileStmt,
        ReturnStmt,
        BreakStmt,
        ContinueStmt

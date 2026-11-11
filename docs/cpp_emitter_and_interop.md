@@ -20,9 +20,9 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
    Standard library headers (`<cstdint>`, `<iostream>`, `<string>`, `<vector>`, `<unordered_map>`, `<memory>`, `<tuple>`, `<utility>`, `<functional>`, `<variant>`, `<algorithm>`, `<type_traits>`) plus `CbError`, `cbToStr`, `cbHasError`, `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`.
 3. **External C/C++ Headers** (from `import header "..."`):
    Deduplicated `#include "<header>"` directives for reachable modules.
-4. **Struct & Union Forward Declarations, Enums, Type Aliases & Early Module Constants**:
-   * `struct <cppName>;` for every non-`extern` `TypeDecl` and `UnionDecl`.
-   * `enum class <cppName> : int64_t { ... };` definitions and stringifier helpers for every `EnumDecl`.
+4. **Enums, Struct & Union Forward Declarations, Type Aliases & Early Module Constants**:
+   * `enum class <cppName> : int64_t;` forward declarations, `enum class <cppName> : int64_t { ... };` definitions, and `cbToStr` stringifier helpers for every `EnumDecl`.
+   * `struct <cppName>;` forward declarations for every non-`extern` `TypeDecl` and `UnionDecl`.
    * `using <cppName> = <mappedTargetType>;` for every `AliasDecl`.
    * Early module constants (`ConstDecl` of primitive/enum/container types) so struct default field initializers can reference them.
 5. **Topological POD Struct & Tagged Union Definitions + Struct Constants**:
@@ -61,6 +61,9 @@ Every generated `build.cpp` begins with a lightweight, self-contained C++17 runt
 #include <tuple>
 #include <utility>
 #include <functional>
+#include <variant>
+#include <algorithm>
+#include <type_traits>
 
 struct [[nodiscard]] CbError {
     std::string msg = "";
@@ -179,7 +182,7 @@ end fn
 If `connect(...)` returns a non-empty `CbError`, `processNetwork()` immediately returns `{ {}, _err1 }` upward. If `connect(...)` succeeds, `_defer_1` is constructed on the stack, and `closeConnection(conn)` is guaranteed to run when `processNetwork()` exits. Multiple `defer` blocks in the same scope declare `_defer_1`, `_defer_2`, etc., which C++ destroys in reverse declaration order (**LIFO**).
 
 ### 4.3 Exception-less `try / catch` Lowering (`TryCatchStmt` & `emitErrorCheck`)
-When `try ... catch e ... end try` is encountered, `emitStmt()` lowers the block using a structured `do { ... } while(false);` loop. Fallible calls inside the `try` block assign `_catch_err = _errN;` and `break;` out of the `do-while` block:
+When `try ... catch e ... end try` is encountered, `emitStmt()` lowers the block using a structured `do { ... } while(false);` loop with a unique `_catch_err_N` variable (supporting nested `try / catch` blocks without variable shadowing). Fallible calls inside the `try` block assign `_catch_err_N = _errM;` and `break;` out of the `do-while` block:
 
 **CleanBasic Source:**
 ```vb
@@ -197,19 +200,19 @@ end fn
 ```cpp
 void startServer() {
     {
-        CbError _catch_err{};
+        CbError _catch_err_1{};
         do {
             auto [_val2, _err2] = processNetwork();
             if (cbHasError(_err2)) {
                 cbStampError(_err2, "network.cb", 42);
-                _catch_err = _err2;
+                _catch_err_1 = _err2;
                 break;
             }
             auto records = _val2;
             (std::cout << std::string("Processed: ") << records << std::endl);
         } while(false);
-        if (cbHasError(_catch_err)) {
-            CbError e = _catch_err;
+        if (cbHasError(_catch_err_1)) {
+            CbError e = _catch_err_1;
             (std::cout << (((std::string("Failed (code=") + cbToStr(e.code)) + std::string("): ")) + e.msg) << std::endl);
         }
     }
@@ -238,7 +241,7 @@ end select
 
 **Emitted C++17:**
 ```cpp
-switch (scores[std::string("alice")]) {
+switch (cbDictAt(scores, std::string("alice"))) {
     case 100: {
         (std::cout << std::string("Perfect score!") << std::endl);
         break;

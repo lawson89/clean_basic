@@ -108,7 +108,7 @@
     "body": [
       "len()"
     ],
-    "description": "Call .len() on a list, dict, or str"
+    "description": "Call .len() on a list, dict, str, or bytes"
   },
   "To String Method": {
     "prefix": "tostr",
@@ -122,7 +122,7 @@
     "body": [
       "toInt()"
     ],
-    "description": "Call .toInt() on a primitive value"
+    "description": "Call .toInt() on a primitive or enum value"
   },
   "To Float Method": {
     "prefix": "tofloat",
@@ -136,7 +136,7 @@
     "body": [
       "push(${1:item})"
     ],
-    "description": "Call .push(item) on a list"
+    "description": "Call .push(item) on a list or bytes"
   }
 ,
   "While Loop": {

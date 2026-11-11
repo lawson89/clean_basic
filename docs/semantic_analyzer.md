@@ -17,9 +17,9 @@ This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/sy
 ```cpp
 struct GlobalSymbolTable {
     std::unordered_map<std::string, TypeSymbol> types;
+    std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, EnumSymbol> enums;
     std::unordered_map<std::string, UnionSymbol> unions;
-    std::unordered_map<std::string, AliasSymbol> aliases;
     std::unordered_map<std::string, ConstSymbol> constants;
     std::unordered_map<std::string, FnSymbol> functions;
     std::vector<std::string> headers;
@@ -44,7 +44,7 @@ struct GlobalSymbolTable {
 ```
 
 ### Symbol Table Components
-* **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
+* **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `privateFields` set of private field names, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
 * **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `members`, `memberValues` map, `cppName`).
 * **`unions` (`key -> UnionSymbol`)**: Stores every `union Name` declaration (`name`, `moduleId`, `key`, `isPub`, `variants`, `variantTypes` map, `variantIndices` map, `cppName`).
 * **`aliases` (`key -> AliasSymbol`)**: Stores every `alias Name = TargetType` declaration (`name`, `moduleId`, `key`, `targetType`, `isPub`, `cppName`).
@@ -141,17 +141,17 @@ partition "Pass 1a: Module Imports, Aliases & Type Headers" {
 partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
   :Iterate over program.declarations:
   1. TypeDecl:
-     - Resolve each field's TypeId through resolveAlias()
-     - Populate TypeSymbol::fields[fieldName]
+     - Canonicalize each field's TypeId through canonicalizeType()
+     - Populate TypeSymbol::fields[fieldName] and privateFields
   2. UnionDecl:
-     - Resolve each variant's TypeId through resolveAlias()
+     - Canonicalize each variant's TypeId through canonicalizeType()
      - Populate UnionSymbol::variants, variantTypes, and variantIndices
   3. EnumDecl:
      - Populate EnumSymbol::members and memberValues
   4. ConstDecl:
-     - Infer or resolve constant TypeId and register ConstSymbol in symbols.constants[key]
+     - Infer or canonicalize constant TypeId and register ConstSymbol in symbols.constants[key]
   5. FnDecl:
-     - Resolve parameter TypeIds and returnType through resolveAlias()
+     - Canonicalize parameter TypeIds and returnType through canonicalizeType()
      - Register FnSymbol (and overloads) in symbols.functions[key];
 }
 
@@ -186,11 +186,11 @@ Modules can define local or public type aliases (`alias UserId = int` or `public
 
 ## 5. Function Call, UFCS & Struct Constructor Resolution
 
-In the AST, every `callee(args...)` or `target.name(args...)` expression is represented as a `FuncCall`. The semantic analyzer disambiguates function calls, UFCS method calls, and struct constructors via `resolveFuncCall()` and `resolveStructConstructor()`.
+In the AST, every `callee(args...)` or `target.name(args...)` expression is represented as a `FuncCall`. The semantic analyzer disambiguates free function calls, function-typed variable/field calls (`fn(...)`), UFCS method calls, tagged union variant constructors (`resolveUnionVariantConstructor`), and struct constructors (`resolveStructConstructor`) via `resolveFuncCall()`.
 
 ### 5.1 Unified Function Call Syntax (`cb::resolveFuncCall`)
 
-When `call.callee` is a `FieldAccess` (`target.name(args...)`), `resolveFuncCall()` checks four possibilities in strict priority order:
+When `call.callee` is a `FieldAccess` (`target.name(args...)`), `resolveFuncCall()` checks module-qualified calls, `bytes.fromHex`, struct field `fn(...)` calls, and UFCS receiver tiers in strict priority order:
 
 ```plantuml
 @startuml
@@ -268,11 +268,11 @@ CleanBasic uses pure value semantics for struct instantiation: `Player(name="Ali
 When a variable is declared with `dim x = <expr>` or `const x = <expr>` without an explicit `as Type` annotation, `analyzeStmt()` infers the type of `<expr>` via `inferExprType()`:
 * **Literals:** `NumberLiteral` -> `int` or `float` (if `raw` contains `'.'`); `StringLiteral` -> `str`; `BytesLiteral` -> `bytes`; `BoolLiteral` -> `bool`; `ListLiteral` -> `list[infer(elem[0])]` (untyped empty `[]` literals are rejected by `validateEmptyContainerInference` and require an explicit type annotation such as `dim xs as list[int] = []`); `DictLiteral` -> `dict[infer(key[0]), infer(val[0])]` (untyped empty `{}` literals similarly require an explicit type annotation).
 * **Variables & Accessors:** `Identifier` -> looks up `scope[name].typeId`; `FieldAccess` -> looks up `TypeSymbol::fields[fieldName]`; `IndexAccess` -> unwraps element type `T` from `list[T]` or value type `V` from `dict[K, V]`.
-* **Calls:** `FuncCall` -> returns resolved `FnSymbol::returnType` or constructed `TypeSymbol` type.
+* **Calls:** `FuncCall` -> returns resolved `FnSymbol::returnType`, constructed `UnionSymbol` type, or constructed `TypeSymbol` type.
 * **Operators:**
   * `not`, `and`, `or`, `==`, `!=`, `<`, `>`, `<=`, `>=` -> `bool`.
   * `&` (string concatenation) -> `str`.
-  * Arithmetic (`+`, `-`, `*`, `/`) -> promotes to `str` if either operand is `str`, promotes to `float` if either operand is `float`, else preserves the left operand's type.
+  * Arithmetic (`+`, `-`, `*`, `/`, `%`) -> promotes to `str` if either operand is `str`, promotes to `float` if either operand is `float`, else preserves the left operand's type.
 
 ### 6.2 `const` vs. `dim` & Variable Declaration Rules
 In `analyzeStmt()` (`VarAssignment`):

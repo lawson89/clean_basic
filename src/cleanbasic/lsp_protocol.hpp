@@ -471,6 +471,42 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
     if (name == "kind") {
         return wrapVbCodeBlock("fn .kind() as str") + "\nReturns the active variant name of a tagged union as a str.";
     }
+    if (name == "readU16Le") {
+        return wrapVbCodeBlock("fn .readU16Le(offset as int) as int") + "\nReads an unsigned 16-bit little-endian integer at byte offset (or 0 if out of bounds).";
+    }
+    if (name == "readU16Be") {
+        return wrapVbCodeBlock("fn .readU16Be(offset as int) as int") + "\nReads an unsigned 16-bit big-endian integer at byte offset (or 0 if out of bounds).";
+    }
+    if (name == "readU32Le") {
+        return wrapVbCodeBlock("fn .readU32Le(offset as int) as int") + "\nReads an unsigned 32-bit little-endian integer at byte offset (or 0 if out of bounds).";
+    }
+    if (name == "readU32Be") {
+        return wrapVbCodeBlock("fn .readU32Be(offset as int) as int") + "\nReads an unsigned 32-bit big-endian integer at byte offset (or 0 if out of bounds).";
+    }
+    if (name == "readU64Le") {
+        return wrapVbCodeBlock("fn .readU64Le(offset as int) as int") + "\nReads a 64-bit little-endian integer at byte offset (or 0 if out of bounds).";
+    }
+    if (name == "readU64Be") {
+        return wrapVbCodeBlock("fn .readU64Be(offset as int) as int") + "\nReads a 64-bit big-endian integer at byte offset (or 0 if out of bounds).";
+    }
+    if (name == "writeU16Le") {
+        return wrapVbCodeBlock("fn .writeU16Le(val as int, offset as int)") + "\nWrites a 16-bit little-endian integer at byte offset in a bytes buffer.";
+    }
+    if (name == "writeU16Be") {
+        return wrapVbCodeBlock("fn .writeU16Be(val as int, offset as int)") + "\nWrites a 16-bit big-endian integer at byte offset in a bytes buffer.";
+    }
+    if (name == "writeU32Le") {
+        return wrapVbCodeBlock("fn .writeU32Le(val as int, offset as int)") + "\nWrites a 32-bit little-endian integer at byte offset in a bytes buffer.";
+    }
+    if (name == "writeU32Be") {
+        return wrapVbCodeBlock("fn .writeU32Be(val as int, offset as int)") + "\nWrites a 32-bit big-endian integer at byte offset in a bytes buffer.";
+    }
+    if (name == "writeU64Le") {
+        return wrapVbCodeBlock("fn .writeU64Le(val as int, offset as int)") + "\nWrites a 64-bit little-endian integer at byte offset in a bytes buffer.";
+    }
+    if (name == "writeU64Be") {
+        return wrapVbCodeBlock("fn .writeU64Be(val as int, offset as int)") + "\nWrites a 64-bit big-endian integer at byte offset in a bytes buffer.";
+    }
     return std::nullopt;
 }
 

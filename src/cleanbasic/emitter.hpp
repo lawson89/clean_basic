@@ -169,17 +169,7 @@ public:
         if (t.name == "auto") return "auto";
         if (t.name == "cptr") return "void*";
         if (t.name == "fn") {
-            std::string ret = "void";
-            if (t.returnType != INVALID_ID) {
-                ret = mapType(modId, t.returnType);
-            }
-            if (t.isFallible) {
-                if (ret == "void") {
-                    ret = "CbError";
-                } else {
-                    ret = "std::tuple<" + ret + ", CbError>";
-                }
-            }
+            const std::string ret = wrapFallibleReturnCppType(modId, t.returnType, t.isFallible);
             std::string params;
             for (size_t i = 0; i < t.typeArgs.size(); ++i) {
                 if (i > 0) params += ", ";
@@ -257,21 +247,22 @@ public:
         return mapTypeNode(modId, resolved) + "{}";
     }
 
+    std::string wrapFallibleReturnCppType(std::string_view modId, TypeId returnType, bool isFallible) const {
+        std::string ret = "void";
+        if (returnType != INVALID_ID && !arena.isVoid(returnType)) {
+            ret = mapType(modId, returnType);
+        }
+        if (isFallible) {
+            if (ret == "void") {
+                return "CbError";
+            }
+            return "std::tuple<" + ret + ", CbError>";
+        }
+        return ret;
+    }
+
     std::string fnReturnCppType(std::string_view modId, const FnDecl& fn) const {
-        std::vector<std::string> retCpp;
-        if (fn.returnType != INVALID_ID && !arena.isVoid(fn.returnType)) {
-            retCpp.push_back(mapType(modId, fn.returnType));
-        }
-        if (fn.isFallible) {
-            retCpp.push_back("CbError");
-        }
-        if (retCpp.empty()) {
-            return "void";
-        }
-        if (retCpp.size() == 1) {
-            return retCpp[0];
-        }
-        return "std::tuple<" + joinStrings(retCpp) + ">";
+        return wrapFallibleReturnCppType(modId, fn.returnType, fn.isFallible);
     }
 
     bool isPassByConstRefType(std::string_view modId, const TypeNode& resolved) const {
@@ -840,10 +831,7 @@ public:
 
     void emitErrorCheck(uint32_t line, const FnDecl& fn, const std::string& errTmp, bool breaksToCatch) {
         if (breaksToCatch) {
-            std::string catchVar = "_catch_err";
-            if (!catchErrStack.empty()) {
-                catchVar = catchErrStack.back();
-            }
+            const std::string& catchVar = catchErrStack.back();
             emitLine("if (cbHasError(" + errTmp + ")) {");
             indentLevel += 1;
             emitLine("cbStampError(" + errTmp + ", " + escapeFileName(currentFileName) + ", " + std::to_string(line) + ");");
@@ -1113,8 +1101,11 @@ public:
             }
         }
 
-        const std::string valCpp = emitExpr(stmt.value, scope);
+        std::string valCpp = emitExpr(stmt.value, scope);
         if (fn.isFallible) {
+            if (valCpp == "{}") {
+                valCpp = defaultValueForType(currentModuleId, fn.returnType);
+            }
             emitLine("return { " + valCpp + R"(, CbError{"", 0} };)");
         } else {
             emitLine("return " + valCpp + ";");
@@ -1216,11 +1207,7 @@ public:
             }
 
             auto loopScope = scope;
-            TypeId intTid = symbols.typeInt;
-            if (intTid == INVALID_ID) {
-                intTid = arena.findType("int");
-            }
-            loopScope[loopVar] = VarSymbol{loopVar, intTid, false};
+            loopScope[loopVar] = VarSymbol{loopVar, symbols.typeInt, false};
             auto loopDecls = declaredVars;
             loopDecls.insert(loopVar);
 
@@ -1511,11 +1498,7 @@ public:
         indentLevel += 1;
         emitLine("CbError " + sanitizeCppIdent(tryCatch->catchVarName) + " = " + catchErr + ";");
         auto catchScope = scope;
-        TypeId errTid = symbols.typeErr;
-        if (errTid == INVALID_ID) {
-            errTid = arena.findType("err");
-        }
-        catchScope[tryCatch->catchVarName] = VarSymbol{tryCatch->catchVarName, errTid, false, false};
+        catchScope[tryCatch->catchVarName] = VarSymbol{tryCatch->catchVarName, symbols.typeErr, false, false};
         auto catchDecls = declaredVars;
         catchDecls.insert(tryCatch->catchVarName);
         emitStmtList(fn, tryCatch->catchBody, catchScope, catchDecls);
@@ -1642,8 +1625,6 @@ public:
     if (symbols.constants.count(key) > 0) {
         cppName = symbols.constants.at(key).cppName;
         tid = symbols.constants.at(key).typeId;
-    } else if (cd.hasDeclaredType) {
-        tid = resolveAlias(arena, symbols, currentModuleId, cd.declaredType);
     }
     std::unordered_map<std::string, VarSymbol> emptyScope;
     const std::string valCpp = emitExpr(cd.value, emptyScope);

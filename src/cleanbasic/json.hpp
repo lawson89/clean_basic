@@ -47,7 +47,6 @@ using cbVendorJson::jsonIsNull;
 
 using cbVendorJson::JSON_BACKSLASH;
 using cbVendorJson::JSON_DQUOTE;
-using cbVendorJson::jsonHexDigitValue;
 using cbVendorJson::parseJson;
 using cbVendorJson::serializeJsonInto;
 using cbVendorJson::serializeJson;

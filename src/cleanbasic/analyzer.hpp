@@ -894,7 +894,11 @@ public:
         if (const auto* dstmt = arena.getStmt<DeferStmt>(stmtId)) {
             const int savedTryDepth = activeTryDepth;
             activeTryDepth = 0;
-            analyzeBlock(fn, dstmt->body, scope);
+            FnDecl deferFn{};
+            deferFn.name = "defer";
+            deferFn.returnType = symbols.typeVoid;
+            deferFn.isFallible = false;
+            analyzeBlock(deferFn, dstmt->body, scope);
             activeTryDepth = savedTryDepth;
             return;
         }
@@ -1350,16 +1354,11 @@ public:
 
 inline AnalysisResult analyzeProgram(
     AstArena& arena,
-    const Program& program,
-    std::optional<GlobalSymbolTable> initialSymbols = std::nullopt
+    const Program& program
 ) {
     AnalysisResult result{};
     result.ok = true;
-    if (initialSymbols.has_value()) {
-        result.symbols = std::move(initialSymbols.value());
-    } else {
-        registerBuiltins(arena, result.symbols);
-    }
+    registerBuiltins(arena, result.symbols);
 
     try {
         Analyzer analyzer(arena, result.symbols, program.fileName);

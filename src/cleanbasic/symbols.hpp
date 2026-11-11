@@ -629,14 +629,6 @@ inline std::string resolveUfcsDefiningModule(
         if (currentModuleId == "std/str" || symbols.hasStdStr) {
             return "std/str";
         }
-        const auto modIt = symbols.modules.find(std::string(currentModuleId));
-        if (modIt != symbols.modules.end()) {
-            for (const auto& kv : modIt->second) {
-                if (kv.second == "std/str") {
-                    return "std/str";
-                }
-            }
-        }
         return "";
     }
     const auto [recvModId, recvBase] = splitSymbolKey(recvTypeKey);

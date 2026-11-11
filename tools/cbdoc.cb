@@ -18,14 +18,71 @@ public type DocEntry
     doc as str
 end type
 
+'' Strips leading "public " and "extern " modifiers from a declaration header.
+fn stripModifiers(header as str) as str
+    dim work = header
+    while true
+        if work.startsWith("public ")
+            work = work.sliceFrom(7).ltrim()
+        else if work.startsWith("extern ")
+            work = work.sliceFrom(7).ltrim()
+        else
+            break
+        end if
+    end while
+    return work
+end fn
+
+'' Returns true if the header declares a public item.
+fn isPublicHeader(header as str) as bool
+    return header.startsWith("public ") or header.contains(" public ")
+end fn
+
+'' Returns true if the header declares an extern item.
+fn isExternHeader(header as str) as bool
+    return header.startsWith("extern ") or header.contains(" extern ")
+end fn
+
+'' Returns true if codePart is a top-level starter that terminates a single-line extern type declaration.
+fn isTopLevelStarter(codePart as str) as bool
+    if codePart.startsWith("public ") or codePart.startsWith("extern ")
+        return true
+    end if
+    if codePart.startsWith("fn ") or codePart.startsWith("type ") or codePart.startsWith("enum ") or codePart.startsWith("union ")
+        return true
+    end if
+    if codePart.startsWith("alias ") or codePart.startsWith("const ") or codePart.startsWith("import ")
+        return true
+    end if
+    return false
+end fn
+
+'' Determines whether an extern type declaration on lineIdx has a multi-line body ending in "end type".
+fn externTypeHasBody(lines as list[str], lineIdx as int) as bool
+    dim j = lineIdx + 1
+    while j < lines.len()
+        const t = lines[j].trim()
+        if t == "" or t.startsWith("'") or t.startsWith("#")
+            j += 1
+            continue
+        end if
+        if isTopLevelStarter(t)
+            return false
+        end if
+        return true
+    end while
+    return false
+end fn
+
 '' Extracts the declaration header if it is public or includePrivate is true.
 fn extractDeclHeader(line as str, includePrivate as bool) as str
     const t = line.trim()
-    if t.startsWith("public ")
+    if isPublicHeader(t)
         return t
     end if
     if includePrivate
-        if t.startsWith("fn ") or t.startsWith("type ") or t.startsWith("enum ") or t.startsWith("union ") or t.startsWith("alias ") or t.startsWith("const ")
+        const stripped = stripModifiers(t)
+        if stripped.startsWith("fn ") or stripped.startsWith("type ") or stripped.startsWith("enum ") or stripped.startsWith("union ") or stripped.startsWith("alias ") or stripped.startsWith("const ")
             return t
         end if
     end if
@@ -34,14 +91,7 @@ end fn
 
 '' Parses the declaration kind (e.g., "fn") and identifier name from a header line.
 fn parseDeclKindAndName(header as str) as list[str]
-    dim work = header
-    if work.startsWith("public ")
-        work = work.sliceFrom(7).ltrim()
-    end if
-    if work.startsWith("extern ")
-        work = work.sliceFrom(7).ltrim()
-    end if
-
+    const work = stripModifiers(header)
     const kinds as list[str] = ["fn", "type", "enum", "union", "alias", "const"]
     for k in kinds
         const prefix = k & " "
@@ -63,13 +113,13 @@ fn parseDeclKindAndName(header as str) as list[str]
 end fn
 
 '' Returns true if the declaration kind represents a multi-line block (e.g., type...end type).
-fn isBlockDeclKind(header as str, kind as str) as bool
+fn isBlockDeclKind(header as str, kind as str, lines as list[str], lineIdx as int) as bool
     if kind == "enum" or kind == "union"
         return true
     end if
     if kind == "type"
-        if header.contains("extern type ")
-            return false
+        if isExternHeader(header)
+            return externTypeHasBody(lines, lineIdx)
         end if
         return true
     end if
@@ -104,7 +154,7 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
             const name = kindAndName[1]
             if kind != "" and name != ""
                 dim sigLines as list[str] = [trimmed]
-                if isBlockDeclKind(header, kind)
+                if isBlockDeclKind(header, kind, lines, i)
                     const endMarker = $"end {kind}"
                     i += 1
                     while i < lines.len()
@@ -118,7 +168,7 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
                         i += 1
                     end while
                 end if
-                if header.startsWith("public ") or pendingDoc.len() > 0
+                if isPublicHeader(header) or pendingDoc.len() > 0
                     entries.push(DocEntry(
                         name=name,
                         kind=kind,
@@ -145,8 +195,7 @@ fn collectCbFiles(targetPath as str) as list[str] can error
         if fs.ext(targetPath) == ".cb"
             return [targetPath]
         end if
-        dim empty as list[str] = []
-        return empty
+        return []
     end if
 
     dim outFiles as list[str] = []

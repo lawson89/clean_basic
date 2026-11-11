@@ -3534,6 +3534,35 @@ TEST_CASE("Tools cbdoc and cbfmt, LSP '' doc-comments, and collection loop const
         CHECK(mdText.find("newParser") != std::string::npos);
         CHECK(mdText.find("public fn newParser(") != std::string::npos);
         CHECK(mdText.find("Creates a new declarative command-line Parser") != std::string::npos);
+
+        // Verify cbdoc handles single-line and multi-line extern types (including extern public type)
+        const std::string extCb = workDir + "/extern_types.cb";
+        const std::string extMd = workDir + "/extern_ref.md";
+        {
+            std::ofstream f(extCb, std::ios::binary | std::ios::trunc);
+            f << R"CB('' Opaque regex handle.
+extern public type Regex
+
+'' Vector with fields.
+public extern type Vec2
+    x as float
+    y as float
+end type
+
+'' Computes length.
+public extern fn vec2Len(v as Vec2) as float
+)CB";
+        }
+        const int extDocRc = std::system(
+            ("./" + outBin + " -o " + extMd + " " + extCb + " > " + stdoutTxt + " 2>&1").c_str()
+        );
+        CHECK(extDocRc == 0);
+        const std::string extMdText = cb::testE2E::readFileText(extMd);
+        CHECK(extMdText.find("Regex") != std::string::npos);
+        CHECK(extMdText.find("extern public type Regex") != std::string::npos);
+        CHECK(extMdText.find("Vec2") != std::string::npos);
+        CHECK(extMdText.find("x as float") != std::string::npos);
+        CHECK(extMdText.find("vec2Len") != std::string::npos);
     }
 
     SECTION("tools/cbfmt.cb formats CleanBasic source via stdin, --check, and --write idempotently") {
@@ -3640,6 +3669,28 @@ end fn
         // 4. Verify the formatted code passes semantic analysis
         const auto checkFormatted = cb::checkSource(expectedFormatted, "formatted.cb");
         REQUIRE(checkFormatted.ok);
+
+        // 4b. Verify cbfmt preserves nested quotes and apostrophes inside interpolated strings
+        const std::string interpFile = workDir + "/interp.cb";
+        const std::string interpSource = R"CB(fn demo() as str
+dim s = $"hello {"world ' not a comment"}!" 'trailing comment
+return s
+end fn
+)CB";
+        const std::string expectedInterp = R"CB(fn demo() as str
+    dim s = $"hello {"world ' not a comment"}!" ' trailing comment
+    return s
+end fn
+)CB";
+        {
+            std::ofstream f(interpFile, std::ios::binary | std::ios::trunc);
+            f << interpSource;
+        }
+        const int interpStdinRc = std::system(
+            ("./" + outBin + " < " + interpFile + " > " + stdoutTxt).c_str()
+        );
+        CHECK(interpStdinRc == 0);
+        CHECK(cb::testE2E::readFileText(stdoutTxt) == expectedInterp);
 
         // 5. Verify stdlib, examples, tools, and tests/cases pass cbfmt --check
         const int repoCheckRc = std::system(
@@ -4423,5 +4474,88 @@ end fn
         const auto unknownFlag = cb::parseCliArgs({"main.cb", "--unknown-flag"});
         CHECK(!unknownFlag.ok);
         CHECK(unknownFlag.errorMessage.find("Unknown option") != std::string::npos);
+    }
+
+    SECTION("Defer block return and fallibility validation plus LSP bytes endian hover and bytes.fromHex signature help") {
+        // 1. Bare return inside defer in a value-returning function is valid and exits the defer lambda early
+        const std::string validDeferReturnSrc = R"CB(
+fn computeWithEarlyDeferExit(skipCleanup as bool) as int
+    defer
+        if skipCleanup
+            return
+        end if
+    end defer
+    return 42
+end fn
+)CB";
+        const auto validDeferTp = cb::transpileSource(validDeferReturnSrc, "defer_ret.cb");
+        REQUIRE(validDeferTp.ok);
+        CHECK(validDeferTp.cppCode.find("return;") != std::string::npos);
+
+        // 2. Returning a value inside defer is rejected by the semantic analyzer
+        const std::string badDeferValSrc = R"CB(
+fn badDeferVal() as int
+    defer
+        return 10
+    end defer
+    return 0
+end fn
+)CB";
+        const auto badDeferValCheck = cb::checkSource(badDeferValSrc, "bad_defer_val.cb");
+        CHECK(!badDeferValCheck.ok);
+        CHECK(badDeferValCheck.error.message.find("Function 'defer' returns void, but a value was returned") != std::string::npos);
+
+        // 3. Unhandled fallible call inside defer (even in a can error function) is rejected unless wrapped in try / catch
+        const std::string badDeferFallibleSrc = R"CB(
+fn mightFail() can error
+    error("boom")
+end fn
+
+fn caller() as int can error
+    defer
+        mightFail()
+    end defer
+    return 1
+end fn
+)CB";
+        const auto badDeferFallibleCheck = cb::checkSource(badDeferFallibleSrc, "bad_defer_fallible.cb");
+        CHECK(!badDeferFallibleCheck.ok);
+        CHECK(badDeferFallibleCheck.error.message.find("Unhandled error") != std::string::npos);
+
+        // 4. LSP hover for bytes endian methods and hover + signature help for bytes.fromHex
+        for (std::string_view endianMethod : {
+                 "readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be",
+                 "writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"
+             }) {
+            const auto mdOpt = cb::formatBuiltinHoverMarkdown(endianMethod);
+            INFO("endianMethod: " << endianMethod);
+            REQUIRE(mdOpt.has_value());
+            CHECK(mdOpt->find(std::string("fn .") + std::string(endianMethod)) != std::string::npos);
+        }
+
+        const std::string bytesLspSrc = R"CB(fn testBytes() can error
+    dim buf = bytes.fromHex("deadbeef")
+    dim v = buf.readU16Le(0)
+end fn
+)CB";
+        const cb::LspDocumentSnapshot bytesSnap = cb::makeSnapshotFromCheckResult(cb::checkSource(bytesLspSrc, "/ws/bytes_lsp.cb"));
+        REQUIRE(bytesSnap.valid);
+
+        const auto fromHexCursor = cb::resolveCursorToken(bytesLspSrc, "/ws/bytes_lsp.cb", 2, 22);
+        const auto fromHexInfo = cb::resolveCursorSymbolInfo(bytesSnap, "/ws/bytes_lsp.cb", fromHexCursor);
+        REQUIRE(fromHexInfo.hoverMarkdown.has_value());
+        CHECK(fromHexInfo.hoverMarkdown->find("fn bytes.fromHex(hex as str) as bytes can error") != std::string::npos);
+
+        const auto readU16Cursor = cb::resolveCursorToken(bytesLspSrc, "/ws/bytes_lsp.cb", 3, 18);
+        const auto readU16Info = cb::resolveCursorSymbolInfo(bytesSnap, "/ws/bytes_lsp.cb", readU16Cursor);
+        REQUIRE(readU16Info.hoverMarkdown.has_value());
+        CHECK(readU16Info.hoverMarkdown->find("fn .readU16Le(offset as int) as int") != std::string::npos);
+
+        const cb::CallSiteContext fromHexCallCtx = cb::parseEnclosingCallSite("    dim buf = bytes.fromHex(");
+        const auto fromHexSig = cb::resolveSignatureHelp(bytesSnap, "", std::string("testBytes"), fromHexCallCtx);
+        REQUIRE(fromHexSig.has_value());
+        CHECK(fromHexSig->label == "fn bytes.fromHex(hex as str) as bytes can error");
+        REQUIRE(fromHexSig->paramLabels.size() == 1);
+        CHECK(fromHexSig->paramLabels[0] == "hex as str");
     }
 }

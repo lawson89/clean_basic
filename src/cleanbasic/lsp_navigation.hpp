@@ -199,6 +199,10 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
                 }
             }
         }
+        if (recv == "bytes" && member == "fromHex" && activeScope.find("bytes") == activeScope.end()) {
+            res.hoverMarkdown = wrapVbCodeBlock("fn bytes.fromHex(hex as str) as bytes can error") + "\nDecodes an even-length hexadecimal string into a bytes buffer.";
+            return res;
+        }
         std::optional<TypeId> recvTidOpt;
         if (!recv.empty() && recv.front() == '"') {
             recvTidOpt = snap.symbols.typeStr;

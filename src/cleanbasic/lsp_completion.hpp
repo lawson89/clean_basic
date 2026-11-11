@@ -533,6 +533,11 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
         }
         if (callCtx.calleeName == "print") return SignatureHelpData{"fn print(values...)", "", {"values..."}, 0};
     } else {
+        if (callCtx.receiverName == "bytes" && callCtx.calleeName == "fromHex" &&
+            !resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName).has_value()) {
+            const std::string doc = wrapVbCodeBlock("fn bytes.fromHex(hex as str) as bytes can error") + "\nDecodes an even-length hexadecimal string into a bytes buffer.";
+            return SignatureHelpData{"fn bytes.fromHex(hex as str) as bytes can error", doc, {"hex as str"}, 0};
+        }
         // Built-in receiver methods
         const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
         if (vOpt.has_value()) {
