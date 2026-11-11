@@ -56,13 +56,7 @@ inline int64_t parseIntegerLiteral(std::string_view raw, bool* okOut = nullptr) 
     if (okOut != nullptr) {
         *okOut = true;
     }
-    std::string cleaned;
-    cleaned.reserve(raw.size());
-    for (char c : raw) {
-        if (c != '_') {
-            cleaned.push_back(c);
-        }
-    }
+    const std::string cleaned(raw);
     try {
         size_t idx = 0;
         if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X')) {

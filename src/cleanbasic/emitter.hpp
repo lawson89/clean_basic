@@ -292,6 +292,12 @@ public:
         ExprId exprId,
         const std::unordered_map<std::string, VarSymbol>& scope
     ) const {
+        if (exprId < arena.exprs.size()) {
+            const TypeId cached = arena.exprs[exprId].resolvedType;
+            if (cached != INVALID_ID && cached != symbols.typeAuto) {
+                return cached;
+            }
+        }
         return inferExprType(arena, exprId, symbols, scope, currentModuleId);
     }
 
@@ -432,18 +438,11 @@ public:
     }
 
     if (const auto* num = arena.getExpr<NumberLiteral>(exprId)) {
-        std::string cleaned;
-        cleaned.reserve(num->raw.size());
-        for (char c : num->raw) {
-            if (c != '_') {
-                cleaned.push_back(c);
-            }
+        if (!num->isFloat && num->raw.size() >= 2 && num->raw[0] == '0' &&
+            (num->raw[1] == 'x' || num->raw[1] == 'X' || num->raw[1] == 'b' || num->raw[1] == 'B')) {
+            return "static_cast<int64_t>(" + num->raw + "ULL)";
         }
-        if (!num->isFloat && cleaned.size() >= 2 && cleaned[0] == '0' &&
-            (cleaned[1] == 'x' || cleaned[1] == 'X' || cleaned[1] == 'b' || cleaned[1] == 'B')) {
-            return "static_cast<int64_t>(" + cleaned + "ULL)";
-        }
-        return cleaned;
+        return num->raw;
     }
 
     if (const auto* str = arena.getExpr<StringLiteral>(exprId)) {
@@ -1474,7 +1473,6 @@ public:
     std::vector<std::pair<std::string, EnumDecl>> enumDecls;
     std::vector<std::pair<std::string, TypeDecl>> structDecls;
     std::vector<std::pair<std::string, UnionDecl>> unionDecls;
-    std::vector<std::pair<std::string, DeclId>> orderedCompositeDecls;
     std::vector<std::pair<std::string, ConstDecl>> constDecls;
     struct EmittedFnEntry {
         std::string moduleId;
@@ -1491,11 +1489,9 @@ public:
         if (const auto* td = arena.getDecl<TypeDecl>(did)) {
             if (!td->isExtern) {
                 structDecls.push_back({declNode.moduleId, *td});
-                orderedCompositeDecls.push_back({declNode.moduleId, did});
             }
         } else if (const auto* ud = arena.getDecl<UnionDecl>(did)) {
             unionDecls.push_back({declNode.moduleId, *ud});
-            orderedCompositeDecls.push_back({declNode.moduleId, did});
         } else if (const auto* ed = arena.getDecl<EnumDecl>(did)) {
             enumDecls.push_back({declNode.moduleId, *ed});
         } else if (const auto* cd = arena.getDecl<ConstDecl>(did)) {
@@ -1534,49 +1530,12 @@ public:
             currentModuleId = pair.first;
             emitLine("struct " + lookupSymbolCppName(symbols.unions, currentModuleId, pair.second.name) + ";");
         }
-    }
-
-    if (!orderedCompositeDecls.empty()) {
-        std::unordered_map<std::string, std::pair<std::string, DeclId>> compositeByKey;
-        std::vector<std::string> initialCompositeKeys;
-        initialCompositeKeys.reserve(orderedCompositeDecls.size());
-        for (const auto& pair : orderedCompositeDecls) {
-            const DeclId did = pair.second;
-            std::string key;
-            if (const auto* td = arena.getDecl<TypeDecl>(did)) {
-                key = symbolKey(pair.first, td->name);
-            } else if (const auto* ud = arena.getDecl<UnionDecl>(did)) {
-                key = symbolKey(pair.first, ud->name);
-            }
-            if (!key.empty() && compositeByKey.count(key) == 0) {
-                compositeByKey[key] = pair;
-                initialCompositeKeys.push_back(key);
-            }
-        }
-
-        std::unordered_set<std::string> visitedCompositeKeys;
-        std::vector<std::pair<std::string, DeclId>> sortedCompositeDecls;
-        sortedCompositeDecls.reserve(orderedCompositeDecls.size());
-
-        auto visitComposite = [&](auto& self, const std::string& key) -> void {
-            if (visitedCompositeKeys.count(key) > 0 || compositeByKey.count(key) == 0) {
-                return;
-            }
-            visitedCompositeKeys.insert(key);
-            for (const std::string& depKey : collectDirectCompositeDeps(arena, symbols, key)) {
-                if (compositeByKey.count(depKey) > 0) {
-                    self(self, depKey);
-                }
-            }
-            sortedCompositeDecls.push_back(compositeByKey.at(key));
-        };
-
-        for (const std::string& key : initialCompositeKeys) {
-            visitComposite(visitComposite, key);
-        }
 
         emitLine();
-        for (const auto& pair : sortedCompositeDecls) {
+        for (const auto& pair : symbols.sortedCompositeDecls) {
+            if (!isModuleEmitted(symbols, pair.first)) {
+                continue;
+            }
             currentModuleId = pair.first;
             const DeclId did = pair.second;
             if (const auto* td = arena.getDecl<TypeDecl>(did)) {

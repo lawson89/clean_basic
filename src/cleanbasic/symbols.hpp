@@ -12,12 +12,10 @@
 
 namespace cb {
 
-struct TypeSymbol {
+struct SymbolMeta {
     std::string name;
     std::string moduleId;
     std::string key;
-    std::unordered_map<std::string, TypeId> fields;
-    std::vector<FieldDecl> fieldOrder;
     bool isPub = false;
     bool isExtern = false;
     std::string cppName;
@@ -28,74 +26,37 @@ struct TypeSymbol {
     std::string docComment;
 };
 
-struct FnSymbol {
-    std::string name;
-    std::string moduleId;
-    std::string key;
+struct TypeSymbol : SymbolMeta {
+    std::unordered_map<std::string, TypeId> fields;
+    std::vector<FieldDecl> fieldOrder;
+};
+
+struct FnSymbol : SymbolMeta {
     std::vector<Param> params;
     TypeId returnType = INVALID_ID;
     bool isFallible = false;
-    bool isPub = false;
-    bool isExtern = false;
-    std::string cppName;
-    std::string fileName = "main.cb";
-    uint32_t line = 1;
-    uint32_t col = 1;
-    uint32_t endLine = 1;
-    std::string docComment;
     bool isBuiltinReceiver = false;
     bool isFnValueCall = false;
     TypeId fnTypeId = INVALID_ID;
 };
 
-struct EnumSymbol {
-    std::string name;
-    std::string moduleId;
-    std::string key;
+struct EnumSymbol : SymbolMeta {
     std::vector<EnumMember> members;
     std::unordered_map<std::string, int64_t> memberValues;
-    bool isPub = false;
-    std::string cppName;
-    std::string fileName = "main.cb";
-    uint32_t line = 1;
-    uint32_t col = 1;
-    uint32_t endLine = 1;
-    std::string docComment;
 };
 
-struct UnionSymbol {
-    std::string name;
-    std::string moduleId;
-    std::string key;
+struct UnionSymbol : SymbolMeta {
     std::vector<UnionVariant> variants;
     std::unordered_map<std::string, TypeId> variantTypes;
     std::unordered_map<std::string, size_t> variantIndices;
-    bool isPub = false;
-    std::string cppName;
-    std::string fileName = "main.cb";
-    uint32_t line = 1;
-    uint32_t col = 1;
-    uint32_t endLine = 1;
-    std::string docComment;
 };
 
-struct ConstSymbol {
-    std::string name;
-    std::string moduleId;
-    std::string key;
+struct ConstSymbol : SymbolMeta {
     TypeId typeId = INVALID_ID;
-    bool isPub = false;
-    std::string cppName;
-    std::string fileName = "main.cb";
-    uint32_t line = 1;
-    uint32_t col = 1;
-    uint32_t endLine = 1;
-    std::string docComment;
 };
 
-template <typename SymT>
 inline void populateSymbolMeta(
-    SymT& sym,
+    SymbolMeta& sym,
     const DeclNode& declNode,
     std::string_view name,
     bool isPub,
@@ -223,6 +184,7 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, std::vector<FnSymbol>> builtinReceiverCache;
     std::unordered_map<std::string, std::unordered_set<std::string>> callGraphEdges;
     std::unordered_set<std::string> rootReferencedFunctions;
+    std::vector<std::pair<std::string, DeclId>> sortedCompositeDecls;
     bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
@@ -463,19 +425,8 @@ inline TypeNode resolveAliasNode(
 
     if (!curr.name.empty() && !isBuiltinTypeName(curr.name)) {
         const std::string typeKey = resolveSymbolKey(symbols, currentModuleId, curr.name);
-        const auto tit = symbols.types.find(typeKey);
-        if (tit != symbols.types.end()) {
-            curr.name = tit->second.key;
-        } else {
-            const auto eit = symbols.enums.find(typeKey);
-            if (eit != symbols.enums.end()) {
-                curr.name = eit->second.key;
-            } else {
-                const auto uit = symbols.unions.find(typeKey);
-                if (uit != symbols.unions.end()) {
-                    curr.name = uit->second.key;
-                }
-            }
+        if (symbols.types.count(typeKey) > 0 || symbols.enums.count(typeKey) > 0 || symbols.unions.count(typeKey) > 0) {
+            curr.name = typeKey;
         }
     }
 
@@ -542,19 +493,23 @@ inline TypeId canonicalizeType(
     return canonicalTid;
 }
 
-template <typename TableMap>
-inline bool isTypeInTable(
-    const GlobalSymbolTable& symbols,
-    const TableMap& table,
-    TypeId tid,
+template <typename SymbolT>
+inline std::optional<SymbolT> resolveTypeByIdInTable(
     const AstArena& arena,
-    std::string_view currentModuleId
+    const GlobalSymbolTable& symbols,
+    const std::unordered_map<std::string, SymbolT>& table,
+    std::string_view currentModuleId,
+    TypeId tid
 ) {
-    if (tid >= arena.types.size()) {
-        return false;
+    if (tid == INVALID_ID || tid >= arena.types.size()) {
+        return std::nullopt;
     }
-    const TypeNode resolved = resolveAliasNode(arena, symbols, currentModuleId, tid);
-    return table.count(resolved.name) > 0;
+    const std::string key = resolveSymbolKey(symbols, currentModuleId, arena.types[tid].name);
+    const auto it = table.find(key);
+    if (it != table.end()) {
+        return it->second;
+    }
+    return std::nullopt;
 }
 
 inline bool isEnumType(
@@ -563,7 +518,7 @@ inline bool isEnumType(
     const AstArena& arena,
     std::string_view currentModuleId
 ) {
-    return isTypeInTable(symbols, symbols.enums, tid, arena, currentModuleId);
+    return resolveTypeByIdInTable(arena, symbols, symbols.enums, currentModuleId, tid).has_value();
 }
 
 inline bool isUnionType(
@@ -572,7 +527,7 @@ inline bool isUnionType(
     const AstArena& arena,
     std::string_view currentModuleId
 ) {
-    return isTypeInTable(symbols, symbols.unions, tid, arena, currentModuleId);
+    return resolveTypeByIdInTable(arena, symbols, symbols.unions, currentModuleId, tid).has_value();
 }
 
 inline std::optional<TypeSymbol> resolveTypeSymbolByName(
@@ -593,30 +548,6 @@ inline std::optional<TypeSymbol> resolveTypeSymbolByName(
             return std::nullopt;
         }
         return tit->second;
-    }
-    return std::nullopt;
-}
-
-template <typename SymbolT>
-inline std::optional<SymbolT> resolveTypeByIdInTable(
-    const AstArena& arena,
-    const GlobalSymbolTable& symbols,
-    const std::unordered_map<std::string, SymbolT>& table,
-    std::string_view currentModuleId,
-    TypeId tid
-) {
-    if (tid == INVALID_ID || tid >= arena.types.size()) {
-        return std::nullopt;
-    }
-    const TypeNode resolved = resolveAliasNode(arena, symbols, currentModuleId, tid);
-    const auto directIt = table.find(resolved.name);
-    if (directIt != table.end()) {
-        return directIt->second;
-    }
-    const std::string key = resolveSymbolKey(symbols, currentModuleId, resolved.name);
-    const auto resolvedIt = table.find(key);
-    if (resolvedIt != table.end()) {
-        return resolvedIt->second;
     }
     return std::nullopt;
 }
@@ -820,20 +751,10 @@ inline std::optional<SymbolT> resolveSymbolInTable(
     std::string_view typeName
 ) {
     (void)arena;
-    const std::string localKey = symbolKey(currentModuleId, typeName);
-    const auto it = table.find(localKey);
+    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
+    const auto it = table.find(normKey);
     if (it != table.end()) {
         return it->second;
-    }
-    const std::string rootKey = symbolKey("", typeName);
-    const auto it2 = table.find(rootKey);
-    if (it2 != table.end()) {
-        return it2->second;
-    }
-    const std::string normKey = resolveSymbolKey(symbols, currentModuleId, typeName);
-    const auto it3 = table.find(normKey);
-    if (it3 != table.end()) {
-        return it3->second;
     }
     return std::nullopt;
 }
@@ -985,7 +906,8 @@ inline TypeId inferExprType(
     ExprId exprId,
     const GlobalSymbolTable& symbols,
     const std::unordered_map<std::string, VarSymbol>& scope,
-    std::string_view currentModuleId
+    std::string_view currentModuleId,
+    AstArena* mutArena = nullptr
 );
 
 inline std::optional<FnSymbol> resolveBareFnRef(
@@ -1141,53 +1063,70 @@ inline TypeId inferExprType(
     ExprId exprId,
     const GlobalSymbolTable& symbols,
     const std::unordered_map<std::string, VarSymbol>& scope,
-    std::string_view currentModuleId
+    std::string_view currentModuleId,
+    AstArena* mutArena
 ) {
     if (exprId >= arena.exprs.size()) {
         return symbols.typeAuto;
     }
     const TypeId cachedTid = arena.exprs[exprId].resolvedType;
-    if (cachedTid != INVALID_ID && cachedTid != symbols.typeAuto) {
+    if (mutArena == nullptr && cachedTid != INVALID_ID && cachedTid != symbols.typeAuto) {
         return cachedTid;
     }
 
+    auto cacheAndReturn = [&](TypeId tid) -> TypeId {
+        if (mutArena != nullptr && tid != INVALID_ID && tid != symbols.typeAuto) {
+            mutArena->exprs[exprId].resolvedType = tid;
+        }
+        return tid;
+    };
+
     if (const auto* lit = arena.getExpr<NumberLiteral>(exprId)) {
         if (lit->isFloat) {
-            return symbols.typeFloat;
+            return cacheAndReturn(symbols.typeFloat);
         }
-        return symbols.typeInt;
+        return cacheAndReturn(symbols.typeInt);
     }
 
     if (arena.getExpr<StringLiteral>(exprId) != nullptr) {
-        return symbols.typeStr;
+        return cacheAndReturn(symbols.typeStr);
     }
 
     if (arena.getExpr<BoolLiteral>(exprId) != nullptr) {
-        return symbols.typeBool;
+        return cacheAndReturn(symbols.typeBool);
     }
 
     if (arena.getExpr<NullLiteral>(exprId) != nullptr) {
-        return symbols.typeNull;
+        return cacheAndReturn(symbols.typeNull);
     }
 
     if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
         const auto it = scope.find(ident->name);
         if (it != scope.end()) {
-            return it->second.typeId;
+            return cacheAndReturn(it->second.typeId);
         }
         const auto cOpt = resolveConstSymbol(symbols, currentModuleId, scope, ident->name);
         if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
-            return cOpt->typeId;
+            return cacheAndReturn(cOpt->typeId);
         }
         const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
         if (bareFnOpt.has_value() && bareFnOpt->fnTypeId != INVALID_ID) {
-            return bareFnOpt->fnTypeId;
+            return cacheAndReturn(bareFnOpt->fnTypeId);
         }
         return symbols.typeAuto;
     }
 
     if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
         TypeId elemType = symbols.typeInt;
+        if (mutArena != nullptr) {
+            for (size_t i = 0; i < llit->elements.size(); ++i) {
+                const TypeId curTid = inferExprType(arena, llit->elements[i], symbols, scope, currentModuleId, mutArena);
+                if (i == 0) {
+                    elemType = resolveAlias(arena, symbols, currentModuleId, curTid);
+                }
+            }
+            return cacheAndReturn(mutArena->findOrAddType("list", {elemType}));
+        }
         if (!llit->elements.empty()) {
             elemType = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, llit->elements[0], symbols, scope, currentModuleId));
         }
@@ -1201,6 +1140,19 @@ inline TypeId inferExprType(
     if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
         TypeId kType = symbols.typeStr;
         TypeId vType = symbols.typeInt;
+        if (mutArena != nullptr) {
+            for (size_t i = 0; i < dlit->entries.size(); ++i) {
+                const TypeId curKTid = inferExprType(arena, dlit->entries[i].key, symbols, scope, currentModuleId, mutArena);
+                const TypeId curVTid = inferExprType(arena, dlit->entries[i].value, symbols, scope, currentModuleId, mutArena);
+                if (i == 0) {
+                    kType = resolveAlias(arena, symbols, currentModuleId, curKTid);
+                    vType = resolveAlias(arena, symbols, currentModuleId, curVTid);
+                }
+            }
+            const TypeId dictTid = mutArena->findOrAddType("dict", {kType, vType});
+            mutArena->findOrAddType("list", {kType});
+            return cacheAndReturn(dictTid);
+        }
         if (!dlit->entries.empty()) {
             kType = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].key, symbols, scope, currentModuleId));
             vType = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].value, symbols, scope, currentModuleId));
@@ -1213,90 +1165,103 @@ inline TypeId inferExprType(
     }
 
     if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
+        const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId, mutArena);
         const auto enumOpt = resolveEnumMemberAccess(arena, symbols, currentModuleId, scope, *faccess);
         if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
             const TypeId tid = arena.findType(enumOpt->key, {});
             if (tid != INVALID_ID) {
-                return tid;
+                return cacheAndReturn(tid);
             }
         }
         const auto cOpt = resolveModuleConstAccess(arena, symbols, currentModuleId, scope, *faccess);
         if (cOpt.has_value() && cOpt->typeId != INVALID_ID) {
-            return cOpt->typeId;
+            return cacheAndReturn(cOpt->typeId);
         }
         const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
         if (bareFnOpt.has_value() && bareFnOpt->fnTypeId != INVALID_ID) {
-            return bareFnOpt->fnTypeId;
+            return cacheAndReturn(bareFnOpt->fnTypeId);
         }
-        const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
         if (tsOpt.has_value()) {
             const auto fit = tsOpt->fields.find(faccess->fieldName);
             if (fit != tsOpt->fields.end()) {
-                return fit->second;
+                return cacheAndReturn(fit->second);
             }
         }
         return symbols.typeAuto;
     }
 
     if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
-        const TypeId targetTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId);
+        const TypeId targetTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId, mutArena);
+        if (mutArena != nullptr) {
+            inferExprType(arena, iaccess->index, symbols, scope, currentModuleId, mutArena);
+        }
         if (targetTid < arena.types.size()) {
             const TypeNode tnode = resolveAliasNode(arena, symbols, currentModuleId, targetTid);
             if (tnode.name == "list" && !tnode.typeArgs.empty()) {
-                return tnode.typeArgs[0];
+                return cacheAndReturn(tnode.typeArgs[0]);
             }
             if (tnode.name == "dict" && tnode.typeArgs.size() == 2) {
-                return tnode.typeArgs[1];
+                return cacheAndReturn(tnode.typeArgs[1]);
             }
             if (tnode.name == "str") {
-                return symbols.typeStr;
+                return cacheAndReturn(symbols.typeStr);
             }
         }
         return symbols.typeAuto;
     }
 
     if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
+        if (mutArena != nullptr) {
+            inferExprType(arena, call->callee, symbols, scope, currentModuleId, mutArena);
+            for (const ExprId argId : call->args) {
+                inferExprType(arena, argId, symbols, scope, currentModuleId, mutArena);
+            }
+            for (const auto& na : call->namedArgs) {
+                inferExprType(arena, na.value, symbols, scope, currentModuleId, mutArena);
+            }
+        }
         const auto fnOpt = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
         if (fnOpt.has_value() && fnOpt->returnType != INVALID_ID) {
-            return resolveAlias(arena, symbols, fnOpt->moduleId, fnOpt->returnType);
+            return cacheAndReturn(resolveAlias(arena, symbols, fnOpt->moduleId, fnOpt->returnType));
         }
         const auto structOpt = resolveStructConstructor(arena, *call, symbols, currentModuleId, scope);
         if (structOpt.has_value()) {
             const TypeId rawTid = arena.findType(structOpt->key, {});
             if (rawTid != INVALID_ID) {
-                return rawTid;
+                return cacheAndReturn(rawTid);
             }
         }
         const auto unionVarOpt = resolveUnionVariantConstructor(arena, *call, symbols, currentModuleId, scope);
         if (unionVarOpt.has_value()) {
             const TypeId rawTid = arena.findType(unionVarOpt->unionSym.key, {});
             if (rawTid != INVALID_ID) {
-                return rawTid;
+                return cacheAndReturn(rawTid);
             }
         }
-        return symbols.typeVoid;
+        return cacheAndReturn(symbols.typeVoid);
     }
 
     if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
+        const TypeId opTid = inferExprType(arena, uop->operand, symbols, scope, currentModuleId, mutArena);
         if (uop->op == "not") {
-            return symbols.typeBool;
+            return cacheAndReturn(symbols.typeBool);
         }
-        return inferExprType(arena, uop->operand, symbols, scope, currentModuleId);
+        return cacheAndReturn(opTid);
     }
 
     if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
+        const TypeId leftTid = inferExprType(arena, bop->left, symbols, scope, currentModuleId, mutArena);
+        const TypeId rightTid = inferExprType(arena, bop->right, symbols, scope, currentModuleId, mutArena);
         if (bop->op == "and" || bop->op == "or" ||
             bop->op == "==" || bop->op == "!=" ||
             bop->op == "<" || bop->op == ">" ||
             bop->op == "<=" || bop->op == ">=") {
-            return symbols.typeBool;
+            return cacheAndReturn(symbols.typeBool);
         }
         if (bop->op == "&") {
-            return symbols.typeStr;
+            return cacheAndReturn(symbols.typeStr);
         }
-        const TypeId leftTid = inferExprType(arena, bop->left, symbols, scope, currentModuleId);
-        const TypeId rightTid = inferExprType(arena, bop->right, symbols, scope, currentModuleId);
         std::string_view leftName = "";
         if (leftTid < arena.types.size()) {
             leftName = arena.types[leftTid].name;
@@ -1307,12 +1272,12 @@ inline TypeId inferExprType(
         }
 
         if (leftName == "str" || rightName == "str") {
-            return symbols.typeStr;
+            return cacheAndReturn(symbols.typeStr);
         }
         if (leftName == "float" || rightName == "float") {
-            return symbols.typeFloat;
+            return cacheAndReturn(symbols.typeFloat);
         }
-        return leftTid;
+        return cacheAndReturn(leftTid);
     }
 
     return symbols.typeAuto;
@@ -1325,53 +1290,7 @@ inline TypeId inferAndCacheExprType(
     const std::unordered_map<std::string, VarSymbol>& scope,
     std::string_view currentModuleId
 ) {
-    if (exprId >= arena.exprs.size()) {
-        return symbols.typeAuto;
-    }
-    if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
-        for (const ExprId elId : llit->elements) {
-            inferAndCacheExprType(arena, elId, symbols, scope, currentModuleId);
-        }
-        if (!llit->elements.empty()) {
-            const TypeId elTid = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, llit->elements[0], symbols, scope, currentModuleId));
-            arena.findOrAddType("list", {elTid});
-        }
-    } else if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
-        for (const auto& ent : dlit->entries) {
-            inferAndCacheExprType(arena, ent.key, symbols, scope, currentModuleId);
-            inferAndCacheExprType(arena, ent.value, symbols, scope, currentModuleId);
-        }
-        if (!dlit->entries.empty()) {
-            const TypeId kTid = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].key, symbols, scope, currentModuleId));
-            const TypeId vTid = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].value, symbols, scope, currentModuleId));
-            arena.findOrAddType("dict", {kTid, vTid});
-            arena.findOrAddType("list", {kTid});
-        }
-    } else if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-        inferAndCacheExprType(arena, call->callee, symbols, scope, currentModuleId);
-        for (const ExprId argId : call->args) {
-            inferAndCacheExprType(arena, argId, symbols, scope, currentModuleId);
-        }
-        for (const auto& na : call->namedArgs) {
-            inferAndCacheExprType(arena, na.value, symbols, scope, currentModuleId);
-        }
-    } else if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
-        inferAndCacheExprType(arena, bop->left, symbols, scope, currentModuleId);
-        inferAndCacheExprType(arena, bop->right, symbols, scope, currentModuleId);
-    } else if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
-        inferAndCacheExprType(arena, uop->operand, symbols, scope, currentModuleId);
-    } else if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
-        inferAndCacheExprType(arena, fa->target, symbols, scope, currentModuleId);
-    } else if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
-        inferAndCacheExprType(arena, ia->target, symbols, scope, currentModuleId);
-        inferAndCacheExprType(arena, ia->index, symbols, scope, currentModuleId);
-    }
-
-    const TypeId tid = inferExprType(arena, exprId, symbols, scope, currentModuleId);
-    if (tid != INVALID_ID && tid != symbols.typeAuto) {
-        arena.exprs[exprId].resolvedType = tid;
-    }
-    return tid;
+    return inferExprType(arena, exprId, symbols, scope, currentModuleId, &arena);
 }
 
 inline std::optional<FnSymbol> resolveFuncCall(

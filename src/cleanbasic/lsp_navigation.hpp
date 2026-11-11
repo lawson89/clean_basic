@@ -74,8 +74,7 @@ inline DefinitionTarget makeDefTarget(std::string_view fileName, uint32_t line, 
     return DefinitionTarget{std::string(fileName), line, col, len};
 }
 
-template <typename Sym>
-inline void bindSymbolTarget(ResolvedCursorSymbol& res, const Sym& sym, std::string hoverMarkdown) {
+inline void bindSymbolTarget(ResolvedCursorSymbol& res, const SymbolMeta& sym, std::string hoverMarkdown) {
     res.hoverMarkdown = std::move(hoverMarkdown);
     if (!sym.fileName.empty()) {
         res.definition = makeDefTarget(sym.fileName, sym.line, sym.col, sym.name.size());
@@ -264,7 +263,10 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
     }
     const auto localIt = activeScope.find(tok.value);
     if (localIt != activeScope.end()) {
-        bindSymbolTarget(res, localIt->second, formatVarHoverMarkdown(snap.arena, localIt->second));
+        res.hoverMarkdown = formatVarHoverMarkdown(snap.arena, localIt->second);
+        if (!localIt->second.fileName.empty()) {
+            res.definition = makeDefTarget(localIt->second.fileName, localIt->second.line, localIt->second.col, localIt->second.name.size());
+        }
         return res;
     }
     const std::string symKey = resolveSymbolKey(snap.symbols, currentModId, tok.value);

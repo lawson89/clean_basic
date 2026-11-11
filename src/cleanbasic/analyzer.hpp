@@ -121,12 +121,11 @@ public:
         }
     }
 
-    template <typename Sym>
     void checkCrossModuleAccess(
         uint32_t line,
         uint32_t col,
         std::string_view kindLabel,
-        const Sym& sym,
+        const SymbolMeta& sym,
         std::string_view displayName = ""
     ) {
         if (!sym.moduleId.empty() && sym.moduleId != moduleId) {
@@ -1089,8 +1088,30 @@ public:
         }
 
         // Validate that composite value types (structs and unions) have no direct by-value recursive cycles
+        // and record their topological declaration order in symbols.sortedCompositeDecls.
         {
+            std::unordered_map<std::string, std::pair<std::string, DeclId>> compositeByKey;
+            std::vector<std::string> compositeKeys;
+            for (const DeclId did : program.declarations) {
+                if (did >= arena.decls.size()) continue;
+                const auto& declNode = arena.decls[did];
+                std::string key;
+                if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
+                    if (!tdecl->isExtern) {
+                        key = symbolKey(declNode.moduleId, tdecl->name);
+                    }
+                } else if (const auto* udecl = arena.getDecl<UnionDecl>(did)) {
+                    key = symbolKey(declNode.moduleId, udecl->name);
+                }
+                if (!key.empty() && compositeByKey.count(key) == 0) {
+                    compositeByKey[key] = {declNode.moduleId, did};
+                    compositeKeys.push_back(key);
+                }
+            }
+
             std::unordered_map<std::string, int> visitState;
+            symbols.sortedCompositeDecls.clear();
+            symbols.sortedCompositeDecls.reserve(compositeKeys.size());
 
             auto dfsCycleCheck = [&](auto& self, const std::string& currKey) -> void {
                 visitState[currKey] = 1;
@@ -1118,28 +1139,20 @@ public:
                         }
                         throw makeError("AnalyzerError", "Recursive value type cycle detected involving '" + errName + "'.", errFile, errLine, errCol);
                     }
-                    if (st == 0) {
+                    if (st == 0 && compositeByKey.count(depKey) > 0) {
                         self(self, depKey);
                     }
                 }
                 visitState[currKey] = 2;
+                const auto compIt = compositeByKey.find(currKey);
+                if (compIt != compositeByKey.end()) {
+                    symbols.sortedCompositeDecls.push_back(compIt->second);
+                }
             };
 
-            for (const DeclId did : program.declarations) {
-                if (did >= arena.decls.size()) continue;
-                const auto& declNode = arena.decls[did];
-                if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
-                    if (!tdecl->isExtern) {
-                        const std::string key = symbolKey(declNode.moduleId, tdecl->name);
-                        if (visitState[key] == 0) {
-                            dfsCycleCheck(dfsCycleCheck, key);
-                        }
-                    }
-                } else if (const auto* udecl = arena.getDecl<UnionDecl>(did)) {
-                    const std::string key = symbolKey(declNode.moduleId, udecl->name);
-                    if (visitState[key] == 0) {
-                        dfsCycleCheck(dfsCycleCheck, key);
-                    }
+            for (const std::string& key : compositeKeys) {
+                if (visitState[key] == 0) {
+                    dfsCycleCheck(dfsCycleCheck, key);
                 }
             }
         }
