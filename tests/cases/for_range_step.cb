@@ -59,8 +59,8 @@ end fn
 fn sumIndexedItems() as int
     dim nums as list[int] = [10, 20, 30]
     dim sum = 0
-    for idx, x in nums
-        sum += (idx + 1) * x
+    for idx = 0 until nums.len()
+        sum += (idx + 1) * nums[idx]
     end for
     return sum
 end fn
@@ -73,9 +73,10 @@ fn iterateStrings()
     end for
     print("strChars: " & out1)
 
+    dim chars = s.chars()
     dim out2 = ""
-    for idx, ch in s
-        out2 &= idx.toStr() & ":" & ch & ","
+    for idx = 0 until chars.len()
+        out2 &= idx.toStr() & ":" & chars[idx] & ","
     end for
     print("strIndexed: " & out2)
 end fn

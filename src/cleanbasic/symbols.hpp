@@ -1535,27 +1535,21 @@ inline std::vector<std::pair<std::string, TypeId>> resolveForInLoopVars(
     if (iterT.name == "list" && !iterT.typeArgs.empty()) {
         if (nVars == 1) {
             bindings.emplace_back(forStmt.loopVars[0], iterT.typeArgs[0]);
-        } else if (nVars == 2) {
-            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
-            bindings.emplace_back(forStmt.loopVars[1], iterT.typeArgs[0]);
         } else if (errorOut != nullptr) {
-            *errorOut = "List iteration supports at most 2 loop variables ('for item in list' or 'for i, item in list').";
+            *errorOut = "List 'for ... in' loop expects 1 variable (for item in listVal).";
         }
     } else if (iterT.name == "str") {
         if (nVars == 1) {
             bindings.emplace_back(forStmt.loopVars[0], symbols.typeStr);
-        } else if (nVars == 2) {
-            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
-            bindings.emplace_back(forStmt.loopVars[1], symbols.typeStr);
         } else if (errorOut != nullptr) {
-            *errorOut = "String iteration supports at most 2 loop variables ('for ch in s' or 'for i, ch in s').";
+            *errorOut = "String 'for ... in' loop expects 1 variable (for ch in strVal).";
         }
-    } else if (iterT.name == "dict" && iterT.typeArgs.size() == 2) {
+    } else if (iterT.name == "dict" && iterT.typeArgs.size() >= 2) {
         if (nVars == 2) {
             bindings.emplace_back(forStmt.loopVars[0], iterT.typeArgs[0]);
             bindings.emplace_back(forStmt.loopVars[1], iterT.typeArgs[1]);
         } else if (errorOut != nullptr) {
-            *errorOut = "Dict iteration requires 2 loop variables ('for k, v in dict').";
+            *errorOut = "Dictionary 'for ... in' loop requires key and value variables (for k, v in dictVal).";
         }
     } else {
         for (const auto& lv : forStmt.loopVars) {

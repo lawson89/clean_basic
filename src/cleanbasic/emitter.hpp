@@ -1168,50 +1168,9 @@ public:
                 } else {
                     emitLine("for (const auto& " + lv + " : " + iterCpp + ") {");
                 }
-                indentLevel += 1;
-                emitStmtList(fn, forS->body, loopScope, loopDecls);
-                indentLevel -= 1;
-                emitLine("}");
-                emitCatchBreakIfPending();
-                return;
+            } else {
+                emitLine("for (const auto& [" + joinStrings(forS->loopVars) + "] : " + iterCpp + ") {");
             }
-            if (forS->loopVars.size() == 2 && iterType.name == "str") {
-                const std::string& idxVar = forS->loopVars[0];
-                const std::string& elemVar = forS->loopVars[1];
-                const std::string iterRef = nextTemp("_iter");
-                emitLine("{");
-                indentLevel += 1;
-                emitLine("const auto " + iterRef + " = cbStrUtf8Chars(" + iterCpp + ");");
-                emitLine("for (int64_t " + idxVar + " = 0; " + idxVar + " < static_cast<int64_t>(" + iterRef + ".size()); ++" + idxVar + ") {");
-                indentLevel += 1;
-                emitLine("const auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
-                emitStmtList(fn, forS->body, loopScope, loopDecls);
-                indentLevel -= 1;
-                emitLine("}");
-                indentLevel -= 1;
-                emitLine("}");
-                emitCatchBreakIfPending();
-                return;
-            }
-            if (forS->loopVars.size() == 2 && iterType.name == "list") {
-                const std::string& idxVar = forS->loopVars[0];
-                const std::string& elemVar = forS->loopVars[1];
-                const std::string iterRef = nextTemp("_iter");
-                emitLine("{");
-                indentLevel += 1;
-                emitLine("const auto& " + iterRef + " = " + iterCpp + ";");
-                emitLine("for (int64_t " + idxVar + " = 0; " + idxVar + " < static_cast<int64_t>(" + iterRef + ".size()); ++" + idxVar + ") {");
-                indentLevel += 1;
-                emitLine("const auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
-                emitStmtList(fn, forS->body, loopScope, loopDecls);
-                indentLevel -= 1;
-                emitLine("}");
-                indentLevel -= 1;
-                emitLine("}");
-                emitCatchBreakIfPending();
-                return;
-            }
-            emitLine("for (const auto& [" + joinStrings(forS->loopVars) + "] : " + iterCpp + ") {");
             indentLevel += 1;
             emitStmtList(fn, forS->body, loopScope, loopDecls);
             indentLevel -= 1;

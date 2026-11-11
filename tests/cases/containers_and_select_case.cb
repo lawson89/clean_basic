@@ -120,8 +120,8 @@ end fn
 fn testIndexedLoops()
     dim names as list[str] = ["alice", "bob"]
     dim nameOut = ""
-    for i, name in names
-        nameOut &= $"{i}:{name}|"
+    for i = 0 until names.len()
+        nameOut &= $"{i}:{names[i]}|"
     end for
     print($"indexed: {nameOut}")
 end fn

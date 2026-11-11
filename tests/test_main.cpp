@@ -3942,7 +3942,35 @@ end fn
         CHECK(res.error.message.find("Module file not found: 'does_not_exist_anywhere.cb'") != std::string::npos);
     }
 
-    SECTION("Rejects dict iteration with 1 or 3 loop variables") {
+    SECTION("Rejects invalid loop variable counts in list, str, and dict 'for ... in' loops") {
+        const std::string badListLoop2 = R"CB(
+fn main() as int
+    dim xs as list[int] = [10, 20]
+    for i, x in xs
+        print(i, x)
+    end for
+    return 0
+end fn
+)CB";
+        const auto resList = cb::transpileSource(badListLoop2, "bad_list_loop2.cb");
+        CHECK_FALSE(resList.ok);
+        CHECK(resList.error.kind == "AnalyzerError");
+        CHECK(resList.error.message.find("List 'for ... in' loop expects 1 variable (for item in listVal).") != std::string::npos);
+
+        const std::string badStrLoop2 = R"CB(
+fn main() as int
+    dim s = "hi"
+    for i, ch in s
+        print(i, ch)
+    end for
+    return 0
+end fn
+)CB";
+        const auto resStr = cb::transpileSource(badStrLoop2, "bad_str_loop2.cb");
+        CHECK_FALSE(resStr.ok);
+        CHECK(resStr.error.kind == "AnalyzerError");
+        CHECK(resStr.error.message.find("String 'for ... in' loop expects 1 variable (for ch in strVal).") != std::string::npos);
+
         const std::string badDictLoop1 = R"CB(
 fn main() as int
     dim d as dict[str, int] = {"a": 1}
@@ -3955,7 +3983,7 @@ end fn
         const auto res1 = cb::transpileSource(badDictLoop1, "bad_dict_loop1.cb");
         CHECK_FALSE(res1.ok);
         CHECK(res1.error.kind == "AnalyzerError");
-        CHECK(res1.error.message.find("Dict iteration requires 2 loop variables ('for k, v in dict').") != std::string::npos);
+        CHECK(res1.error.message.find("Dictionary 'for ... in' loop requires key and value variables (for k, v in dictVal).") != std::string::npos);
 
         const std::string badDictLoop3 = R"CB(
 fn main() as int
@@ -3969,7 +3997,7 @@ end fn
         const auto res3 = cb::transpileSource(badDictLoop3, "bad_dict_loop3.cb");
         CHECK_FALSE(res3.ok);
         CHECK(res3.error.kind == "AnalyzerError");
-        CHECK(res3.error.message.find("Dict iteration requires 2 loop variables ('for k, v in dict').") != std::string::npos);
+        CHECK(res3.error.message.find("Dictionary 'for ... in' loop requires key and value variables (for k, v in dictVal).") != std::string::npos);
     }
 
     SECTION("Normalizes uppercase hex escapes in string literals for valid C++17 emission") {
