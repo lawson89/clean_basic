@@ -532,7 +532,11 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
     } else {
         if (callCtx.receiverName == "bytes" && callCtx.calleeName == "fromHex" &&
             !resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName).has_value()) {
-            const std::string doc = wrapVbCodeBlock("fn bytes.fromHex(hex as str) as bytes can error") + "\nDecodes an even-length hexadecimal string into a bytes buffer.";
+            std::string doc;
+            const auto docOpt = formatBuiltinHoverMarkdown("bytes.fromHex");
+            if (docOpt.has_value()) {
+                doc = docOpt.value();
+            }
             return SignatureHelpData{"fn bytes.fromHex(hex as str) as bytes can error", doc, {"hex as str"}, 0};
         }
         // Built-in receiver methods

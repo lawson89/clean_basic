@@ -27,6 +27,10 @@ public:
         throw makeError("AnalyzerError", std::string(msg), fileName, line, col);
     }
 
+    TypeId inferExpr(ExprId exprId, const std::unordered_map<std::string, VarSymbol>& scope) {
+        return inferAndCacheExprType(arena, exprId, symbols, scope, moduleId);
+    }
+
     void recordCalleeEdge(const FnSymbol& fnSym) {
         if (fnSym.isBuiltinReceiver || fnSym.isFnValueCall) {
             return;
@@ -144,6 +148,7 @@ public:
             return;
         }
 
+        inferExpr(exprId, scope);
         const auto& exprNode = arena.exprs[exprId];
 
         if (arena.getExpr<Identifier>(exprId) != nullptr) {
@@ -184,12 +189,12 @@ public:
                 if (!call->namedArgs.empty()) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Named arguments are not supported in 'assert(...)'.");
                 }
-                const TypeId condTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, call->args[0], symbols, scope, moduleId));
+                const TypeId condTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[0], scope));
                 if (condTid != symbols.typeBool && condTid != symbols.typeAuto) {
                     setAnalyzerError(exprNode.line, exprNode.col, "First argument to 'assert(...)' must be of type 'bool'.");
                 }
                 if (call->args.size() == 2) {
-                    const TypeId msgTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, call->args[1], symbols, scope, moduleId));
+                    const TypeId msgTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[1], scope));
                     if (msgTid != symbols.typeStr && msgTid != symbols.typeAuto) {
                         setAnalyzerError(exprNode.line, exprNode.col, "Second argument to 'assert(...)' must be of type 'str'.");
                     }
@@ -244,7 +249,7 @@ public:
                     if (pIdx < fnSym.params.size()) {
                         const TypeId expectedParamTid = resolveAlias(arena, symbols, moduleId, fnSym.params[pIdx].typeId);
                         validateNonNullTarget(exprNode.line, exprNode.col, expectedParamTid, call->args[aIdx]);
-                        const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, call->args[aIdx], symbols, scope, moduleId));
+                        const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[aIdx], scope));
                         if (fnSym.isBuiltinReceiver) {
                             if (expectedParamTid != symbols.typeAuto && actualArgTid != symbols.typeAuto && expectedParamTid != actualArgTid) {
                                 setAnalyzerError(exprNode.line, exprNode.col, "Type mismatch for parameter '" + fnSym.params[pIdx].name + "' in call to '." + fnSym.name + "()'.");
@@ -378,13 +383,13 @@ public:
                         }
                         const TypeId expectedPayloadTid = resolveAlias(arena, symbols, uOpt->moduleId, vTypeIt->second);
                         validateNonNullTarget(exprNode.line, exprNode.col, expectedPayloadTid, call->args[0]);
-                        const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, call->args[0], symbols, scope, moduleId));
+                        const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[0], scope));
                         if (expectedPayloadTid != symbols.typeAuto && actualArgTid != symbols.typeAuto && expectedPayloadTid != actualArgTid) {
                             setAnalyzerError(exprNode.line, exprNode.col, "Argument type does not match payload type for union variant '" + uOpt->name + "." + fa->fieldName + "'.");
                         }
                     }
                     if (fa->fieldName == "append") {
-                        const TypeId recvTid = inferExprType(arena, fa->target, symbols, scope, moduleId);
+                        const TypeId recvTid = inferExpr(fa->target, scope);
                         if (recvTid < arena.types.size()) {
                             const TypeNode recvT = resolveAliasNode(arena, symbols, moduleId, recvTid);
                             if (recvT.name == "list") {
@@ -393,7 +398,7 @@ public:
                         }
                     }
                     if (fa->fieldName == "fromHex") {
-                        const TypeId recvTid = inferExprType(arena, fa->target, symbols, scope, moduleId);
+                        const TypeId recvTid = inferExpr(fa->target, scope);
                         if (recvTid < arena.types.size()) {
                             const TypeNode recvT = resolveAliasNode(arena, symbols, moduleId, recvTid);
                             if (recvT.name == "bytes") {
@@ -423,8 +428,8 @@ public:
         if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
             validateExprCalls(fn, bop->left, scope, false);
             validateExprCalls(fn, bop->right, scope, false);
-            const TypeId lt = inferExprType(arena, bop->left, symbols, scope, moduleId);
-            const TypeId rt = inferExprType(arena, bop->right, symbols, scope, moduleId);
+            const TypeId lt = inferExpr(bop->left, scope);
+            const TypeId rt = inferExpr(bop->right, scope);
             if (bop->op == "==" || bop->op == "!=") {
                 if (arena.getExpr<NullLiteral>(bop->left) != nullptr && rt != symbols.typeAuto) {
                     validateNonNullTarget(exprNode.line, exprNode.col, rt, bop->left);
@@ -483,7 +488,7 @@ public:
                 }
                 return;
             }
-            const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, moduleId);
+            const TypeId targetTid = inferExpr(faccess->target, scope);
             const auto tsOpt = resolveTypeSymbol(arena, symbols, moduleId, targetTid);
             if (tsOpt.has_value()) {
                 if (tsOpt->moduleId != moduleId && tsOpt->privateFields.count(faccess->fieldName) > 0) {
@@ -526,7 +531,7 @@ public:
                 ensureContainerTypesInExpr(elId, scope);
             }
             if (!llit->elements.empty()) {
-                const TypeId elTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, llit->elements[0], symbols, scope, moduleId));
+                const TypeId elTid = resolveAlias(arena, symbols, moduleId, inferExpr(llit->elements[0], scope));
                 arena.findOrAddType("list", {elTid});
             }
         } else if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
@@ -535,8 +540,8 @@ public:
                 ensureContainerTypesInExpr(ent.value, scope);
             }
             if (!dlit->entries.empty()) {
-                const TypeId kTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, dlit->entries[0].key, symbols, scope, moduleId));
-                const TypeId vTid = resolveAlias(arena, symbols, moduleId, inferExprType(arena, dlit->entries[0].value, symbols, scope, moduleId));
+                const TypeId kTid = resolveAlias(arena, symbols, moduleId, inferExpr(dlit->entries[0].key, scope));
+                const TypeId vTid = resolveAlias(arena, symbols, moduleId, inferExpr(dlit->entries[0].value, scope));
                 arena.findOrAddType("dict", {kTid, vTid});
                 arena.findOrAddType("list", {kTid});
             }
@@ -634,7 +639,7 @@ public:
         const std::unordered_map<std::string, VarSymbol>& emptyScope
     ) {
         const TypeId resolvedTid = resolveAlias(arena, symbols, moduleId, rawTypeId);
-        const TypeId valTid = inferExprType(arena, defaultExprId, symbols, emptyScope, moduleId);
+        const TypeId valTid = inferExpr(defaultExprId, emptyScope);
         validateNonNullTarget(line, col, resolvedTid, defaultExprId);
         validateEnumAssignment(line, col, itemName, resolvedTid, valTid);
         validateExprCalls(dummyFn, defaultExprId, emptyScope, false);
@@ -644,7 +649,7 @@ public:
         std::unordered_map<std::string, VarSymbol> emptyScope;
         if (const auto* cdecl = arena.getDecl<ConstDecl>(did)) {
             const std::string key = symbolKey(declNode.moduleId, cdecl->name);
-            const TypeId valTid = inferExprType(arena, cdecl->value, symbols, emptyScope, moduleId);
+            const TypeId valTid = inferExpr(cdecl->value, emptyScope);
             TypeId targetTid = valTid;
             if (symbols.constants.count(key) > 0) {
                 targetTid = symbols.constants.at(key).typeId;
@@ -703,7 +708,7 @@ public:
             ensureContainerTypesInExpr(vassign->value, scope);
             checkFallibleUsage(fn, vassign->value, scope, vassign->implicitBubble, vassign->breaksToCatch);
 
-            const TypeId valType = inferExprType(arena, vassign->value, symbols, scope, moduleId);
+            const TypeId valType = inferExpr(vassign->value, scope);
             if (const auto* ident = arena.getExpr<Identifier>(vassign->target)) {
                 const auto& tgtNode = arena.exprs[vassign->target];
                 if (vassign->isDim || vassign->isConst) {
@@ -741,7 +746,7 @@ public:
             } else {
                 const auto& tgtNode = arena.exprs[vassign->target];
                 if (const auto* iaccess = arena.getExpr<IndexAccess>(vassign->target)) {
-                    const TypeId idxTgtTid = inferExprType(arena, iaccess->target, symbols, scope, moduleId);
+                    const TypeId idxTgtTid = inferExpr(iaccess->target, scope);
                     if (idxTgtTid < arena.types.size()) {
                         const TypeNode idxTgtNode = resolveAliasNode(arena, symbols, moduleId, idxTgtTid);
                         if (idxTgtNode.name == "str") {
@@ -754,7 +759,7 @@ public:
                     std::string msg = "Cannot mutate const variable '" + root.name + "'.";
                     setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                 }
-                const TypeId lhsTid = inferExprType(arena, vassign->target, symbols, scope, moduleId);
+                const TypeId lhsTid = inferExpr(vassign->target, scope);
                 validateNonNullTarget(tgtNode.line, tgtNode.col, lhsTid, vassign->value);
                 std::string targetLabel = root.name;
                 if (const auto* fa = arena.getExpr<FieldAccess>(vassign->target)) {
@@ -852,7 +857,7 @@ public:
         if (const auto* selStmt = arena.getStmt<SelectStmt>(stmtId)) {
             validateExprCalls(fn, selStmt->target, scope, false);
 
-            const TypeId targetTid = inferExprType(arena, selStmt->target, symbols, scope, moduleId);
+            const TypeId targetTid = inferExpr(selStmt->target, scope);
             const bool isEnumTarget = isEnumType(symbols, targetTid, arena, moduleId);
             const auto unionOpt = resolveUnionSymbol(arena, symbols, moduleId, targetTid);
             const bool isUnionTarget = unionOpt.has_value();
@@ -900,7 +905,7 @@ public:
                     }
                     for (const auto& mExpr : scase.matchExprs) {
                         validateExprCalls(fn, mExpr, scope, false);
-                        const TypeId mExprTid = inferExprType(arena, mExpr, symbols, scope, moduleId);
+                        const TypeId mExprTid = inferExpr(mExpr, scope);
                         if (mExprTid != targetTid && mExprTid != symbols.typeAuto) {
                             setAnalyzerError(scase.line, scase.col, "case expression type does not match select case target type");
                         }
@@ -1236,7 +1241,7 @@ public:
                 fileName = declNode.fileName;
                 validateEmptyContainerInference(declNode.line, declNode.col, "const", cdecl->name, cdecl->hasDeclaredType, cdecl->value);
                 std::unordered_map<std::string, VarSymbol> emptyScope;
-                const TypeId inferredTid = inferExprType(arena, cdecl->value, symbols, emptyScope, declNode.moduleId);
+                const TypeId inferredTid = inferAndCacheExprType(arena, cdecl->value, symbols, emptyScope, declNode.moduleId);
                 TypeId constTid = inferredTid;
                 if (cdecl->hasDeclaredType) {
                     constTid = canonicalizeType(arena, symbols, declNode.moduleId, cdecl->declaredType);

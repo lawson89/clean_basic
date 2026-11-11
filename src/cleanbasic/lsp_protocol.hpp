@@ -377,135 +377,63 @@ inline std::string formatVarHoverMarkdown(const AstArena& arena, const VarSymbol
     return wrapVbCodeBlock(prefix + vs.name + " as " + formatCleanbasicType(arena, vs.typeId));
 }
 
+struct BuiltinHoverEntry {
+    std::string_view name;
+    std::string_view signature;
+    std::string_view description;
+};
+
 inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view name) {
-    if (name == "print") {
-        return wrapVbCodeBlock("fn print(values...)") + "\nWrites one or more values to standard output followed by a newline.";
-    }
-    if (name == "error") {
-        return wrapVbCodeBlock("fn error(msg as str, [code=1]) as err") + "\nRaises and returns a structured err value from a can error function.";
-    }
-    if (name == "assert") {
-        return wrapVbCodeBlock("fn assert(cond as bool, [msg as str]) can error") + "\nAsserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false.";
-    }
-    if (name == "len") {
-        return wrapVbCodeBlock("fn .len() as int") + "\nReturns the number of elements in a list, dict, str, or bytes.";
-    }
-    if (name == "toStr") {
-        return wrapVbCodeBlock("fn .toStr() as str") + "\nReturns a string representation of the value.";
-    }
-    if (name == "toInt") {
-        return wrapVbCodeBlock("fn .toInt() as int") + "\nConverts a numeric, boolean, or enum value to an int.";
-    }
-    if (name == "toFloat") {
-        return wrapVbCodeBlock("fn .toFloat() as float") + "\nConverts a numeric value to a float.";
-    }
-    if (name == "push") {
-        return wrapVbCodeBlock("fn .push(item as T)") + "\nAppends an item to the end of a list or bytes buffer.";
-    }
-    if (name == "pop") {
-        return wrapVbCodeBlock("fn .pop() as T") + "\nRemoves and returns the last element from a list or bytes buffer.";
-    }
-    if (name == "clear") {
-        return wrapVbCodeBlock("fn .clear()") + "\nRemoves all elements from a list, dict, or bytes buffer.";
-    }
-    if (name == "get") {
-        return wrapVbCodeBlock("fn .get(key as K, defaultValue as V) as V") + "\nReturns the value associated with key in a dict, or defaultValue if the key is not present (without mutating the dict).";
-    }
-    if (name == "has") {
-        return wrapVbCodeBlock("fn .has(key as K) as bool") + "\nReturns true if the dict contains the specified key.";
-    }
-    if (name == "remove") {
-        return wrapVbCodeBlock("fn .remove(key as K) as bool") + "\nRemoves the entry for key from a dict and returns true if it existed.";
-    }
-    if (name == "byteAt") {
-        return wrapVbCodeBlock("fn .byteAt(idx as int) as int") + "\nReturns the unsigned byte value (0..255) at byte index idx in a str, or -1 if out of bounds.";
-    }
-    if (name == "fromHex") {
-        return wrapVbCodeBlock("fn .fromHex() as bytes can error") + "\nDecodes an even-length hexadecimal string into a bytes buffer.";
-    }
-    if (name == "toBytes") {
-        return wrapVbCodeBlock("fn .toBytes() as bytes") + "\nEncodes a str into a UTF-8 bytes buffer.";
-    }
-    if (name == "toHex") {
-        return wrapVbCodeBlock("fn .toHex() as str") + "\nEncodes a bytes buffer as a lowercase hexadecimal string.";
-    }
-    if (name == "toUtf8") {
-        return wrapVbCodeBlock("fn .toUtf8() as str can error") + "\nValidates and decodes a bytes buffer into a UTF-8 str.";
-    }
-    if (name == "slice") {
-        return wrapVbCodeBlock("fn .slice(start as int, stop as int)") + "\nReturns a bounds-clamped sub-slice [start, stop) of a list or bytes buffer.";
-    }
-    if (name == "sliceFrom") {
-        return wrapVbCodeBlock("fn .sliceFrom(start as int)") + "\nReturns a bounds-clamped sub-slice from start to the end of a list or bytes buffer.";
-    }
-    if (name == "contains") {
-        return wrapVbCodeBlock("fn .contains(val as T) as bool") + "\nReturns true if the list contains val.";
-    }
-    if (name == "sort") {
-        return wrapVbCodeBlock("fn .sort()") + "\nSorts the elements of a list in ascending order in place.";
-    }
-    if (name == "removeAt") {
-        return wrapVbCodeBlock("fn .removeAt(idx as int) as T") + "\nRemoves and returns the element at index idx in a list (or default T{} if out of bounds).";
-    }
-    if (name == "keys") {
-        return wrapVbCodeBlock("fn .keys() as list[K]") + "\nReturns a list of all keys in a dict (sorted deterministically when K is orderable).";
-    }
-    if (name == "bitAnd") {
-        return wrapVbCodeBlock("fn .bitAnd(y as int) as int") + "\nReturns the bitwise AND of two 64-bit integers.";
-    }
-    if (name == "bitOr") {
-        return wrapVbCodeBlock("fn .bitOr(y as int) as int") + "\nReturns the bitwise OR of two 64-bit integers.";
-    }
-    if (name == "bitXor") {
-        return wrapVbCodeBlock("fn .bitXor(y as int) as int") + "\nReturns the bitwise XOR of two 64-bit integers.";
-    }
-    if (name == "bitNot") {
-        return wrapVbCodeBlock("fn .bitNot() as int") + "\nReturns the bitwise NOT (~x) of a 64-bit integer.";
-    }
-    if (name == "shl") {
-        return wrapVbCodeBlock("fn .shl(bits as int) as int") + "\nShifts a 64-bit integer left by bits (0..63), returning 0 if bits is out of range.";
-    }
-    if (name == "shr") {
-        return wrapVbCodeBlock("fn .shr(bits as int) as int") + "\nPerforms a logical unsigned 64-bit right shift by bits (0..63), returning 0 if bits is out of range.";
-    }
-    if (name == "kind") {
-        return wrapVbCodeBlock("fn .kind() as str") + "\nReturns the active variant name of a tagged union as a str.";
-    }
-    if (name == "readU16Le") {
-        return wrapVbCodeBlock("fn .readU16Le(offset as int) as int") + "\nReads an unsigned 16-bit little-endian integer at byte offset (or 0 if out of bounds).";
-    }
-    if (name == "readU16Be") {
-        return wrapVbCodeBlock("fn .readU16Be(offset as int) as int") + "\nReads an unsigned 16-bit big-endian integer at byte offset (or 0 if out of bounds).";
-    }
-    if (name == "readU32Le") {
-        return wrapVbCodeBlock("fn .readU32Le(offset as int) as int") + "\nReads an unsigned 32-bit little-endian integer at byte offset (or 0 if out of bounds).";
-    }
-    if (name == "readU32Be") {
-        return wrapVbCodeBlock("fn .readU32Be(offset as int) as int") + "\nReads an unsigned 32-bit big-endian integer at byte offset (or 0 if out of bounds).";
-    }
-    if (name == "readU64Le") {
-        return wrapVbCodeBlock("fn .readU64Le(offset as int) as int") + "\nReads a 64-bit little-endian integer at byte offset (or 0 if out of bounds).";
-    }
-    if (name == "readU64Be") {
-        return wrapVbCodeBlock("fn .readU64Be(offset as int) as int") + "\nReads a 64-bit big-endian integer at byte offset (or 0 if out of bounds).";
-    }
-    if (name == "writeU16Le") {
-        return wrapVbCodeBlock("fn .writeU16Le(val as int, offset as int)") + "\nWrites a 16-bit little-endian integer at byte offset in a bytes buffer.";
-    }
-    if (name == "writeU16Be") {
-        return wrapVbCodeBlock("fn .writeU16Be(val as int, offset as int)") + "\nWrites a 16-bit big-endian integer at byte offset in a bytes buffer.";
-    }
-    if (name == "writeU32Le") {
-        return wrapVbCodeBlock("fn .writeU32Le(val as int, offset as int)") + "\nWrites a 32-bit little-endian integer at byte offset in a bytes buffer.";
-    }
-    if (name == "writeU32Be") {
-        return wrapVbCodeBlock("fn .writeU32Be(val as int, offset as int)") + "\nWrites a 32-bit big-endian integer at byte offset in a bytes buffer.";
-    }
-    if (name == "writeU64Le") {
-        return wrapVbCodeBlock("fn .writeU64Le(val as int, offset as int)") + "\nWrites a 64-bit little-endian integer at byte offset in a bytes buffer.";
-    }
-    if (name == "writeU64Be") {
-        return wrapVbCodeBlock("fn .writeU64Be(val as int, offset as int)") + "\nWrites a 64-bit big-endian integer at byte offset in a bytes buffer.";
+    static constexpr BuiltinHoverEntry entries[] = {
+        {"print", "fn print(values...)", "Writes one or more values to standard output followed by a newline."},
+        {"error", "fn error(msg as str, [code=1]) as err", "Raises and returns a structured err value from a can error function."},
+        {"assert", "fn assert(cond as bool, [msg as str]) can error", "Asserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false."},
+        {"bytes.fromHex", "fn bytes.fromHex(hex as str) as bytes can error", "Decodes an even-length hexadecimal string into a bytes buffer."},
+        {"len", "fn .len() as int", "Returns the number of elements in a list, dict, str, or bytes."},
+        {"toStr", "fn .toStr() as str", "Returns a string representation of the value."},
+        {"toInt", "fn .toInt() as int", "Converts a numeric, boolean, or enum value to an int."},
+        {"toFloat", "fn .toFloat() as float", "Converts a numeric value to a float."},
+        {"push", "fn .push(item as T)", "Appends an item to the end of a list or bytes buffer."},
+        {"pop", "fn .pop() as T", "Removes and returns the last element from a list or bytes buffer."},
+        {"clear", "fn .clear()", "Removes all elements from a list, dict, or bytes buffer."},
+        {"get", "fn .get(key as K, defaultValue as V) as V", "Returns the value associated with key in a dict, or defaultValue if the key is not present (without mutating the dict)."},
+        {"has", "fn .has(key as K) as bool", "Returns true if the dict contains the specified key."},
+        {"remove", "fn .remove(key as K) as bool", "Removes the entry for key from a dict and returns true if it existed."},
+        {"byteAt", "fn .byteAt(idx as int) as int", "Returns the unsigned byte value (0..255) at byte index idx in a str, or -1 if out of bounds."},
+        {"fromHex", "fn .fromHex() as bytes can error", "Decodes an even-length hexadecimal string into a bytes buffer."},
+        {"toBytes", "fn .toBytes() as bytes", "Encodes a str into a UTF-8 bytes buffer."},
+        {"toHex", "fn .toHex() as str", "Encodes a bytes buffer as a lowercase hexadecimal string."},
+        {"toUtf8", "fn .toUtf8() as str can error", "Validates and decodes a bytes buffer into a UTF-8 str."},
+        {"slice", "fn .slice(start as int, stop as int)", "Returns a bounds-clamped sub-slice [start, stop) of a list or bytes buffer."},
+        {"sliceFrom", "fn .sliceFrom(start as int)", "Returns a bounds-clamped sub-slice from start to the end of a list or bytes buffer."},
+        {"contains", "fn .contains(val as T) as bool", "Returns true if the list contains val."},
+        {"sort", "fn .sort()", "Sorts the elements of a list in ascending order in place."},
+        {"removeAt", "fn .removeAt(idx as int) as T", "Removes and returns the element at index idx in a list (or default T{} if out of bounds)."},
+        {"keys", "fn .keys() as list[K]", "Returns a list of all keys in a dict (sorted deterministically when K is orderable)."},
+        {"bitAnd", "fn .bitAnd(y as int) as int", "Returns the bitwise AND of two 64-bit integers."},
+        {"bitOr", "fn .bitOr(y as int) as int", "Returns the bitwise OR of two 64-bit integers."},
+        {"bitXor", "fn .bitXor(y as int) as int", "Returns the bitwise XOR of two 64-bit integers."},
+        {"bitNot", "fn .bitNot() as int", "Returns the bitwise NOT (~x) of a 64-bit integer."},
+        {"shl", "fn .shl(bits as int) as int", "Shifts a 64-bit integer left by bits (0..63), returning 0 if bits is out of range."},
+        {"shr", "fn .shr(bits as int) as int", "Performs a logical unsigned 64-bit right shift by bits (0..63), returning 0 if bits is out of range."},
+        {"kind", "fn .kind() as str", "Returns the active variant name of a tagged union as a str."},
+        {"readU16Le", "fn .readU16Le(offset as int) as int", "Reads an unsigned 16-bit little-endian integer at byte offset (or 0 if out of bounds)."},
+        {"readU16Be", "fn .readU16Be(offset as int) as int", "Reads an unsigned 16-bit big-endian integer at byte offset (or 0 if out of bounds)."},
+        {"readU32Le", "fn .readU32Le(offset as int) as int", "Reads an unsigned 32-bit little-endian integer at byte offset (or 0 if out of bounds)."},
+        {"readU32Be", "fn .readU32Be(offset as int) as int", "Reads an unsigned 32-bit big-endian integer at byte offset (or 0 if out of bounds)."},
+        {"readU64Le", "fn .readU64Le(offset as int) as int", "Reads a 64-bit little-endian integer at byte offset (or 0 if out of bounds)."},
+        {"readU64Be", "fn .readU64Be(offset as int) as int", "Reads a 64-bit big-endian integer at byte offset (or 0 if out of bounds)."},
+        {"writeU16Le", "fn .writeU16Le(val as int, offset as int)", "Writes a 16-bit little-endian integer at byte offset in a bytes buffer."},
+        {"writeU16Be", "fn .writeU16Be(val as int, offset as int)", "Writes a 16-bit big-endian integer at byte offset in a bytes buffer."},
+        {"writeU32Le", "fn .writeU32Le(val as int, offset as int)", "Writes a 32-bit little-endian integer at byte offset in a bytes buffer."},
+        {"writeU32Be", "fn .writeU32Be(val as int, offset as int)", "Writes a 32-bit big-endian integer at byte offset in a bytes buffer."},
+        {"writeU64Le", "fn .writeU64Le(val as int, offset as int)", "Writes a 64-bit little-endian integer at byte offset in a bytes buffer."},
+        {"writeU64Be", "fn .writeU64Be(val as int, offset as int)", "Writes a 64-bit big-endian integer at byte offset in a bytes buffer."},
+    };
+    for (const auto& entry : entries) {
+        if (entry.name == name) {
+            return wrapVbCodeBlock(entry.signature) + "\n" + std::string(entry.description);
+        }
     }
     return std::nullopt;
 }

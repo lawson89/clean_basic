@@ -154,10 +154,16 @@ using ExprVariant = std::variant<
 struct ExprNode {
     uint32_t line = 1;
     uint32_t col = 1;
+    TypeId resolvedType = INVALID_ID;
     ExprVariant payload;
 
     template <typename T>
     const T* getIf() const {
+        return std::get_if<T>(&payload);
+    }
+
+    template <typename T>
+    T* getIfMut() {
         return std::get_if<T>(&payload);
     }
 };
@@ -412,6 +418,14 @@ struct AstArena {
             return nullptr;
         }
         return exprs[id].getIf<T>();
+    }
+
+    template <typename T>
+    T* getExprMut(ExprId id) {
+        if (id >= exprs.size()) {
+            return nullptr;
+        }
+        return exprs[id].getIfMut<T>();
     }
 
     template <typename T>

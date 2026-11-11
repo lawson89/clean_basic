@@ -199,7 +199,7 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
    >;
    ```
 
-The parser, analyzer, and emitter inspect arena variants ergonomically using non-owning `std::get_if<T>` helper methods on `AstArena` (`arena.getExpr<T>(id)`, `arena.getStmt<T>(id)`, `arena.getDecl<T>(id)`).
+The parser, analyzer, and emitter inspect arena variants ergonomically using non-owning `std::get_if<T>` helper methods on `AstArena` (`arena.getExpr<T>(id)`, `arena.getExprMut<T>(id)`, `arena.getStmt<T>(id)`, `arena.getDecl<T>(id)`). Each `ExprNode` also caches its inferred `TypeId resolvedType = INVALID_ID` during semantic analysis so downstream passes can read expression types in $O(1)$.
 
 ---
 

@@ -292,17 +292,37 @@ public:
         return retStr + " " + cppName + "(" + joinStrings(paramItems) + ")";
     }
 
+    TypeId exprType(
+        ExprId exprId,
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) const {
+        return inferExprType(arena, exprId, symbols, scope, currentModuleId);
+    }
+
+    std::optional<FnSymbol> resolveFallibleCallExpr(
+        ExprId exprId,
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) const {
+        if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
+            const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
+            if (fnSym.has_value() && fnSym->isFallible) {
+                return fnSym;
+            }
+        }
+        return std::nullopt;
+    }
+
     std::string emitAsStrExpr(
         ExprId exprId,
         const std::unordered_map<std::string, VarSymbol>& scope
     ) {
-    const TypeId tid = inferExprType(arena, exprId, symbols, scope, currentModuleId);
-    std::string cpp = emitExpr(exprId, scope);
-    if (tid < arena.types.size() && arena.types[tid].name == "str") {
-        return cpp;
+        const TypeId tid = exprType(exprId, scope);
+        std::string cpp = emitExpr(exprId, scope);
+        if (tid < arena.types.size() && arena.types[tid].name == "str") {
+            return cpp;
+        }
+        return "cbToStr(" + cpp + ")";
     }
-    return "cbToStr(" + cpp + ")";
-}
 
     std::vector<std::string> emitExprList(
     const std::vector<ExprId>& exprIds,
@@ -523,7 +543,7 @@ public:
         if (bareFnOpt.has_value()) {
             return bareFnOpt->cppName;
         }
-        const TypeId tgtTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
+        const TypeId tgtTid = exprType(faccess->target, scope);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, tgtTid);
         std::string emittedFieldName = faccess->fieldName;
         if (!tsOpt.has_value() || !tsOpt->isExtern) {
@@ -533,7 +553,7 @@ public:
     }
 
     if (const auto* iaccess = arena.getExpr<IndexAccess>(exprId)) {
-        const TypeId tgtTid = inferExprType(arena, iaccess->target, symbols, scope, currentModuleId);
+        const TypeId tgtTid = exprType(iaccess->target, scope);
         const TypeNode resolvedTgt = resolveAliasNode(arena, symbols, currentModuleId, tgtTid);
         const std::string tgtCpp = emitExpr(iaccess->target, scope, asLvalue);
         const std::string idxCpp = emitExpr(iaccess->index, scope, false);
@@ -599,18 +619,16 @@ public:
                 const auto* access = arena.getExpr<FieldAccess>(call->callee);
                 const bool recvMutated = (!fnSym->params.empty() && fnSym->params[0].isByref);
                 const std::string recvCpp = emitExpr(access->target, scope, recvMutated);
+                const TypeId recvTid = exprType(access->target, scope);
+                const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
                 if (fnSym->name == "len") {
                     return "static_cast<int64_t>(" + recvCpp + ".size())";
                 } else if (fnSym->name == "push") {
-                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
-                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
                     if (recvNode.name == "bytes") {
                         return recvCpp + ".push_back(static_cast<uint8_t>(" + emitExpr(call->args[0], scope) + "))";
                     }
                     return recvCpp + ".push_back(" + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "pop") {
-                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
-                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
                     if (recvNode.name == "bytes") {
                         return "cbBytesPop(" + recvCpp + ")";
                     }
@@ -630,15 +648,11 @@ public:
                 } else if (fnSym->name == "toFloat") {
                     return "static_cast<double>(" + recvCpp + ")";
                 } else if (fnSym->name == "slice") {
-                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
-                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
                     if (recvNode.name == "list") {
                         return "cbListSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                     }
                     return "cbBytesSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                 } else if (fnSym->name == "sliceFrom") {
-                    const TypeId recvTid = inferExprType(arena, access->target, symbols, scope, currentModuleId);
-                    const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
                     if (recvNode.name == "list") {
                         return "cbListSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                     }
@@ -691,7 +705,7 @@ public:
                 }
                 std::string streamExpr = "(std::cout";
                 for (const ExprId argId : call->args) {
-                    const TypeId argTid = inferExprType(arena, argId, symbols, scope, currentModuleId);
+                    const TypeId argTid = exprType(argId, scope);
                     std::string argCpp = emitExpr(argId, scope);
                     if (argTid < arena.types.size() &&
                         (arena.types[argTid].name == "bool" || arena.types[argTid].name == "err")) {
@@ -705,23 +719,21 @@ public:
 
             // Normal call or UFCS
             ExprId ufcsRecv = INVALID_ID;
+            std::vector<ExprId> allPos;
+            const std::vector<ExprId>* posArgsPtr = &call->args;
             if (isUfcsCallExpr(arena, *call, symbols, currentModuleId, scope, &ufcsRecv)) {
-                std::vector<ExprId> allPos;
                 allPos.reserve(1 + call->args.size());
                 allPos.push_back(ufcsRecv);
                 for (const ExprId a : call->args) {
                     allPos.push_back(a);
                 }
-                if (fnSym->isFnValueCall) {
-                return emitExpr(call->callee, scope) + "(" + emitCallArgsJoined(*fnSym, allPos, call->namedArgs, scope) + ")";
+                posArgsPtr = &allPos;
             }
-            return fnSym->cppName + "(" + emitCallArgsJoined(*fnSym, allPos, call->namedArgs, scope) + ")";
-            }
-
+            std::string calleeTargetCpp = fnSym->cppName;
             if (fnSym->isFnValueCall) {
-                return emitExpr(call->callee, scope) + "(" + emitCallArgsJoined(*fnSym, call->args, call->namedArgs, scope) + ")";
+                calleeTargetCpp = emitExpr(call->callee, scope);
             }
-            return fnSym->cppName + "(" + emitCallArgsJoined(*fnSym, call->args, call->namedArgs, scope) + ")";
+            return calleeTargetCpp + "(" + emitCallArgsJoined(*fnSym, *posArgsPtr, call->namedArgs, scope) + ")";
         }
 
         const std::string calleeCpp = emitExpr(call->callee, scope);
@@ -907,16 +919,13 @@ public:
     std::unordered_map<std::string, VarSymbol>& scope,
     std::unordered_set<std::string>& declaredVars
 ) {
-    if (const auto* call = arena.getExpr<FuncCall>(stmt.value)) {
-        const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-        if (fnSym.has_value() && fnSym->isFallible) {
-            emitFallibleAssignment(line, fn, stmt, *fnSym, scope, declaredVars);
-            return;
-        }
+    if (const auto fnSym = resolveFallibleCallExpr(stmt.value, scope)) {
+        emitFallibleAssignment(line, fn, stmt, *fnSym, scope, declaredVars);
+        return;
     }
 
     std::string valCpp = emitExpr(stmt.value, scope);
-    const TypeId valType = inferExprType(arena, stmt.value, symbols, scope, currentModuleId);
+    const TypeId valType = exprType(stmt.value, scope);
 
     if (stmt.hasDeclaredType && stmt.target != INVALID_ID) {
         const ExprId targetId = stmt.target;
@@ -1008,13 +1017,12 @@ public:
             if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, stmt.breaksToCatch, scope)) {
                 return;
             }
-            const auto fnSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-            if (fnSym.has_value() && fnSym->isFallible) {
-                const std::string callCpp = emitExpr(stmt.expr, scope);
-                const bool hasValue = (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType));
-                emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
-                return;
-            }
+        }
+        if (const auto fnSym = resolveFallibleCallExpr(stmt.expr, scope)) {
+            const std::string callCpp = emitExpr(stmt.expr, scope);
+            const bool hasValue = (fnSym->returnType != INVALID_ID && !arena.isVoid(fnSym->returnType));
+            emitFallibleCallUnpack(line, fn, callCpp, hasValue, stmt.breaksToCatch);
+            return;
         }
 
         const std::string exprCpp = emitExpr(stmt.expr, scope);
@@ -1045,25 +1053,24 @@ public:
             if (emitIntrinsicFallibleOrErrorCall(line, fn, *call, stmt.breaksToCatch, scope)) {
                 return;
             }
-            const auto calleeSym = resolveFuncCall(arena, *call, symbols, currentModuleId, scope);
-            if (calleeSym.has_value() && calleeSym->isFallible) {
-                const bool hasValue = (calleeSym->returnType != INVALID_ID && !arena.isVoid(calleeSym->returnType));
-                const std::string valTmp = emitFallibleCallUnpack(line, fn, emitExpr(stmt.value, scope), hasValue, stmt.breaksToCatch);
-                if (!hasValue) {
-                    if (fn.isFallible) {
-                        emitLine(R"(return CbError{"", 0};)");
-                    } else {
-                        emitLine("return;");
-                    }
+        }
+        if (const auto calleeSym = resolveFallibleCallExpr(firstId, scope)) {
+            const bool hasValue = (calleeSym->returnType != INVALID_ID && !arena.isVoid(calleeSym->returnType));
+            const std::string valTmp = emitFallibleCallUnpack(line, fn, emitExpr(stmt.value, scope), hasValue, stmt.breaksToCatch);
+            if (!hasValue) {
+                if (fn.isFallible) {
+                    emitLine(R"(return CbError{"", 0};)");
                 } else {
-                    if (fn.isFallible) {
-                        emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
-                    } else {
-                        emitLine("return " + valTmp + ";");
-                    }
+                    emitLine("return;");
                 }
-                return;
+            } else {
+                if (fn.isFallible) {
+                    emitLine("return { " + valTmp + R"(, CbError{"", 0} };)");
+                } else {
+                    emitLine("return " + valTmp + ";");
+                }
             }
+            return;
         }
 
         std::string valCpp = emitExpr(stmt.value, scope);
@@ -1190,7 +1197,7 @@ public:
             if (forS->implicitBubble || forS->breaksToCatch) {
                 iterCpp = emitFallibleCallUnpack(stmtNode.line, fn, iterCpp, true, forS->breaksToCatch);
             }
-            const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, currentModuleId);
+            const TypeId iterTid = exprType(forS->iterable, scope);
             const TypeNode iterType = resolveAliasNode(arena, symbols, currentModuleId, iterTid);
 
             auto loopScope = scope;
@@ -1291,7 +1298,7 @@ public:
     }
 
     if (const auto* selS = arena.getStmt<SelectStmt>(stmtId)) {
-        const TypeId targetTid = inferExprType(arena, selS->target, symbols, scope, currentModuleId);
+        const TypeId targetTid = exprType(selS->target, scope);
         const std::string targetCpp = emitExpr(selS->target, scope);
 
         const auto unionTargetOpt = resolveUnionSymbol(arena, symbols, currentModuleId, targetTid);

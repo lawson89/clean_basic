@@ -269,8 +269,8 @@ CleanBasic uses pure value semantics for struct instantiation: `Player(name="Ali
 
 ## 6. Type Inference & Mutability Enforcement
 
-### 6.1 Local Type Inference (`cb::inferExprType`)
-When a variable is declared with `dim x = <expr>` or `const x = <expr>` without an explicit `as Type` annotation, `analyzeStmt()` infers the type of `<expr>` via `inferExprType()`:
+### 6.1 Local Type Inference (`cb::inferExprType` & `ExprNode::resolvedType` Caching)
+When a variable is declared with `dim x = <expr>` or `const x = <expr>` without an explicit `as Type` annotation, `analyzeStmt()` infers and caches the type of `<expr>` on `ExprNode::resolvedType` via `inferAndCacheExprType()` / `inferExprType()` (which short-circuits in $O(1)$ whenever `resolvedType` is already populated):
 * **Literals:** `NumberLiteral` -> `int` or `float` (if `raw` contains `'.'`); `StringLiteral` -> `str`; `BytesLiteral` -> `bytes`; `BoolLiteral` -> `bool`; `ListLiteral` -> `list[infer(elem[0])]` (untyped empty `[]` literals are rejected by `validateEmptyContainerInference` and require an explicit type annotation such as `dim xs as list[int] = []`); `DictLiteral` -> `dict[infer(key[0]), infer(val[0])]` (untyped empty `{}` literals similarly require an explicit type annotation).
 * **Variables & Accessors:** `Identifier` -> looks up `scope[name].typeId`; `FieldAccess` -> looks up `TypeSymbol::fields[fieldName]`; `IndexAccess` -> unwraps element type `T` from `list[T]` or value type `V` from `dict[K, V]`.
 * **Calls:** `FuncCall` -> returns resolved `FnSymbol::returnType`, constructed `UnionSymbol` type, or constructed `TypeSymbol` type.
