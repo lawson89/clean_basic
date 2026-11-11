@@ -49,7 +49,7 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
 
 ## 2. Emitted C++17 Runtime Preamble (`CPP_RUNTIME_PREAMBLE`)
 
-Every generated `build.cpp` begins with a lightweight, self-contained C++17 runtime preamble (`src/cleanbasic/runtime_preamble.hpp`), providing `CbError`, `cbToStr`, `cbHasError`, `cbStampError`, `cbAssertCond` / `cbAssertCmp`, RFC 3629 UTF-8 and `bytes` helpers (`cbStrUtf8SeqLen`, `cbStrUtf8Step`, `cbStrUtf8Chars`, `cbBytesToUtf8`, `cbBytesFromHex`), bounds-safe container helpers (`cbListGet`, `cbDictAt`, `cbDictGet`, `cbDictKeys`), `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`:
+Every generated `build.cpp` begins with a lightweight, self-contained C++17 runtime preamble (`src/cleanbasic/runtime_preamble.hpp`), providing `CbError`, `cbToStr`, `cbHasError`, `cbStampError`, `cbAssertCond` / `cbAssertCmp`, RFC 3629 UTF-8 string helpers (`cbStrUtf8SeqLen`, `cbStrUtf8Step`, `cbStrUtf8Chars`), bounds-safe container helpers (`cbListGet`, `cbDictAt`, `cbDictGet`, `cbDictKeys`), `cbRuntimeArgs`, and `CbDeferTask` / `cbDefer`:
 
 ```cpp
 #include <cstdint>
@@ -110,7 +110,6 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 | `float` | `double` | `0.0` | 64-bit IEEE-754 floating-point value. |
 | `bool` | `bool` | `false` | Emits `"true"` / `"false"` via `cbToStr`. |
 | `str` | `std::string` | `std::string("")` | Value-semantics string; literals emit `std::string("...")`. |
-| `bytes` | `std::vector<uint8_t>` | `std::vector<uint8_t>{}` | Raw binary buffer; byte literals emit initializer lists. |
 | `cptr` | `void*` | `void*{}` (`nullptr`) | Opaque C pointer for C/C++ FFI interop. |
 | `err` | `CbError` | `CbError{}` | Built-in error struct (`.msg`, `.code`, `.file`, `.line`); marked `[[nodiscard]]`. |
 | `fn(T1, ...) [as R] [can error]` | `std::function<Ret(Param1, ...)>` | `std::function<...>{}` | Stateless function reference type (supports `byref` parameters and `can error` return lowering). |

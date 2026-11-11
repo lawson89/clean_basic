@@ -7,7 +7,6 @@
 ' EXPECT_CPP: cbStrByteAtFast(
 ' EXPECT_CPP: cb_std_str__escapeCpp(
 ' EXPECT_CPP: cb_std_str__unescape(
-' EXPECT_CPP: cbBytesFromHex(
 ' EXPECT_OUT: Search: contains=true find=6 rfind=17 count=2 starts=true ends=true
 ' EXPECT_OUT: IgnoreCase: eq=true starts=true ends=true find=7 rfind=24 contains=true
 ' EXPECT_OUT: Split/Join: csv=a|b|c chars=X-Y fields=2026-11-06,ERROR,diskFull lines=3
@@ -16,7 +15,7 @@
 ' EXPECT_OUT: Transform: rep=a-b-c first=a-b:c lower=cleanbasic upper=CLEANBASIC repeat=ha!ha!ha! rev=dcba
 ' EXPECT_OUT: Parse/Class: int=-42 hexInt=42 binInt=42 float=3.250000 bool1=true bool0=false digit=true alpha=true space=true alnum=true hex=true builtinStr=99
 ' EXPECT_OUT: UTF8: bytes=10 cp=6 valid=true chars=c|a|f|é rev=🚀 éfac left=café right=🚀 mid=fé char3=é rocket=🚀 trim=café padL=««café padR=café»» jpLen=5 jpMid=んに jpFrom=ちは
-' EXPECT_OUT: Index/Escape/Hex: idx0=C idxOut=[] byte0=67 byteOut=-1 escLen=14 unesc=true hex=deadbeef:cafebabe:0102
+' EXPECT_OUT: Index/Escape: idx0=C idxOut=[] byte0=67 byteOut=-1 escLen=14 unesc=true
 
 import "std/str"
 import "std/fs"
@@ -141,24 +140,19 @@ fn main() as int
             " jpFrom=" & jp.sliceFrom(jp.find("ち"))
         )
 
-        ' 8. String Indexing s[i], Built-in .byteAt(i), escapeCpp, unescape, bytes.fromHex & str.fromHex
+        ' 8. String Indexing s[i], Built-in .byteAt(i), escapeCpp & unescape
         dim idx0 = word[0]
         dim idxOut = word[-1] & word[999]
         dim rawEsc = "a" & str.fromChar(34) & "b" & str.fromChar(92) & "c" & str.fromChar(10) & "d" & str.fromChar(1)
         dim escaped = rawEsc.escapeCpp()
         dim unescaped = str.unescape(escaped)
-        dim b1 = bytes.fromHex("deadbeef")
-        dim hexStr = "cafebabe"
-        dim b2 = hexStr.fromHex()
-        dim b3 = "0102".fromHex()
         print(
-            "Index/Escape/Hex: idx0=" & idx0 &
+            "Index/Escape: idx0=" & idx0 &
             " idxOut=[" & idxOut & "]" &
             " byte0=" & word.byteAt(0) &
             " byteOut=" & word.byteAt(99) &
             " escLen=" & escaped.len() &
-            " unesc=" & (unescaped == rawEsc) &
-            " hex=" & b1.toHex() & ":" & b2.toHex() & ":" & b3.toHex()
+            " unesc=" & (unescaped == rawEsc)
         )
 
         return 0

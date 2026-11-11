@@ -12,7 +12,6 @@
 ' EXPECT_CPP: void* h = nullptr;
 ' EXPECT_CPP: (h == nullptr)
 ' EXPECT_CPP: cbListGet(nums, 0)
-' EXPECT_CPP: cbBytesGet(raw, 0)
 ' EXPECT_CPP: cbDictAt(d, std::string("present"))
 ' EXPECT_CPP: cbDictGet(d, std::string("missing"), 10)
 ' EXPECT_CPP: inline const T& cbListGet(const std::vector<T>& v, int64_t idx)
@@ -22,11 +21,11 @@
 ' EXPECT_CPP: cb_std_str__join(
 ' EXPECT_CPP: struct [[nodiscard]] CbError {
 ' EXPECT_CPP: [[nodiscard]] CbError testZeroImportStdStrPrelude()
-' EXPECT_CPP: int64_t sumReadOnly(const std::vector<int64_t>& nums, const std::vector<uint8_t>& raw, const std::unordered_map<std::string, int64_t>& d)
+' EXPECT_CPP: int64_t sumReadOnly(const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& d)
 ' EXPECT_OUT: compound: count=3
 ' EXPECT_OUT: defaults: 127.0.0.1 | 9090 | localhost:8080 (t=5000) | 10.0.0.1:8080 (t=1500)
 ' EXPECT_OUT: cptrNull: true
-' EXPECT_OUT: safeContainers: sum=165, zeroCopyTotal=12
+' EXPECT_OUT: safeContainers: sum=160, zeroCopyTotal=12
 ' EXPECT_OUT: zeroImportPrelude: alpha-beta:42
 ' EXPECT_OUT: multilineCfg: localhost:8080 (retries=3)
 
@@ -64,8 +63,8 @@ fn connectEndpoint(host as str = "localhost", port as int = 8080, timeoutMs as i
     return $"{host}:{port} (t={timeoutMs})"
 end fn
 
-fn sumReadOnly(nums as list[int], raw as bytes, d as dict[str, int]) as int
-    return nums[0] + nums[99] + raw[0] + raw[99] + d["present"] + d.get("missing", 10)
+fn sumReadOnly(nums as list[int], d as dict[str, int]) as int
+    return nums[0] + nums[99] + d["present"] + d.get("missing", 10)
 end fn
 
 fn mutateContainers(byref nums as list[int], byref d as dict[str, int])
@@ -118,10 +117,9 @@ fn main() as int
     end if
 
     dim nums as list[int] = [1, 2]
-    dim raw = b"\x05"
     dim d as dict[str, int] = {"present": 7}
     mutateContainers(nums, d)
-    dim sro = sumReadOnly(nums, raw, d)
+    dim sro = sumReadOnly(nums, d)
     dim zc = readZeroCopyItems([Item(id=2), Item(id=3)], {"a": [Item(id=4)]})
     print($"safeContainers: sum={sro}, zeroCopyTotal={zc}")
 

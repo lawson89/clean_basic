@@ -3,7 +3,6 @@
   "name": "CleanBasic",
   "scopeName": "source.cleanbasic",
     "patterns": [
-    { "include": "#bytes" },
     { "include": "#interpolated-strings" },
     { "include": "#strings" },
     { "include": "#comments" },
@@ -26,17 +25,6 @@
         {
           "name": "comment.line.number-sign.cleanbasic",
           "match": "#.*$"
-        }
-      ]
-    },
-    "bytes": {
-      "name": "string.quoted.double.byte.cleanbasic",
-      "begin": "\\b[bB]\"",
-      "end": "\"|(?=$)",
-      "patterns": [
-        {
-          "name": "constant.character.escape.cleanbasic",
-          "match": "\\\\(?:x[0-9a-fA-F]{2}|.)"
         }
       ]
     },
@@ -118,7 +106,7 @@
       "patterns": [
         {
           "name": "storage.type.primitive.cleanbasic",
-          "match": "\\b(?:int|float|str|bool|cptr|err|bytes|list|dict)\\b"
+          "match": "\\b(?:int|float|str|bool|cptr|err|list|dict)\\b"
         }
       ]
     },
@@ -130,7 +118,7 @@
         },
         {
           "name": "support.function.builtin.method.cleanbasic",
-          "match": "\\.(?:len|toStr|toInt|toFloat|push|pop|clear|get|has|remove|keys|contains|sort|removeAt|slice|sliceFrom|byteAt|toUtf8|toBytes|toHex|fromHex|bitAnd|bitOr|bitXor|bitNot|shl|shr|kind|readU16Le|readU16Be|readU32Le|readU32Be|readU64Le|readU64Be|writeU16Le|writeU16Be|writeU32Le|writeU32Be|writeU64Le|writeU64Be)(?=\\s*\\()"
+          "match": "\\.(?:len|toStr|toInt|toFloat|push|pop|clear|get|has|remove|keys|contains|sort|removeAt|slice|sliceFrom|byteAt|bitAnd|bitOr|bitXor|bitNot|shl|shr|kind)(?=\\s*\\()"
         }
       ]
     },

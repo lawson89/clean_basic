@@ -106,16 +106,15 @@ PrimaryExpr     ::= Literal | QualifiedIdent | "(" Expr ")"
 CallArgList     ::= CallArg ("," CallArg)* [","]
 CallArg         ::= [Identifier "="] Expr
 
-Literal         ::= NumberLiteral | StringLiteral | InterpString | BytesLiteral
+Literal         ::= NumberLiteral | StringLiteral | InterpString
                   | "true" | "false" | "null"
                   | ListLiteral | DictLiteral
 InterpString    ::= '$"' (StringChar | "{{" | "}}" | "{" Expr "}")* '"'
-BytesLiteral    ::= 'b"' ... '"' | 'B"' ... '"'
 ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
 DictLiteral     ::= "{" [DictEntry ("," DictEntry)* [","]] "}"
 DictEntry       ::= Expr ":" Expr
 
-Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err" | "bytes"
+Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err"
                   | "list" "[" Type "]"
                   | "dict" "[" Type "," Type "]"
                   | FnType

@@ -116,51 +116,6 @@ inline void cbFsStripCr(std::string& line) {
     }
 }
 
-inline std::tuple<std::vector<uint8_t>, CbError> cbFsReadBytes(const std::string& path) {
-    if (path.empty()) {
-        return {std::vector<uint8_t>{}, CbError{"Cannot read empty file path", 400}};
-    }
-    std::error_code ec;
-    if (!std::filesystem::exists(path, ec) || ec) {
-        return {std::vector<uint8_t>{}, CbError{"File not found: " + path, 404}};
-    }
-    if (std::filesystem::is_directory(path, ec)) {
-        return {std::vector<uint8_t>{}, CbError{"Path is a directory, not a file: " + path, 400}};
-    }
-    std::ifstream in(path, std::ios::in | std::ios::binary);
-    if (!in.is_open()) {
-        return {std::vector<uint8_t>{}, CbError{"Failed to open file for reading: " + path, 500}};
-    }
-    in.seekg(0, std::ios::end);
-    const std::streamsize size = in.tellg();
-    in.seekg(0, std::ios::beg);
-    std::vector<uint8_t> buffer;
-    if (size > 0) {
-        buffer.resize(static_cast<size_t>(size));
-        if (!in.read(reinterpret_cast<char*>(buffer.data()), size)) {
-            return {std::vector<uint8_t>{}, CbError{"I/O error while reading binary file: " + path, 500}};
-        }
-    }
-    return {buffer, CbError{"", 0}};
-}
-
-inline CbError cbFsWriteBytes(const std::string& path, const std::vector<uint8_t>& data) {
-    if (path.empty()) {
-        return CbError{"Cannot write to empty file path", 400};
-    }
-    std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        return CbError{"Failed to open file for writing: " + path, 500};
-    }
-    if (!data.empty()) {
-        out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    }
-    out.flush();
-    if (!out.good()) {
-        return CbError{"Failed to write binary content to file: " + path, 500};
-    }
-    return CbError{"", 0};
-}
 
 inline std::tuple<std::string, CbError> cbFsRead(const std::string& path) {
     if (path.empty()) {
@@ -364,39 +319,6 @@ inline CbError cbFsWriteLine(CbFile f, const std::string& text) {
     return cbFsWriteStream(f, text + std::string(1, static_cast<char>(10)));
 }
 
-inline std::tuple<std::vector<uint8_t>, CbError> cbFsReadFileBytes(CbFile f, int64_t count) {
-    std::istream* in = nullptr;
-    const CbError err = cbFsResolveInputStream(f.handle, in);
-    if (cbHasError(err)) {
-        return {std::vector<uint8_t>{}, err};
-    }
-    if (count <= 0) {
-        return {std::vector<uint8_t>{}, CbError{"", 0}};
-    }
-    std::vector<uint8_t> buf(static_cast<size_t>(count));
-    in->read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(count));
-    const std::streamsize bytesRead = in->gcount();
-    buf.resize(static_cast<size_t>(bytesRead));
-    if (in->bad()) {
-        return {std::vector<uint8_t>{}, CbError{"I/O error while reading bytes from stream", 500}};
-    }
-    return {buf, CbError{"", 0}};
-}
-
-inline CbError cbFsWriteFileBytes(CbFile f, const std::vector<uint8_t>& data) {
-    std::ostream* out = nullptr;
-    const CbError err = cbFsResolveOutputStream(f.handle, out);
-    if (cbHasError(err)) {
-        return err;
-    }
-    if (!data.empty()) {
-        out->write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    }
-    if (out->fail() || out->bad()) {
-        return CbError{"Failed to write binary data to file stream", 500};
-    }
-    return CbError{"", 0};
-}
 
 inline CbError cbFsFlush(CbFile f) {
     if (f.handle == cbFsStdinHandle) {

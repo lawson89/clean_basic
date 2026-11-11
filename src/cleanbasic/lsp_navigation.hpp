@@ -199,13 +199,6 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
                 }
             }
         }
-        if (recv == "bytes" && member == "fromHex" && activeScope.find("bytes") == activeScope.end()) {
-            const auto bOpt = formatBuiltinHoverMarkdown("bytes.fromHex");
-            if (bOpt.has_value()) {
-                res.hoverMarkdown = bOpt.value();
-            }
-            return res;
-        }
         std::optional<TypeId> recvTidOpt;
         if (!recv.empty() && recv.front() == '"') {
             recvTidOpt = snap.symbols.typeStr;

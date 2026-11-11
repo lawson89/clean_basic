@@ -56,7 +56,7 @@ struct GlobalSymbolTable {
 * **`headers` & `linkLibs`**: Deduplicated ordered lists of `import header "..."` and `import link "..."` targets across all loaded modules.
 * **`modules` (`importerModuleId -> {alias -> resolvedModuleId}`)**: Per-module import alias lookup tables.
 * **`fnScopes` (`fnKey -> {varName -> VarSymbol}`)**: Captured local variable and parameter scopes for each analyzed function.
-* **`builtinReceiverCache` (`typeName -> vector<FnSymbol>`)**: Pre-cached built-in receiver method tables for non-parametric built-in types (`int`, `float`, `bool`, `str`, `bytes`, `err`) populated once in `registerBuiltins`.
+* **`builtinReceiverCache` (`typeName -> vector<FnSymbol>`)**: Pre-cached built-in receiver method tables for non-parametric built-in types (`int`, `float`, `bool`, `str`, `err`) populated once in `registerBuiltins`.
 * **`callGraphEdges` & `rootReferencedFunctions`**: Function call-graph edges and root-referenced function keys recorded during `Analyzer` Pass 2 and consumed by `Emitter::computeReachableFunctions()` for tree-shaking.
 
 ---
@@ -71,7 +71,6 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 | `int` | `symbols.typeInt` | Signed integer primitive. |
 | `float` | `symbols.typeFloat` | Double-precision floating-point primitive (`double`). |
 | `str` | `symbols.typeStr` | UTF-8 string value (`std::string`). |
-| `bytes` | `symbols.typeBytes` | Raw binary buffer (`std::vector<uint8_t>`). |
 | `bool` | `symbols.typeBool` | Boolean primitive (`true` / `false`). |
 | `cptr` | `symbols.typeCptr` | Opaque C pointer (`void*`) for C/C++ FFI handles. |
 | `err` | `symbols.typeErr` | Built-in structured error type (`CbError`) with `.msg as str`, `.code as int`, `.file as str`, and `.line as int` fields. |
@@ -89,10 +88,10 @@ Before inspecting user declarations, `registerBuiltins(arena, symbols)` interns 
 
 CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 
-* **`.len() as int`**: Supported on `list[T]`, `dict[K, V]`, `str`, and `bytes`. Returns the number of elements or characters.
-* **`.push(item as T)`**: Supported on `list[T]` and `bytes` (octet). Appends an item to the end of the list.
-* **`.pop() as T`**: Supported on `list[T]` and `bytes` (returns `int`). Removes and returns the last element.
-* **`.clear()`**: Supported on `list[T]`, `dict[K, V]`, and `bytes`. Removes all elements in place.
+* **`.len() as int`**: Supported on `list[T]`, `dict[K, V]`, and `str`. Returns the number of elements or characters.
+* **`.push(item as T)`**: Supported on `list[T]`. Appends an item to the end of the list.
+* **`.pop() as T`**: Supported on `list[T]`. Removes and returns the last element.
+* **`.clear()`**: Supported on `list[T]` and `dict[K, V]`. Removes all elements in place.
 * **`list[T].slice(start as int, stop as int) as list[T]` & `list[T].sliceFrom(start as int) as list[T]`**: Bounds-clamped sub-list extraction.
 * **`list[T].contains(val as T) as bool`**: Returns `true` if `val` is present in the list.
 * **`list[T].sort()` & `list[T].removeAt(idx as int) as T`**: In-place sorting and bounds-safe indexed removal (rejected on `const` receivers).
@@ -104,9 +103,6 @@ CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 * **`union.kind() as str`**: Returns the active variant name of a tagged `union` sum type.
 * **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
 * **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
-* **`bytes` Methods & Static Constructor**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, endian readers (`.readU16Le(offset)`, `.readU16Be(offset)`, `.readU32Le(offset)`, `.readU32Be(offset)`, `.readU64Le(offset)`, `.readU64Be(offset)`), endian writers (`.writeU16Le(val, offset)`, `.writeU16Be(val, offset)`, `.writeU32Le(val, offset)`, `.writeU32Be(val, offset)`, `.writeU64Le(val, offset)`, `.writeU64Be(val, offset)`), and static constructor `bytes.fromHex(hex as str) as bytes can error`.
-* **`str.toBytes() as bytes`**: Encodes a string into UTF-8 bytes.
-* **`str.fromHex() as bytes can error`**: Decodes an even-length hexadecimal string into a `bytes` buffer.
 * **`str.byteAt(idx as int) as int`**: Returns the unsigned byte value (`0..255`) at byte index `idx`, or `-1` if out of bounds.
 * **`.toFloat() as float`**: Supported on `int` and `float`. Performs an infallible floating-point conversion.
 
@@ -195,7 +191,7 @@ In the AST, every `callee(args...)` or `target.name(args...)` expression is repr
 
 ### 5.1 Unified Function Call Syntax (`cb::resolveFuncCall`)
 
-When `call.callee` is a `FieldAccess` (`target.name(args...)`), `resolveFuncCall()` checks module-qualified calls, `bytes.fromHex`, struct field `fn(...)` calls, and UFCS receiver tiers in strict priority order:
+When `call.callee` is a `FieldAccess` (`target.name(args...)`), `resolveFuncCall()` checks module-qualified calls, struct field `fn(...)` calls, and UFCS receiver tiers in strict priority order:
 
 ```plantuml
 @startuml
@@ -271,7 +267,7 @@ CleanBasic uses pure value semantics for struct instantiation: `Player(name="Ali
 
 ### 6.1 Local Type Inference (`cb::inferExprType` & `ExprNode::resolvedType` Caching)
 When a variable is declared with `dim x = <expr>` or `const x = <expr>` without an explicit `as Type` annotation, `analyzeStmt()` infers and caches the type of `<expr>` on `ExprNode::resolvedType` via `inferAndCacheExprType()` / `inferExprType()` (which short-circuits in $O(1)$ whenever `resolvedType` is already populated):
-* **Literals:** `NumberLiteral` -> `int` or `float` (if `raw` contains `'.'`); `StringLiteral` -> `str`; `BytesLiteral` -> `bytes`; `BoolLiteral` -> `bool`; `ListLiteral` -> `list[infer(elem[0])]` (untyped empty `[]` literals are rejected by `validateEmptyContainerInference` and require an explicit type annotation such as `dim xs as list[int] = []`); `DictLiteral` -> `dict[infer(key[0]), infer(val[0])]` (untyped empty `{}` literals similarly require an explicit type annotation).
+* **Literals:** `NumberLiteral` -> `int` or `float` (if `raw` contains `'.'`); `StringLiteral` -> `str`; `BoolLiteral` -> `bool`; `ListLiteral` -> `list[infer(elem[0])]` (untyped empty `[]` literals are rejected by `validateEmptyContainerInference` and require an explicit type annotation such as `dim xs as list[int] = []`); `DictLiteral` -> `dict[infer(key[0]), infer(val[0])]` (untyped empty `{}` literals similarly require an explicit type annotation).
 * **Variables & Accessors:** `Identifier` -> looks up `scope[name].typeId`; `FieldAccess` -> looks up `TypeSymbol::fields[fieldName]`; `IndexAccess` -> unwraps element type `T` from `list[T]` or value type `V` from `dict[K, V]`.
 * **Calls:** `FuncCall` -> returns resolved `FnSymbol::returnType`, constructed `UnionSymbol` type, or constructed `TypeSymbol` type.
 * **Operators:**
@@ -319,7 +315,7 @@ When function `caller` invokes a fallible function `callee` (`callee.isFallible 
   Compilation fails immediately with an `AnalyzerError`:
   `Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block (function '<caller>' calls fallible function '<callee>').`
 * **Top-Level Statement Rule for Fallible Calls:**
-  Every fallible function or built-in method call (such as `bytes.toUtf8()` or `bytes.fromHex()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if` conditions) is rejected with:
+  Every fallible function call (such as `str.toInt()` or `fs.read()`) must appear at the root of an assignment (`dim x = fallible()` or `x = fallible()`), a direct `return fallible()` statement, a standalone expression statement (`fallible()`), a `while fallible()` condition, or a `for x in fallible()` iterable. Nesting a fallible call inside a sub-expression (such as function arguments `foo(fallible())`, binary operators `1 + fallible()`, compound assignments `x += fallible()`, or `if` conditions) is rejected with:
   `AnalyzerError: Fallible call to '<name>' must be assigned to a variable, returned directly, or called as a standalone statement.`
 
 ### 7.3 `try / catch` Block Scoping (`TryCatchStmt`)

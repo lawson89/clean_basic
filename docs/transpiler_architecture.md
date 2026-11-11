@@ -155,7 +155,6 @@ Each arena wrapper node (`ExprNode`, `StmtNode`, `DeclNode`) pairs source locati
    using ExprVariant = std::variant<
        NumberLiteral,
        StringLiteral,
-       BytesLiteral,
        BoolLiteral,
        NullLiteral,
        Identifier,

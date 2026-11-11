@@ -299,12 +299,6 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
         }
     }
     if (!varTidOpt.has_value()) {
-        if (receiverName == "bytes") {
-            if (matchesCompletionPrefix("fromHex", prefix)) {
-                addCompletionEntry(items, seen, "fromHex", 2, "fn(hex as str) as bytes can error");
-            }
-            return;
-        }
         const auto enumOpt = resolveEnumSymbol(snap.arena, snap.symbols, currentModuleId, receiverName);
         if (enumOpt.has_value() && (enumOpt->moduleId == currentModuleId || enumOpt->isPub)) {
             for (const auto& m : enumOpt->members) {
@@ -437,7 +431,7 @@ inline void collectNamedArgumentCompletions(const LspDocumentSnapshot& snap, std
 }
 
 inline void collectTypeAnnotationCompletions(const LspDocumentSnapshot& snap, std::string_view currentModuleId, std::string_view prefix, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
-    const std::vector<std::string> builtinTypes = {"int", "float", "str", "bytes", "bool", "cptr", "err", "list", "dict"};
+    const std::vector<std::string> builtinTypes = {"int", "float", "str", "bool", "cptr", "err", "list", "dict"};
     for (const auto& bt : builtinTypes) if (matchesCompletionPrefix(bt, prefix)) addCompletionEntry(items, seen, bt, 14, "built-in type");
     if (snap.valid) collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, false, true, items, seen);
 }
@@ -530,15 +524,6 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
         }
         if (callCtx.calleeName == "print") return SignatureHelpData{"fn print(values...)", "", {"values..."}, 0};
     } else {
-        if (callCtx.receiverName == "bytes" && callCtx.calleeName == "fromHex" &&
-            !resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName).has_value()) {
-            std::string doc;
-            const auto docOpt = formatBuiltinHoverMarkdown("bytes.fromHex");
-            if (docOpt.has_value()) {
-                doc = docOpt.value();
-            }
-            return SignatureHelpData{"fn bytes.fromHex(hex as str) as bytes can error", doc, {"hex as str"}, 0};
-        }
         // Built-in receiver methods
         const auto vOpt = resolveVariableTypeInFn(snap, enclosingFnKey, callCtx.receiverName);
         if (vOpt.has_value()) {

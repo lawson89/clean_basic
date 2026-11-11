@@ -15,7 +15,6 @@
 ' EXPECT_CPP: auto records = _val4;
 ' EXPECT_CPP: do {
 ' EXPECT_CPP: _catch_err_3 = _err4;
-' EXPECT_CPP: cbBytesToUtf8(
 ' EXPECT_OUT: Closing connection: 1
 ' EXPECT_OUT: Connected and processed 100 records.
 ' EXPECT_OUT: Handled empty IP (code=408): IP cannot be empty
@@ -163,16 +162,16 @@ fn countItem(s as str) as int can error
     return s.len()
 end fn
 
-fn decodeBytesDirect(raw as bytes) as str can error
-    return raw.toUtf8()
+fn decodeTextDirect(raw as str) as str can error
+    if raw == ""
+        error("empty raw")
+    end if
+    return raw
 end fn
 
-fn parseAndSumMode(raw as bytes, nums as IntList) as ModeAlias can error
-    dim decoded = raw.toUtf8()
+fn parseAndSumMode(raw as str, nums as IntList) as ModeAlias can error
+    dim decoded = decodeTextDirect(raw)
     dim total = 0
-    for b in raw
-        total += b
-    end for
     for n in nums
         total += n
     end for
@@ -190,8 +189,8 @@ fn testFallibleLoopsAndCompound() can error
         total += delta
         label &= item.left(1)
     end for
-    dim m = parseAndSumMode(b"ok", [1, 2])
-    dim dec = decodeBytesDirect(b"ok")
+    dim m = parseAndSumMode("ok", [1, 2])
+    dim dec = decodeTextDirect("ok")
     print($"Fallible loops & compound: total={total}, label={label}, mode={m}, decoded={dec}")
 end fn
 

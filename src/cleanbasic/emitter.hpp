@@ -147,7 +147,6 @@ public:
         if (t.name == "float") return "double";
         if (t.name == "bool") return "bool";
         if (t.name == "str") return "std::string";
-        if (t.name == "bytes") return "std::vector<uint8_t>";
         if (t.name == "err") return "CbError";
         if (t.name == "void") return "void";
         if (t.name == "auto") return "auto";
@@ -224,7 +223,6 @@ public:
         if (resolved.name == "float") return "0.0";
         if (resolved.name == "bool") return "false";
         if (resolved.name == "str") return "std::string("")";
-        if (resolved.name == "bytes") return "std::vector<uint8_t>{}";
         if (isEnumType(symbols, tid, arena, modId)) {
             return "static_cast<" + mapTypeNode(modId, resolved) + ">(0)";
         }
@@ -470,18 +468,6 @@ public:
         return "std::string(" + q + str->value + q + ")";
     }
 
-    if (const auto* b = arena.getExpr<BytesLiteral>(exprId)) {
-        std::string res = "std::vector<uint8_t>{";
-        for (size_t i = 0; i < b->value.size(); ++i) {
-            res += std::to_string(static_cast<int>(b->value[i]));
-            if (i + 1 < b->value.size()) {
-                res += ", ";
-            }
-        }
-        res += "}";
-        return res;
-    }
-
     if (const auto* b = arena.getExpr<BoolLiteral>(exprId)) {
         if (b->value) {
             return "true";
@@ -566,9 +552,6 @@ public:
         if (resolvedTgt.name == "list") {
             return "cbListGet(" + tgtCpp + ", " + idxCpp + ")";
         }
-        if (resolvedTgt.name == "bytes") {
-            return "cbBytesGet(" + tgtCpp + ", " + idxCpp + ")";
-        }
         if (resolvedTgt.name == "dict") {
             return "cbDictAt(" + tgtCpp + ", " + idxCpp + ")";
         }
@@ -619,19 +602,11 @@ public:
                 const auto* access = arena.getExpr<FieldAccess>(call->callee);
                 const bool recvMutated = (!fnSym->params.empty() && fnSym->params[0].isByref);
                 const std::string recvCpp = emitExpr(access->target, scope, recvMutated);
-                const TypeId recvTid = exprType(access->target, scope);
-                const TypeNode recvNode = resolveAliasNode(arena, symbols, currentModuleId, recvTid);
                 if (fnSym->name == "len") {
                     return "static_cast<int64_t>(" + recvCpp + ".size())";
                 } else if (fnSym->name == "push") {
-                    if (recvNode.name == "bytes") {
-                        return recvCpp + ".push_back(static_cast<uint8_t>(" + emitExpr(call->args[0], scope) + "))";
-                    }
                     return recvCpp + ".push_back(" + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "pop") {
-                    if (recvNode.name == "bytes") {
-                        return "cbBytesPop(" + recvCpp + ")";
-                    }
                     return "cbListPop(" + recvCpp + ")";
                 } else if (fnSym->name == "clear") {
                     return recvCpp + ".clear()";
@@ -648,15 +623,9 @@ public:
                 } else if (fnSym->name == "toFloat") {
                     return "static_cast<double>(" + recvCpp + ")";
                 } else if (fnSym->name == "slice") {
-                    if (recvNode.name == "list") {
-                        return "cbListSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
-                    }
-                    return "cbBytesSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
+                    return "cbListSlice(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                 } else if (fnSym->name == "sliceFrom") {
-                    if (recvNode.name == "list") {
-                        return "cbListSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
-                    }
-                    return "cbBytesSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
+                    return "cbListSliceFrom(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "contains") {
                     return "cbListContains(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "sort") {
@@ -679,23 +648,8 @@ public:
                     return "cbBitShr(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "kind") {
                     return "cbUnionKind(" + recvCpp + ")";
-                } else if (fnSym->name == "toUtf8") {
-                    return "cbBytesToUtf8(" + recvCpp + ")";
-                } else if (fnSym->name == "toBytes") {
-                    return "cbStrToBytes(" + recvCpp + ")";
                 } else if (fnSym->name == "byteAt") {
                     return "cbStrByteAtFast(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
-                } else if (fnSym->name == "toHex") {
-                    return "cbBytesToHex(" + recvCpp + ")";
-                } else if (fnSym->name == "fromHex") {
-                    if (call->args.empty()) {
-                        return "cbBytesFromHex(" + recvCpp + ")";
-                    }
-                    return "cbBytesFromHex(" + emitExpr(call->args[0], scope) + ")";
-                } else if (fnSym->name.rfind("readU", 0) == 0) {
-                    return "cbBytesR" + fnSym->name.substr(1) + "(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
-                } else if (fnSym->name.rfind("writeU", 0) == 0) {
-                    return "cbBytesW" + fnSym->name.substr(1) + "(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ", " + emitExpr(call->args[1], scope) + ")";
                 }
             }
 
@@ -1211,8 +1165,6 @@ public:
                 const std::string& lv = forS->loopVars[0];
                 if (iterType.name == "str") {
                     emitLine("for (const auto& " + lv + " : cbStrUtf8Chars(" + iterCpp + ")) {");
-                } else if (iterType.name == "bytes") {
-                    emitLine("for (int64_t " + lv + " : " + iterCpp + ") {");
                 } else {
                     emitLine("for (const auto& " + lv + " : " + iterCpp + ") {");
                 }
@@ -1241,7 +1193,7 @@ public:
                 emitCatchBreakIfPending();
                 return;
             }
-            if (forS->loopVars.size() == 2 && (iterType.name == "list" || iterType.name == "bytes")) {
+            if (forS->loopVars.size() == 2 && iterType.name == "list") {
                 const std::string& idxVar = forS->loopVars[0];
                 const std::string& elemVar = forS->loopVars[1];
                 const std::string iterRef = nextTemp("_iter");
@@ -1250,11 +1202,7 @@ public:
                 emitLine("const auto& " + iterRef + " = " + iterCpp + ";");
                 emitLine("for (int64_t " + idxVar + " = 0; " + idxVar + " < static_cast<int64_t>(" + iterRef + ".size()); ++" + idxVar + ") {");
                 indentLevel += 1;
-                if (iterType.name == "bytes") {
-                    emitLine("int64_t " + elemVar + " = static_cast<int64_t>(" + iterRef + "[static_cast<size_t>(" + idxVar + ")]);");
-                } else {
-                    emitLine("const auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
-                }
+                emitLine("const auto& " + elemVar + " = " + iterRef + "[static_cast<size_t>(" + idxVar + ")];");
                 emitStmtList(fn, forS->body, loopScope, loopDecls);
                 indentLevel -= 1;
                 emitLine("}");

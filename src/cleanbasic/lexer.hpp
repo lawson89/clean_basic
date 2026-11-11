@@ -64,7 +64,7 @@ inline bool isSingleKeyword(std::string_view word) {
 
 inline bool isTypeKeyword(std::string_view word) {
     static const std::vector<std::string_view> typeKws = {
-        "int", "float", "bool", "str", "bytes", "list", "dict", "err", "cptr"
+        "int", "float", "bool", "str", "list", "dict", "err", "cptr"
     };
     for (const auto& tk : typeKws) {
         if (word == tk) {
@@ -274,15 +274,7 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             return true;
         };
 
-        // 5a. Byte string literal: b"..." or B"..."
-        if ((ch == 'b' || ch == 'B') && i + 1 < n && code[i + 1] == '"') {
-            if (!scanQuotedLiteral(2, "BYTES", "Unterminated byte string literal")) {
-                return res;
-            }
-            continue;
-        }
-
-        // 5b. Interpolated string literal: $"..."
+        // 5a. Interpolated string literal: $"..."
         if (ch == '$' && i + 1 < n && code[i + 1] == '"') {
             bracketDepth += 1;
             res.tokens.push_back(Token{"LPAREN", "(", lineNum, col});

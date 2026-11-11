@@ -397,15 +397,6 @@ public:
                             }
                         }
                     }
-                    if (fa->fieldName == "fromHex") {
-                        const TypeId recvTid = inferExpr(fa->target, scope);
-                        if (recvTid < arena.types.size()) {
-                            const TypeNode recvT = resolveAliasNode(arena, symbols, moduleId, recvTid);
-                            if (recvT.name == "bytes") {
-                                setAnalyzerError(exprNode.line, exprNode.col, "'.fromHex()' cannot be called on a 'bytes' instance; use 'bytes.fromHex(hex)' or 'hex.fromHex()'.");
-                            }
-                        }
-                    }
                 }
             }
 

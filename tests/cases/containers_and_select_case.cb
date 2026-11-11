@@ -4,7 +4,6 @@
 ' EXPECT_CPP: cbListSort(
 ' EXPECT_CPP: cbDictKeys(
 ' EXPECT_CPP: cbListPop(
-' EXPECT_CPP: cbBytesPop(
 ' EXPECT_CPP: continue;
 ' EXPECT_CPP: case 1:
 ' EXPECT_CPP: case 2:
@@ -20,8 +19,8 @@
 ' EXPECT_OUT: keys: alpha,beta,gamma,
 ' EXPECT_OUT: arenaSummary: node0_line=12, hasX=true, tagX=99, valsLen=2, totalVals=35
 ' EXPECT_OUT: classify: small|medium|large, str: 1|2|0
-' EXPECT_OUT: continueSum: for=12, while=13, bytesPop=99, emptyRet=0:0
-' EXPECT_OUT: indexed: 0:alice|1:bob|, bytesSum=132
+' EXPECT_OUT: continueSum: for=12, while=13, emptyRet=0:0
+' EXPECT_OUT: indexed: 0:alice|1:bob|
 
 type NodeEntry
     line as int
@@ -111,15 +110,11 @@ fn testContinueAndEmptyInference()
         whileSum += n
     end while
 
-    dim buf = b"abc"
-    dim lastByte = buf.pop()
-    buf.clear()
-
     dim el = makeEmptyList()
     dim ed = makeEmptyDict()
     el = []
     ed = {}
-    print($"continueSum: for={forSum}, while={whileSum}, bytesPop={lastByte}, emptyRet={el.len()}:{ed.len()}")
+    print($"continueSum: for={forSum}, while={whileSum}, emptyRet={el.len()}:{ed.len()}")
 end fn
 
 fn testIndexedLoops()
@@ -128,13 +123,7 @@ fn testIndexedLoops()
     for i, name in names
         nameOut &= $"{i}:{name}|"
     end for
-
-    dim raw = b"AB"
-    dim bytesSum = 0
-    for idx, b in raw
-        bytesSum += idx + b
-    end for
-    print($"indexed: {nameOut}, bytesSum={bytesSum}")
+    print($"indexed: {nameOut}")
 end fn
 
 fn main()

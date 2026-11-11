@@ -1652,7 +1652,7 @@ end fn
 
     const auto lenHover = cb::formatBuiltinHoverMarkdown("len");
     REQUIRE(lenHover.has_value());
-    CHECK(lenHover->find("list, dict, str, or bytes") != std::string::npos);
+    CHECK(lenHover->find("list, dict, or str") != std::string::npos);
     const auto toIntHover = cb::formatBuiltinHoverMarkdown("toInt");
     REQUIRE(toIntHover.has_value());
     CHECK(toIntHover->find("numeric, boolean, or enum value") != std::string::npos);
@@ -2914,28 +2914,6 @@ end fn
         CHECK(res.error.message.find("has no member 'blue'") != std::string::npos);
     }
 
-    SECTION("Analyzer rejects mutating bytes methods on const variables") {
-        const std::string constPush = R"(
-fn main()
-    const b = b"hello"
-    b.push(65)
-end fn
-)";
-        const auto resPush = cb::transpileSource(constPush, "constPush.cb");
-        CHECK_FALSE(resPush.ok);
-        CHECK(resPush.error.message.find("Cannot call '.push()' on const variable 'b'") != std::string::npos);
-
-        const std::string constWrite = R"(
-fn main()
-    const b = b"hello"
-    b.writeU16Le(1234, 0)
-end fn
-)";
-        const auto resWrite = cb::transpileSource(constWrite, "constWrite.cb");
-        CHECK_FALSE(resWrite.ok);
-        CHECK(resWrite.error.message.find("Cannot call '.writeU16Le()' on const variable 'b'") != std::string::npos);
-    }
-
     SECTION("Analyzer validates select case matching on enum types") {
         const std::string mismatchedEnumCase = R"(
 enum Color
@@ -2956,17 +2934,6 @@ end fn
         const auto res = cb::transpileSource(mismatchedEnumCase, "mismatchedEnumCase.cb");
         CHECK_FALSE(res.ok);
         CHECK(res.error.message.find("case expression type does not match select case target type") != std::string::npos);
-    }
-
-    SECTION("Lexer rejects invalid byte literal hex escape") {
-        const std::string badHex = R"(
-fn main()
-    dim b = b"\xZZ"
-end fn
-)";
-        const auto res = cb::transpileSource(badHex, "badHex.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.message.find("Invalid hexadecimal escape") != std::string::npos);
     }
 }
 
@@ -3025,13 +2992,13 @@ TEST_CASE("String interpolation zero-AST lexer desugaring and diagnostics", "[le
     }
 }
 
-TEST_CASE("Fallible UFCS scope forwarding, enum aliases, for-in over bytes/aliases, and LSP enum/bytes parity", "[analyzer][emitter][lsp]") {
+TEST_CASE("Fallible UFCS scope forwarding, enum aliases, and LSP enum parity", "[analyzer][emitter][lsp]") {
     SECTION("Rejects unhandled fallible UFCS receiver calls") {
         const std::string badUfcs = R"CB(
 fn decodeUnhandled()
-    dim raw = b"hello"
-    dim s = raw.toUtf8()
-    print(s)
+    dim raw = "42"
+    dim n = raw.toInt()
+    print(n)
 end fn
 )CB";
         const auto badRes = cb::transpileSource(badUfcs, "badUfcs.cb");
@@ -3040,15 +3007,14 @@ end fn
         CHECK(badRes.error.message.find("Unhandled error") != std::string::npos);
     }
 
-    SECTION("LSP supports enum symbols/hover/completions and bytes receiver completions") {
+    SECTION("LSP supports enum symbols/hover/completions") {
         cb::LspServerState state{};
-        const std::string uri = "file:///ws/enum_bytes_lsp.cb";
+        const std::string uri = "file:///ws/enum_lsp.cb";
         const std::string text = R"CB(public enum Color
     red = 1
     blue = 2
 end enum
 fn demo()
-    dim buf = b"abc"
     dim c = Color.red
 end fn
 )CB";
@@ -3058,11 +3024,11 @@ end fn
         const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(state, uri);
         REQUIRE(snap.valid);
 
-        const cb::CursorTokenContext enumMemberCtx = cb::resolveCursorToken(text, "/ws/enum_bytes_lsp.cb", 7, 20);
+        const cb::CursorTokenContext enumMemberCtx = cb::resolveCursorToken(text, "/ws/enum_lsp.cb", 6, 20);
         REQUIRE(enumMemberCtx.found);
         CHECK(enumMemberCtx.hasDotReceiver);
         CHECK(enumMemberCtx.receiverName == "Color");
-        const cb::ResolvedCursorSymbol hoverInfo = cb::resolveCursorSymbolInfo(snap, "/ws/enum_bytes_lsp.cb", enumMemberCtx);
+        const cb::ResolvedCursorSymbol hoverInfo = cb::resolveCursorSymbolInfo(snap, "/ws/enum_lsp.cb", enumMemberCtx);
         REQUIRE(hoverInfo.hoverMarkdown.has_value());
         CHECK(hoverInfo.hoverMarkdown.value().find("(enum member) Color.red = 1") != std::string::npos);
 
@@ -3070,18 +3036,6 @@ end fn
         std::unordered_map<std::string, bool> seenEnum;
         cb::collectDotCompletions(snap, "", std::string("demo"), "Color", "", dotEnumItems, seenEnum);
         CHECK(dotEnumItems.size() == 2);
-
-        std::vector<cb::CompletionItemEntry> dotBytesItems;
-        std::unordered_map<std::string, bool> seenBytes;
-        cb::collectDotCompletions(snap, "", std::string("demo"), "buf", "toU", dotBytesItems, seenBytes);
-        REQUIRE(dotBytesItems.size() == 1);
-        CHECK(dotBytesItems[0].label == "toUtf8");
-
-        std::vector<cb::CompletionItemEntry> typeItems;
-        std::unordered_map<std::string, bool> seenTypes;
-        cb::collectTypeAnnotationCompletions(snap, "", "by", typeItems, seenTypes);
-        REQUIRE(!typeItems.empty());
-        CHECK(typeItems[0].label == "bytes");
     }
 }
 
@@ -3338,18 +3292,6 @@ end fn
         CHECK_FALSE(resComp.ok);
         CHECK(resComp.error.kind == "AnalyzerError");
         CHECK(resComp.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
-
-        const std::string nestedToUtf8 = R"CB(
-fn caller(raw as bytes) can error
-    if raw.toUtf8() == "ok"
-        print("ok")
-    end if
-end fn
-)CB";
-        const auto resUtf8 = cb::transpileSource(nestedToUtf8, "nestedToUtf8.cb");
-        CHECK_FALSE(resUtf8.ok);
-        CHECK(resUtf8.error.kind == "AnalyzerError");
-        CHECK(resUtf8.error.message.find("Fallible call to 'toUtf8' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 
     SECTION("Rejects unhandled fallible iterable in for-in loops and fallible calls on RHS of compound assignments") {
@@ -3386,28 +3328,13 @@ end fn
     }
 }
 
-TEST_CASE("Auto-included std/str prelude LSP parity and bytes instance .fromHex() rejection", "[prelude][fromHex][lsp]") {
-    SECTION("Rejects calling .fromHex(...) on a bytes instance") {
-        const std::string badInstanceHex = R"CB(
-fn main() as int can error
-    dim b = b""
-    dim out = b.fromHex("deadbeef")
-    return out.len()
-end fn
-)CB";
-        const auto badRes = cb::transpileSource(badInstanceHex, "badInstanceHex.cb");
-        CHECK_FALSE(badRes.ok);
-        CHECK(badRes.error.kind == "AnalyzerError");
-        CHECK(badRes.error.message.find("'.fromHex()' cannot be called on a 'bytes' instance") != std::string::npos);
-    }
-
-    SECTION("LSP zero-import str completions/hover, dict.get, str.fromHex, and aligned infallible bytes endian signatures") {
+TEST_CASE("Auto-included std/str prelude LSP parity", "[prelude][lsp]") {
+    SECTION("LSP zero-import str completions/hover and dict.get") {
         cb::LspServerState state;
         const std::string uri = "file:///workspace/lspPrelude.cb";
         const std::string src = R"CB(fn main()
     dim s = "hello"
     dim d as dict[str, int] = {"a": 1}
-    dim b = b"\x01\x02"
     dim x = s.trim()
 end fn
 )CB";
@@ -3420,13 +3347,10 @@ end fn
         std::unordered_map<std::string, bool> seenStr;
         cb::collectDotCompletions(snap, "", fnKey, "s", "", strItems, seenStr);
         bool foundTrim = false;
-        bool foundFromHex = false;
         for (const auto& item : strItems) {
             if (item.label == "trim") foundTrim = true;
-            if (item.label == "fromHex" && item.detail == "fn() as bytes can error") foundFromHex = true;
         }
         CHECK(foundTrim);
-        CHECK(foundFromHex);
 
         std::vector<cb::CompletionItemEntry> litItems;
         std::unordered_map<std::string, bool> seenLit;
@@ -3443,22 +3367,7 @@ end fn
         CHECK(dictItems[0].label == "get");
         CHECK(dictItems[0].detail == "fn(key as str, defaultValue as int) as int");
 
-        std::vector<cb::CompletionItemEntry> bytesItems;
-        std::unordered_map<std::string, bool> seenBytes;
-        cb::collectDotCompletions(snap, "", fnKey, "b", "", bytesItems, seenBytes);
-        bool foundReadU16Le = false;
-        bool foundWriteU16Le = false;
-        bool foundBytesFromHex = false;
-        for (const auto& item : bytesItems) {
-            if (item.label == "readU16Le" && item.detail == "fn(offset as int) as int") foundReadU16Le = true;
-            if (item.label == "writeU16Le" && item.detail == "fn(value as int, offset as int)") foundWriteU16Le = true;
-            if (item.label == "fromHex") foundBytesFromHex = true;
-        }
-        CHECK(foundReadU16Le);
-        CHECK(foundWriteU16Le);
-        CHECK_FALSE(foundBytesFromHex);
-
-        const auto cursorCtx = cb::resolveCursorToken(src, "/workspace/lspPrelude.cb", 5, 16);
+        const auto cursorCtx = cb::resolveCursorToken(src, "/workspace/lspPrelude.cb", 4, 16);
         const auto symInfo = cb::resolveCursorSymbolInfo(snap, "/workspace/lspPrelude.cb", cursorCtx);
         REQUIRE(symInfo.hoverMarkdown.has_value());
         CHECK(symInfo.hoverMarkdown.value().find("public fn trim(s as str) as str") != std::string::npos);
@@ -4415,21 +4324,11 @@ end fn
         CHECK(tp.cppCode.find("c.template_") != std::string::npos);
     }
 
-    SECTION("Emits shared RFC 3629 UTF-8 validator in cbBytesToUtf8 and single-entry std::filesystem::remove in cbFsRemove") {
+    SECTION("Emits RFC 3629 UTF-8 validator in runtime preamble and single-entry std::filesystem::remove in cbFsRemove") {
         const std::string utf8AndFsSrc = R"CB(
 import "std/fs"
 
-fn checkUtf8(data as bytes) as str can error
-    return data.toUtf8()
-end fn
-
 fn main() as int
-    try
-        dim s = checkUtf8(b"\xc0\x80")
-        print(s)
-    catch e
-        print(e.msg)
-    end try
     try
         fs.remove("nonexistent_file.txt")
     catch e
@@ -4440,7 +4339,6 @@ end fn
 )CB";
         const auto tp = cb::transpileSource(utf8AndFsSrc, "utf8_fs.cb");
         REQUIRE(tp.ok);
-        CHECK(tp.cppCode.find("const size_t seqLen = cbStrUtf8SeqLen(s, i);") != std::string::npos);
         CHECK(tp.cppCode.find("b0 == 0xE0u && b1 < 0xA0u") != std::string::npos);
         CHECK(tp.cppCode.find("b0 == 0xEDu && b1 >= 0xA0u") != std::string::npos);
         CHECK(tp.cppCode.find("b0 == 0xF0u && b1 < 0x90u") != std::string::npos);
@@ -4517,42 +4415,6 @@ end fn
         const auto badDeferFallibleCheck = cb::checkSource(badDeferFallibleSrc, "bad_defer_fallible.cb");
         CHECK(!badDeferFallibleCheck.ok);
         CHECK(badDeferFallibleCheck.error.message.find("Unhandled error") != std::string::npos);
-
-        // 4. LSP hover for bytes endian methods and hover + signature help for bytes.fromHex
-        for (std::string_view endianMethod : {
-                 "readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be",
-                 "writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"
-             }) {
-            const auto mdOpt = cb::formatBuiltinHoverMarkdown(endianMethod);
-            INFO("endianMethod: " << endianMethod);
-            REQUIRE(mdOpt.has_value());
-            CHECK(mdOpt->find(std::string("fn .") + std::string(endianMethod)) != std::string::npos);
-        }
-
-        const std::string bytesLspSrc = R"CB(fn testBytes() can error
-    dim buf = bytes.fromHex("deadbeef")
-    dim v = buf.readU16Le(0)
-end fn
-)CB";
-        const cb::LspDocumentSnapshot bytesSnap = cb::makeSnapshotFromCheckResult(cb::checkSource(bytesLspSrc, "/ws/bytes_lsp.cb"));
-        REQUIRE(bytesSnap.valid);
-
-        const auto fromHexCursor = cb::resolveCursorToken(bytesLspSrc, "/ws/bytes_lsp.cb", 2, 22);
-        const auto fromHexInfo = cb::resolveCursorSymbolInfo(bytesSnap, "/ws/bytes_lsp.cb", fromHexCursor);
-        REQUIRE(fromHexInfo.hoverMarkdown.has_value());
-        CHECK(fromHexInfo.hoverMarkdown->find("fn bytes.fromHex(hex as str) as bytes can error") != std::string::npos);
-
-        const auto readU16Cursor = cb::resolveCursorToken(bytesLspSrc, "/ws/bytes_lsp.cb", 3, 18);
-        const auto readU16Info = cb::resolveCursorSymbolInfo(bytesSnap, "/ws/bytes_lsp.cb", readU16Cursor);
-        REQUIRE(readU16Info.hoverMarkdown.has_value());
-        CHECK(readU16Info.hoverMarkdown->find("fn .readU16Le(offset as int) as int") != std::string::npos);
-
-        const cb::CallSiteContext fromHexCallCtx = cb::parseEnclosingCallSite("    dim buf = bytes.fromHex(");
-        const auto fromHexSig = cb::resolveSignatureHelp(bytesSnap, "", std::string("testBytes"), fromHexCallCtx);
-        REQUIRE(fromHexSig.has_value());
-        CHECK(fromHexSig->label == "fn bytes.fromHex(hex as str) as bytes can error");
-        REQUIRE(fromHexSig->paramLabels.size() == 1);
-        CHECK(fromHexSig->paramLabels[0] == "hex as str");
     }
 
     SECTION("Zero-copy const auto& union select case binding, const enforcement, pre-cached built-in receiver methods, and Analyzer call-graph edges") {
@@ -4592,7 +4454,6 @@ end fn
         REQUIRE(checkRes.ok);
         CHECK(checkRes.symbols.builtinReceiverCache.count("int") == 1);
         CHECK(checkRes.symbols.builtinReceiverCache.count("str") == 1);
-        CHECK(checkRes.symbols.builtinReceiverCache.count("bytes") == 1);
         CHECK(checkRes.symbols.rootReferencedFunctions.count("main") == 1);
         CHECK(checkRes.symbols.callGraphEdges.at("main").count("inspectEvent") == 1);
         CHECK(checkRes.symbols.callGraphEdges.at("inspectEvent").count("bump") == 1);

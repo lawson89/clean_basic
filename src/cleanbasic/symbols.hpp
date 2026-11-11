@@ -230,7 +230,6 @@ struct GlobalSymbolTable {
     TypeId typeNull = INVALID_ID;
     TypeId typeErr = INVALID_ID;
     TypeId typeCptr = INVALID_ID;
-    TypeId typeBytes = INVALID_ID;
 };
 
 struct AnalysisResult {
@@ -267,13 +266,11 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     symbols.typeNull = arena.findOrAddType("null");
     symbols.typeErr = arena.findOrAddType("err");
     symbols.typeCptr = arena.findOrAddType("cptr");
-    symbols.typeBytes = arena.findOrAddType("bytes");
 
     arena.findOrAddType("list", {symbols.typeInt});
     arena.findOrAddType("list", {symbols.typeFloat});
     arena.findOrAddType("list", {symbols.typeStr});
     arena.findOrAddType("list", {symbols.typeBool});
-    arena.findOrAddType("list", {symbols.typeBytes});
     arena.findOrAddType("list", {symbols.typeCptr});
     arena.findOrAddType("list", {symbols.typeErr});
 
@@ -348,37 +345,16 @@ inline void registerBuiltins(AstArena& arena, GlobalSymbolTable& symbols) {
     };
     symbols.builtinReceiverCache["str"] = {
         makeMethod("len", symbols.typeStr, false, symbols.typeInt),
-        makeMethod("toBytes", symbols.typeStr, false, symbols.typeBytes),
-        makeMethod("fromHex", symbols.typeStr, false, symbols.typeBytes, {}, true),
         makeMethod("byteAt", symbols.typeStr, false, symbols.typeInt, {makeParam("idx", symbols.typeInt)}),
         makeMethod("toStr", symbols.typeStr, false, symbols.typeStr)
     };
-    std::vector<FnSymbol> bytesMethods = {
-        makeMethod("len", symbols.typeBytes, false, symbols.typeInt),
-        makeMethod("push", symbols.typeBytes, true, symbols.typeVoid, {makeParam("byteVal", symbols.typeInt)}),
-        makeMethod("pop", symbols.typeBytes, true, symbols.typeInt),
-        makeMethod("clear", symbols.typeBytes, true, symbols.typeVoid),
-        makeMethod("slice", symbols.typeBytes, false, symbols.typeBytes, {makeParam("start", symbols.typeInt), makeParam("stop", symbols.typeInt)}),
-        makeMethod("sliceFrom", symbols.typeBytes, false, symbols.typeBytes, {makeParam("start", symbols.typeInt)}),
-        makeMethod("toUtf8", symbols.typeBytes, false, symbols.typeStr, {}, true),
-        makeMethod("toHex", symbols.typeBytes, false, symbols.typeStr)
-    };
-    const std::vector<std::string_view> readNames = {"readU16Le", "readU16Be", "readU32Le", "readU32Be", "readU64Le", "readU64Be"};
-    for (const auto rn : readNames) {
-        bytesMethods.push_back(makeMethod(rn, symbols.typeBytes, false, symbols.typeInt, {makeParam("offset", symbols.typeInt)}));
-    }
-    const std::vector<std::string_view> writeNames = {"writeU16Le", "writeU16Be", "writeU32Le", "writeU32Be", "writeU64Le", "writeU64Be"};
-    for (const auto wn : writeNames) {
-        bytesMethods.push_back(makeMethod(wn, symbols.typeBytes, true, symbols.typeVoid, {makeParam("value", symbols.typeInt), makeParam("offset", symbols.typeInt)}));
-    }
-    symbols.builtinReceiverCache["bytes"] = std::move(bytesMethods);
 }
 
 inline bool isBuiltinTypeName(std::string_view name) {
     return name == "int" || name == "float" || name == "str" || name == "bool" ||
            name == "void" || name == "auto" || name == "null" ||
            name == "err" || name == "list" || name == "dict" || name == "cptr" ||
-           name == "bytes" || name == "fn";
+           name == "fn";
 }
 
 inline bool isBuiltinSymbolName(std::string_view name) {
@@ -1180,9 +1156,6 @@ inline bool isUfcsCallExpr(
         if (isModuleAliasInScope(symbols, currentModuleId, tgtIdent->name, scope, targetModId)) {
             return false;
         }
-        if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end() && calleeFa->fieldName == "fromHex") {
-            return false;
-        }
     }
     if (resolveUnionVariantAccess(arena, symbols, currentModuleId, scope, *calleeFa).has_value()) {
         return false;
@@ -1262,10 +1235,6 @@ inline TypeId inferExprType(
 
     if (arena.getExpr<StringLiteral>(exprId) != nullptr) {
         return symbols.typeStr;
-    }
-
-    if (arena.getExpr<BytesLiteral>(exprId) != nullptr) {
-        return symbols.typeBytes;
     }
 
     if (arena.getExpr<BoolLiteral>(exprId) != nullptr) {
@@ -1357,9 +1326,6 @@ inline TypeId inferExprType(
             }
             if (tnode.name == "dict" && tnode.typeArgs.size() == 2) {
                 return tnode.typeArgs[1];
-            }
-            if (tnode.name == "bytes") {
-                return symbols.typeInt;
             }
             if (tnode.name == "str") {
                 return symbols.typeStr;
@@ -1488,15 +1454,6 @@ inline std::optional<FnSymbol> resolveFuncCall(
                 }
                 return std::nullopt;
             }
-            if (tgtIdent->name == "bytes" && scope.find("bytes") == scope.end() && access->fieldName == "fromHex") {
-                FnSymbol fs{};
-                fs.name = "fromHex";
-                fs.returnType = symbols.typeBytes;
-                fs.isFallible = true;
-                fs.isBuiltinReceiver = true;
-                fs.params.push_back(makeBuiltinParam("hex", symbols.typeStr, false));
-                return fs;
-            }
         }
         if (resolveUnionVariantAccess(arena, symbols, currentModuleId, scope, *access).has_value()) {
             return std::nullopt;
@@ -1583,15 +1540,6 @@ inline std::vector<std::pair<std::string, TypeId>> resolveForInLoopVars(
             bindings.emplace_back(forStmt.loopVars[1], iterT.typeArgs[0]);
         } else if (errorOut != nullptr) {
             *errorOut = "List iteration supports at most 2 loop variables ('for item in list' or 'for i, item in list').";
-        }
-    } else if (iterT.name == "bytes") {
-        if (nVars == 1) {
-            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
-        } else if (nVars == 2) {
-            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
-            bindings.emplace_back(forStmt.loopVars[1], symbols.typeInt);
-        } else if (errorOut != nullptr) {
-            *errorOut = "Bytes iteration supports at most 2 loop variables ('for b in data' or 'for i, b in data').";
         }
     } else if (iterT.name == "str") {
         if (nVars == 1) {

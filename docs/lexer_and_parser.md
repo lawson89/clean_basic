@@ -34,11 +34,10 @@ struct LexResult {
 | Token `kind` | Examples (`Token::value`) | Description |
 | :--- | :--- | :--- |
 | `KEYWORD` | `public`, `private`, `extern`, `import`, `import header`, `import link`, `const`, `dim`, `byref`, `enum`, `end enum`, `union`, `end union`, `while`, `end while`, `until`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
-| `TYPE_KW` | `int`, `float`, `bool`, `str`, `bytes`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
+| `TYPE_KW` | `int`, `float`, `bool`, `str`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
 | `NUMBER` | `42`, `1_000_000`, `0xFF_00`, `0b1010_0101`, `3.141_592` | Decimal, hexadecimal (`0x...`), or binary (`0b...`) integer literals and decimal floating-point literals (supporting `_` digit separators). |
 | `STRING` | `"Alice"`, `"IP cannot be empty"` | Double-quoted string literals (retaining outer quotes until stripped by `stripQuotes` in the parser; supports `\` escape sequences). Interpolated strings (`$"Hello {user.name}!"`) are desugared directly in the lexer into parenthesized `&` concatenation expressions `("Hello " & (user.name) & "!")` with `{{` and `}}` brace escaping. |
-| `BYTES` | `b"GIF89a"`, `B"\x7fELF"` | Byte string literals prefixed with `b"` or `B"`. |
 | `OP_CMP` | `==`, `!=`, `<`, `>`, `<=`, `>=` | Relational and equality comparison operators. |
 | `OP_ARITH` | `+`, `-`, `*`, `/`, `%`, `&` | Arithmetic operators (including integer modulo `%`) and the `&` string concatenation operator. |
 | `COMPOUND_ASSIGN` | `+=`, `-=`, `*=`, `/=`, `%=`, `&=` | Compound assignment operators (desugared in the parser to `VarAssignment`). |
@@ -113,7 +112,7 @@ Unary prefix '+', '-' (right-associative)" as L7
 rectangle "8. parsePostfix
 '.field', '[index]', '(args...)' (left-associative loop)" as L8
 rectangle "9. parsePrimary
-Literals (Number, String, Bytes b"...", Bool, Null, List [...], Dict {...}),
+Literals (Number, String, Bool, Null, List [...], Dict {...}),
 Identifiers, and Parenthesized '( expr )'" as L9
 
 L1 --> L2

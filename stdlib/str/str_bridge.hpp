@@ -803,6 +803,19 @@ inline bool cbStrIsAsciiHexDigitByte(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+inline int cbStrHexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
 inline bool cbStrAsciiIsHexDigit(const std::string& s) {
     if (s.empty()) {
         return false;
@@ -893,8 +906,8 @@ inline std::tuple<std::string, CbError> cbStrUnescape(const std::string& s) {
             if (i + 3 >= s.size()) {
                 return {std::string(""), CbError{"Invalid hex escape sequence: expected two hex digits", 400}};
             }
-            const int hi = cbHexDigitValue(s[i + 2]);
-            const int lo = cbHexDigitValue(s[i + 3]);
+            const int hi = cbStrHexDigitValue(s[i + 2]);
+            const int lo = cbStrHexDigitValue(s[i + 3]);
             if (hi < 0 || lo < 0) {
                 return {std::string(""), CbError{"Invalid hex escape sequence: non-hex digit", 400}};
             }

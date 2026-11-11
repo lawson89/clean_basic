@@ -152,7 +152,7 @@ end fn
 
 fn writeBannerToStream(out as fs.File, msg as str) can error
     out.writeStr("Stdout stream write: ")
-    out.writeFileBytes(b"he")
+    out.writeStr("he")
     out.writeLine(msg)
     out.flush()
 end fn

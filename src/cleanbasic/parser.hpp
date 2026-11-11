@@ -147,69 +147,7 @@ inline bool validateStringLiteralEscapes(std::string_view raw, std::string* erro
     return true;
 }
 
-inline std::vector<uint8_t> decodeBytesLiteral(std::string_view raw, std::string* errorOut = nullptr) {
-    std::vector<uint8_t> bytes;
-    if (raw.size() < 3) {
-        return bytes;
-    }
-    constexpr char backslashChar = 92;
-    constexpr char singleQuote = static_cast<char>(39);
-    size_t i = 2; // skip b" or B"
-    size_t end = raw.size() - 1; // skip trailing "
-    while (i < end) {
-        if (raw[i] == backslashChar && i + 1 < end) {
-            char esc = raw[i + 1];
-            if (esc == 'n') {
-                bytes.push_back(static_cast<uint8_t>(10));
-                i += 2;
-            } else if (esc == 'r') {
-                bytes.push_back(static_cast<uint8_t>(13));
-                i += 2;
-            } else if (esc == 't') {
-                bytes.push_back(static_cast<uint8_t>(9));
-                i += 2;
-            } else if (esc == '0') {
-                bytes.push_back(static_cast<uint8_t>(0));
-                i += 2;
-            } else if (esc == backslashChar) {
-                bytes.push_back(static_cast<uint8_t>(92));
-                i += 2;
-            } else if (esc == '"') {
-                bytes.push_back(static_cast<uint8_t>('"'));
-                i += 2;
-            } else if (esc == singleQuote) {
-                bytes.push_back(static_cast<uint8_t>(39));
-                i += 2;
-            } else if (esc == 'x' || esc == 'X') {
-                if (i + 3 >= end) {
-                    if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
-                    return bytes;
-                }
-                const int v1 = cbHexDigitValue(raw[i + 2]);
-                const int v2 = cbHexDigitValue(raw[i + 3]);
-                if (v1 < 0 || v2 < 0) {
-                    if (errorOut) *errorOut = "Invalid hexadecimal escape in byte string literal.";
-                    return bytes;
-                }
-                bytes.push_back(static_cast<uint8_t>((v1 << 4) | v2));
-                i += 4;
-            } else {
-                if (errorOut) {
-                    std::string msg = "Unknown escape sequence '";
-                    msg.push_back(backslashChar);
-                    msg.push_back(esc);
-                    msg += "' in byte string literal.";
-                    *errorOut = std::move(msg);
-                }
-                return bytes;
-            }
-        } else {
-            bytes.push_back(static_cast<uint8_t>(raw[i]));
-            i += 1;
-        }
-    }
-    return bytes;
-}
+
 // ==========================================
 // Stateful Parser Class
 // ==========================================
@@ -389,15 +327,6 @@ public:
                 setParseError(strTok, errStr);
             }
             return arena.addExpr(strTok.line, strTok.col, StringLiteral{stripQuotes(strTok.value)});
-        }
-        if (check("BYTES")) {
-            const Token bTok = match("BYTES");
-            std::string errStr;
-            auto decoded = decodeBytesLiteral(bTok.value, &errStr);
-            if (!errStr.empty()) {
-                setParseError(bTok, errStr);
-            }
-            return arena.addExpr(bTok.line, bTok.col, BytesLiteral{std::move(decoded)});
         }
         if (check("KEYWORD", "true") || check("KEYWORD", "false")) {
             const Token bTok = match("KEYWORD");

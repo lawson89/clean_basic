@@ -76,10 +76,6 @@ struct StringLiteral {
     std::string value;
 };
 
-struct BytesLiteral {
-    std::vector<uint8_t> value;
-};
-
 struct BoolLiteral {
     bool value = false;
 };
@@ -138,7 +134,6 @@ struct DictLiteral {
 using ExprVariant = std::variant<
     NumberLiteral,
     StringLiteral,
-    BytesLiteral,
     BoolLiteral,
     NullLiteral,
     Identifier,
