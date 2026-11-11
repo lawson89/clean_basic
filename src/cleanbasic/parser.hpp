@@ -722,13 +722,7 @@ public:
             }
             const Token eqTok = match("ASSIGN");
             const ExprId startExpr = parseExpr();
-            bool inclusive = true;
-            if (check("KEYWORD", "until")) {
-                match("KEYWORD", "until");
-                inclusive = false;
-            } else {
-                match("KEYWORD", "to");
-            }
+            match("KEYWORD", "to");
             const ExprId endExpr = parseExpr();
             bool hasStep = false;
             ExprId stepExpr = INVALID_ID;
@@ -737,7 +731,7 @@ public:
                 hasStep = true;
                 stepExpr = parseExpr();
             }
-            rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr, inclusive};
+            rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr};
         } else {
             match("KEYWORD", "in");
             iterable = parseExpr();
@@ -956,36 +950,9 @@ public:
         expectNewlineOrEof();
 
         std::vector<FieldDecl> fields;
-        if (isExtern && !check("KEYWORD", "end type")) {
-            if (check("EOF") ||
-                check("KEYWORD", "public") ||
-                check("KEYWORD", "extern") ||
-                check("KEYWORD", "fn") ||
-                check("KEYWORD", "type") ||
-                check("KEYWORD", "enum") ||
-                check("KEYWORD", "union") ||
-                check("KEYWORD", "const") ||
-                check("KEYWORD", "alias") ||
-                check("KEYWORD", "import") ||
-                check("KEYWORD", "import header") ||
-                check("KEYWORD", "import link")) {
-                TypeDecl decl{};
-                decl.name = nameTok.value;
-                decl.fields = std::move(fields);
-                decl.isPub = isPub;
-                decl.isExtern = isExtern;
-                return arena.addDecl(startTok.line, startTok.col, std::move(decl), "", fileName, nameTok.line, nameTok.line, nameTok.col);
-            }
-        }
-
         while (!check("KEYWORD", "end type")) {
             if (check("EOF")) {
                 setParseError(current(), "Unclosed 'type " + nameTok.value + "', expected 'end type'");
-            }
-            bool isPrivateField = false;
-            if (check("KEYWORD", "private")) {
-                match("KEYWORD", "private");
-                isPrivateField = true;
             }
             const Token fieldTok = match("IDENT");
             match("KEYWORD", "as");
@@ -995,7 +962,6 @@ public:
             fd.col = fieldTok.col;
             fd.name = fieldTok.value;
             fd.typeId = fieldType;
-            fd.isPrivate = isPrivateField;
             fields.push_back(std::move(fd));
             expectNewlineOrEof();
         }

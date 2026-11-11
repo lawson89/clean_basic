@@ -300,23 +300,14 @@ inline std::string formatFnHoverMarkdown(const AstArena& arena, const FnSymbol& 
     return appendDocCommentMarkdown(wrapVbCodeBlock(sig), fn.docComment);
 }
 
-inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts, bool includePrivateFields = true) {
+inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts) {
     const std::string nl(1, static_cast<char>(10));
-    std::string code = buildHoverHeader("type", ts.name, ts.isPub, ts.isExtern);
-    if (ts.isExtern && ts.fieldOrder.empty()) return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);
-    code += nl;
+    std::string code = buildHoverHeader("type", ts.name, ts.isPub, ts.isExtern) + nl;
     for (const auto& f : ts.fieldOrder) {
-        if (f.isPrivate && !includePrivateFields) {
-            continue;
-        }
         TypeId ftid = f.typeId;
         const auto fit = ts.fields.find(f.name);
         if (fit != ts.fields.end()) ftid = fit->second;
-        std::string privPrefix;
-        if (f.isPrivate) {
-            privPrefix = "private ";
-        }
-        code += "    " + privPrefix + f.name + " as " + formatCleanbasicType(arena, ftid) + nl;
+        code += "    " + f.name + " as " + formatCleanbasicType(arena, ftid) + nl;
     }
     code += "end type";
     return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);

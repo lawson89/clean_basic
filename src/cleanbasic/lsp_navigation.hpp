@@ -146,7 +146,7 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         if (scopeIt != snap.symbols.fnScopes.end()) activeScope = scopeIt->second;
     }
     const auto bindFn = [&](const FnSymbol& fn) { bindSymbolTarget(res, fn, formatFnHoverMarkdown(snap.arena, fn)); };
-    const auto bindType = [&](const TypeSymbol& ts) { bindSymbolTarget(res, ts, formatTypeHoverMarkdown(snap.arena, ts, ts.moduleId == currentModId)); };
+    const auto bindType = [&](const TypeSymbol& ts) { bindSymbolTarget(res, ts, formatTypeHoverMarkdown(snap.arena, ts)); };
     const auto bindAlias = [&](const AliasSymbol& al) { bindSymbolTarget(res, al, formatAliasHoverMarkdown(snap.arena, snap.symbols, al)); };
     const auto bindEnum = [&](const EnumSymbol& es) { bindSymbolTarget(res, es, formatEnumHoverMarkdown(es)); };
     const auto bindUnion = [&](const UnionSymbol& us) { bindSymbolTarget(res, us, formatUnionHoverMarkdown(snap.arena, us)); };
@@ -218,17 +218,15 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
             const auto tsOpt = resolveTypeSymbol(snap.arena, snap.symbols, currentModId, recvTid);
             if (tsOpt.has_value()) {
                 const TypeSymbol& ts = tsOpt.value();
-                if (ts.moduleId == currentModId || ts.privateFields.count(member) == 0) {
-                    const auto fit = ts.fields.find(member);
-                    if (fit != ts.fields.end()) {
-                        res.hoverMarkdown = wrapVbCodeBlock("(field) " + ts.name + "." + member + " as " + formatCleanbasicType(snap.arena, fit->second));
-                        if (!ts.fileName.empty()) {
-                            for (const auto& fd : ts.fieldOrder) {
-                                if (fd.name == member) { res.definition = makeDefTarget(ts.fileName, fd.line, fd.col, fd.name.size()); break; }
-                            }
+                const auto fit = ts.fields.find(member);
+                if (fit != ts.fields.end()) {
+                    res.hoverMarkdown = wrapVbCodeBlock("(field) " + ts.name + "." + member + " as " + formatCleanbasicType(snap.arena, fit->second));
+                    if (!ts.fileName.empty()) {
+                        for (const auto& fd : ts.fieldOrder) {
+                            if (fd.name == member) { res.definition = makeDefTarget(ts.fileName, fd.line, fd.col, fd.name.size()); break; }
                         }
-                        return res;
                     }
+                    return res;
                 }
             }
             const auto ufcsFn = resolveUfcsFn(snap.arena, snap.symbols, currentModId, recvTid, member);

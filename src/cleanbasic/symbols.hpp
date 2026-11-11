@@ -17,7 +17,6 @@ struct TypeSymbol {
     std::string moduleId;
     std::string key;
     std::unordered_map<std::string, TypeId> fields;
-    std::unordered_set<std::string> privateFields;
     std::vector<FieldDecl> fieldOrder;
     bool isPub = false;
     bool isExtern = false;
@@ -108,6 +107,26 @@ struct ConstSymbol {
     uint32_t endLine = 1;
     std::string docComment;
 };
+
+template <typename SymT>
+inline void populateSymbolMeta(
+    SymT& sym,
+    const DeclNode& declNode,
+    std::string_view name,
+    bool isPub,
+    std::string cppName
+) {
+    sym.name = std::string(name);
+    sym.moduleId = declNode.moduleId;
+    sym.key = symbolKey(declNode.moduleId, name);
+    sym.isPub = isPub;
+    sym.cppName = std::move(cppName);
+    sym.fileName = declNode.fileName;
+    sym.line = declNode.nameLine;
+    sym.col = declNode.nameCol;
+    sym.endLine = declNode.endLine;
+    sym.docComment = declNode.docComment;
+}
 
 inline std::vector<std::string_view> splitSourceLinesView(std::string_view sourceText) {
     std::vector<std::string_view> lines;
@@ -1306,9 +1325,6 @@ inline TypeId inferExprType(
         const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
         if (tsOpt.has_value()) {
-            if (tsOpt->moduleId != currentModuleId && tsOpt->privateFields.count(faccess->fieldName) > 0) {
-                return symbols.typeAuto;
-            }
             const auto fit = tsOpt->fields.find(faccess->fieldName);
             if (fit != tsOpt->fields.end()) {
                 return fit->second;
@@ -1406,6 +1422,45 @@ inline TypeId inferAndCacheExprType(
     if (exprId >= arena.exprs.size()) {
         return symbols.typeAuto;
     }
+    if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
+        for (const ExprId elId : llit->elements) {
+            inferAndCacheExprType(arena, elId, symbols, scope, currentModuleId);
+        }
+        if (!llit->elements.empty()) {
+            const TypeId elTid = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, llit->elements[0], symbols, scope, currentModuleId));
+            arena.findOrAddType("list", {elTid});
+        }
+    } else if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
+        for (const auto& ent : dlit->entries) {
+            inferAndCacheExprType(arena, ent.key, symbols, scope, currentModuleId);
+            inferAndCacheExprType(arena, ent.value, symbols, scope, currentModuleId);
+        }
+        if (!dlit->entries.empty()) {
+            const TypeId kTid = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].key, symbols, scope, currentModuleId));
+            const TypeId vTid = resolveAlias(arena, symbols, currentModuleId, inferExprType(arena, dlit->entries[0].value, symbols, scope, currentModuleId));
+            arena.findOrAddType("dict", {kTid, vTid});
+            arena.findOrAddType("list", {kTid});
+        }
+    } else if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
+        inferAndCacheExprType(arena, call->callee, symbols, scope, currentModuleId);
+        for (const ExprId argId : call->args) {
+            inferAndCacheExprType(arena, argId, symbols, scope, currentModuleId);
+        }
+        for (const auto& na : call->namedArgs) {
+            inferAndCacheExprType(arena, na.value, symbols, scope, currentModuleId);
+        }
+    } else if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
+        inferAndCacheExprType(arena, bop->left, symbols, scope, currentModuleId);
+        inferAndCacheExprType(arena, bop->right, symbols, scope, currentModuleId);
+    } else if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
+        inferAndCacheExprType(arena, uop->operand, symbols, scope, currentModuleId);
+    } else if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
+        inferAndCacheExprType(arena, fa->target, symbols, scope, currentModuleId);
+    } else if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
+        inferAndCacheExprType(arena, ia->target, symbols, scope, currentModuleId);
+        inferAndCacheExprType(arena, ia->index, symbols, scope, currentModuleId);
+    }
+
     const TypeId tid = inferExprType(arena, exprId, symbols, scope, currentModuleId);
     if (tid != INVALID_ID && tid != symbols.typeAuto) {
         arena.exprs[exprId].resolvedType = tid;

@@ -259,7 +259,6 @@ end fn
         REQUIRE(fnFt.body.size() >= 2);
         const auto& forStmt = *parseFt.arena.getStmt<cb::ForStmt>(fnFt.body[1]);
         CHECK(forStmt.rangeSpec.hasRange);
-        CHECK(forStmt.rangeSpec.inclusive);
         CHECK(forStmt.rangeSpec.hasStep);
     }
 
@@ -575,6 +574,7 @@ end fn
 TEST_CASE("Emitter generates C++17 error bubbling and defer for extern declarations", "[emitter]") {
     const std::string code = R"(
 public extern type SQL_DB
+end type
 public extern fn connect(path as str) as SQL_DB can error
 public extern fn SQL_close(db as SQL_DB)
 
@@ -3469,13 +3469,14 @@ TEST_CASE("Tools cbdoc and cbfmt, LSP '' doc-comments, and collection loop const
         CHECK(mdText.find("public fn newParser(") != std::string::npos);
         CHECK(mdText.find("Creates a new declarative command-line Parser") != std::string::npos);
 
-        // Verify cbdoc handles single-line and multi-line extern types (including extern public type)
+        // Verify cbdoc handles fieldless and multi-line extern types (including extern public type)
         const std::string extCb = workDir + "/extern_types.cb";
         const std::string extMd = workDir + "/extern_ref.md";
         {
             std::ofstream f(extCb, std::ios::binary | std::ios::trunc);
             f << R"CB('' Opaque regex handle.
 extern public type Regex
+end type
 
 '' Vector with fields.
 public extern type Vec2
@@ -4113,69 +4114,56 @@ end fn
     }
 }
 
-TEST_CASE("Private struct fields, recursive value type cycle detection, topological struct ordering, 1-to-1 module mangling, and macro hygiene", "[access][analyzer][emitter][mangling]") {
-    SECTION("Same-module private field access and construction succeed while cross-module access and direct construction are rejected") {
-        std::unordered_map<std::string, std::string> memFiles;
-        memFiles["vault.cb"] = R"CB(
-public type Account
-    private secretPin as int
-    owner as str
-end type
-
-public fn openAccount(owner as str, pin as int) as Account
-    dim acc = Account(secretPin=pin, owner=owner)
-    acc.secretPin = pin + 1
-    return acc
-end fn
-
-public fn checkPin(acc as Account) as int
-    return acc.secretPin
-end fn
-)CB";
-
-        const std::string okMain = R"CB(import "vault.cb"
+TEST_CASE("Opaque extern types, lexical block scoping, recursive value type cycle detection, topological struct ordering, 1-to-1 module mangling, and macro hygiene", "[access][analyzer][emitter][mangling]") {
+    SECTION("Enforces true lexical block scoping across if, for, while, select case, try/catch, and defer blocks") {
+        const std::string leakedIfVar = R"CB(
 fn main() as int
-    dim a = vault.openAccount("Alice", 999)
-    print(a.owner, vault.checkPin(a))
+    if true
+        dim innerVal = 42
+    end if
+    innerVal = 99
     return 0
 end fn
 )CB";
-        const auto okRes = cb::checkSource(okMain, "main.cb", memFiles);
-        REQUIRE(okRes.ok);
+        const auto resIf = cb::checkSource(leakedIfVar, "leaked_if.cb");
+        REQUIRE_FALSE(resIf.ok);
+        CHECK(resIf.error.message.find("Undeclared variable 'innerVal'") != std::string::npos);
 
-        const std::string badReadMain = R"CB(import "vault.cb"
+        const std::string leakedForVar = R"CB(
 fn main() as int
-    dim a = vault.openAccount("Alice", 999)
-    return a.secretPin
-end fn
-)CB";
-        const auto badReadRes = cb::checkSource(badReadMain, "main.cb", memFiles);
-        REQUIRE_FALSE(badReadRes.ok);
-        CHECK(badReadRes.error.message.find("Field 'secretPin' of type 'Account' is private to module 'vault'.") != std::string::npos);
-
-        const std::string badWriteMain = R"CB(import "vault.cb"
-fn main() as int
-    dim a = vault.openAccount("Alice", 999)
-    a.secretPin = 0
+    for i = 0 to 3
+        dim stepVal = i
+    end for
+    i = 10
     return 0
 end fn
 )CB";
-        const auto badWriteRes = cb::checkSource(badWriteMain, "main.cb", memFiles);
-        REQUIRE_FALSE(badWriteRes.ok);
-        CHECK(badWriteRes.error.message.find("Field 'secretPin' of type 'Account' is private to module 'vault'.") != std::string::npos);
+        const auto resFor = cb::checkSource(leakedForVar, "leaked_for.cb");
+        REQUIRE_FALSE(resFor.ok);
+        CHECK(resFor.error.message.find("Undeclared variable 'i'") != std::string::npos);
 
-        const std::string badConstructMain = R"CB(import "vault.cb"
+        // Verify sibling branches can independently declare same-named variables with different types
+        const std::string siblingShadow = R"CB(
 fn main() as int
-    dim a = vault.Account(owner="Alice")
+    if true
+        dim temp = 10
+    else
+        dim temp = "hello"
+    end if
+    for i = 0 to 2
+        dim item = i
+    end for
+    for i = 0 to 2
+        dim item = "str"
+    end for
     return 0
 end fn
 )CB";
-        const auto badConstructRes = cb::checkSource(badConstructMain, "main.cb", memFiles);
-        REQUIRE_FALSE(badConstructRes.ok);
-        CHECK(badConstructRes.error.message.find("Cannot construct type 'Account' outside module 'vault' because field 'secretPin' is private.") != std::string::npos);
+        const auto okSibling = cb::transpileSource(siblingShadow, "sibling.cb");
+        REQUIRE(okSibling.ok);
     }
 
-    SECTION("Standard library handles in std/fs and std/json are encapsulated with private fields") {
+    SECTION("Standard library handles in std/fs and std/json are opaque fieldless extern types") {
         const std::string badFsHandle = R"CB(import "std/fs"
 fn main() as int
     dim f = fs.stdin()
@@ -4184,7 +4172,7 @@ end fn
 )CB";
         const auto resFs = cb::checkSource(badFsHandle, "bad_fs.cb");
         REQUIRE_FALSE(resFs.ok);
-        CHECK(resFs.error.message.find("Field 'handle' of type 'CbFile' is private to module 'std/fs'.") != std::string::npos);
+        CHECK(resFs.error.message.find("Type 'CbFile' has no field 'handle'.") != std::string::npos);
 
         const std::string badJsonConstruct = R"CB(import "std/json"
 fn main() as int
@@ -4194,43 +4182,7 @@ end fn
 )CB";
         const auto resJson = cb::checkSource(badJsonConstruct, "bad_json.cb");
         REQUIRE_FALSE(resJson.ok);
-        CHECK(resJson.error.message.find("Cannot construct type 'CbJsonDoc' outside module 'std/json' because field 'docId' is private.") != std::string::npos);
-    }
-
-    SECTION("LSP dot-completion and hover hide private fields across modules while showing them in the defining module") {
-        cb::LspServerState state{};
-        state.openDocuments["file:///ws/vault.cb"] = R"CB(public type Account
-    private secretPin as int
-    owner as str
-end type
-)CB";
-        state.openDocuments["file:///ws/main.cb"] = R"CB(import "vault.cb"
-fn run(acc as vault.Account) as int
-    return 0
-end fn
-)CB";
-        const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(state, "file:///ws/main.cb");
-        REQUIRE(snap.valid);
-
-        std::vector<cb::CompletionItemEntry> dotItems;
-        std::unordered_map<std::string, bool> seen;
-        cb::collectDotCompletions(snap, "", std::string("run"), "acc", "", dotItems, seen);
-        bool sawOwner = false;
-        bool sawSecretPin = false;
-        for (const auto& item : dotItems) {
-            if (item.label == "owner") sawOwner = true;
-            if (item.label == "secretPin") sawSecretPin = true;
-        }
-        CHECK(sawOwner);
-        CHECK_FALSE(sawSecretPin);
-
-        const auto& ts = snap.symbols.types.at("vault::Account");
-        const std::string crossHover = cb::formatTypeHoverMarkdown(snap.arena, ts, false);
-        CHECK(crossHover.find("owner as str") != std::string::npos);
-        CHECK(crossHover.find("secretPin") == std::string::npos);
-
-        const std::string sameHover = cb::formatTypeHoverMarkdown(snap.arena, ts, true);
-        CHECK(sameHover.find("private secretPin as int") != std::string::npos);
+        CHECK(resJson.error.message.find("Cannot directly construct opaque extern type 'CbJsonDoc'.") != std::string::npos);
     }
 
     SECTION("Detects direct by-value recursive cycles in structs and unions while allowing list[T] and dict[K, V] self-references") {

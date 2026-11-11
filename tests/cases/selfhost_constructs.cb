@@ -117,7 +117,7 @@ fn evalExpr(arena as MiniArena, fnKey as str, exprId as int) as int can error
 end fn
 
 fn executeStmts(byref arena as MiniArena, fnKey as str) can error
-    for i = 0 until arena.stmts.len()
+    for i = 0 to arena.stmts.len() - 1
         dim st = arena.stmts[i]
         select case st.payload
             case assign as asgn

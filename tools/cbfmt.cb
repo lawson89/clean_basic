@@ -216,37 +216,6 @@ fn stripModifiers(codePart as str) as str
     return work
 end fn
 
-'' Returns true if codePart is a top-level starter that terminates a single-line extern type declaration.
-fn isTopLevelStarter(codePart as str) as bool
-    if codePart.startsWith("public ") or codePart.startsWith("extern ")
-        return true
-    end if
-    if codePart.startsWith("fn ") or codePart.startsWith("type ") or codePart.startsWith("enum ") or codePart.startsWith("union ")
-        return true
-    end if
-    if codePart.startsWith("alias ") or codePart.startsWith("const ") or codePart.startsWith("import ")
-        return true
-    end if
-    return false
-end fn
-
-'' Determines whether an extern type declaration on lineIdx has a multi-line body ending in "end type".
-fn externTypeHasBody(lines as list[str], lineIdx as int) as bool
-    dim j = lineIdx + 1
-    while j < lines.len()
-        const t = lines[j].trim()
-        if t == "" or t.startsWith("'") or t.startsWith("#")
-            j += 1
-            continue
-        end if
-        if isTopLevelStarter(t)
-            return false
-        end if
-        return true
-    end while
-    return false
-end fn
-
 '' Returns true if codePart is a standard block-closing statement (excluding "end select").
 fn isStandardBlockCloser(codePart as str) as bool
     if codePart == "end fn" or codePart == "end type" or codePart == "end enum" or codePart == "end union"
@@ -286,7 +255,7 @@ fn isSelectCaseOpener(codePart as str) as bool
 end fn
 
 '' Returns true if codePart opens a standard indented block (excluding "select case" and "case").
-fn isStandardBlockOpener(codePart as str, lines as list[str], lineIdx as int) as bool
+fn isStandardBlockOpener(codePart as str) as bool
     if codePart.startsWith("if ") or codePart.startsWith("if(")
         return true
     end if
@@ -312,13 +281,7 @@ fn isStandardBlockOpener(codePart as str, lines as list[str], lineIdx as int) as
         end if
         return true
     end if
-    if core.startsWith("type ")
-        if hasExtern
-            return externTypeHasBody(lines, lineIdx)
-        end if
-        return true
-    end if
-    if core.startsWith("enum ") or core.startsWith("union ")
+    if core.startsWith("type ") or core.startsWith("enum ") or core.startsWith("union ")
         return true
     end if
 
@@ -420,7 +383,7 @@ public fn formatSource(source as str, indentWidth as int = 4) as str
                 lineBlockIndent = blockIndent
                 selectStack.push(false)
                 afterBlockDelta = 1
-            else if isStandardBlockOpener(codePart, lines, i)
+            else if isStandardBlockOpener(codePart)
                 lineBlockIndent = blockIndent
                 afterBlockDelta = 1
             end if

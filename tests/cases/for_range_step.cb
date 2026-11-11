@@ -1,7 +1,7 @@
 ' EXPECT_CPP: for (int64_t i = 0; i <= 10; i += 2) {
 ' EXPECT_CPP: for (int64_t i = 10; i >= 2; i += (-2)) {
 ' EXPECT_CPP: for (int64_t i = 5; i >= 1; i += (-2)) {
-' EXPECT_CPP: for (int64_t i = 0; i < 5; i += 1) {
+' EXPECT_CPP: for (int64_t i = 0; i <= (5 - 1); i += 1) {
 ' EXPECT_CPP: for (const auto& x : nums) {
 ' EXPECT_CPP: cbStrUtf8Chars(
 ' FORBID_CPP: throw
@@ -41,7 +41,7 @@ end fn
 
 fn sumHalfOpen() as int
     dim total = 0
-    for i = 0 until 5
+    for i = 0 to 5 - 1
         total += i
     end for
     return total
@@ -59,7 +59,7 @@ end fn
 fn sumIndexedItems() as int
     dim nums as list[int] = [10, 20, 30]
     dim sum = 0
-    for idx = 0 until nums.len()
+    for idx = 0 to nums.len() - 1
         sum += (idx + 1) * nums[idx]
     end for
     return sum
@@ -75,7 +75,7 @@ fn iterateStrings()
 
     dim chars = s.chars()
     dim out2 = ""
-    for idx = 0 until chars.len()
+    for idx = 0 to chars.len() - 1
         out2 &= idx.toStr() & ":" & chars[idx] & ","
     end for
     print("strIndexed: " & out2)

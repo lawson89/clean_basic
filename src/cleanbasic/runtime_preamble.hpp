@@ -289,17 +289,11 @@ inline T cbListPop(std::vector<T>& v) {
     return val;
 }
 
-inline bool cbRangeCond(int64_t curr, int64_t end, int64_t step, bool inclusive = true) {
+inline bool cbRangeCond(int64_t curr, int64_t end, int64_t step) {
     if (step < 0) {
-        if (inclusive) {
-            return curr >= end;
-        }
-        return curr > end;
+        return curr >= end;
     }
-    if (inclusive) {
-        return curr <= end;
-    }
-    return curr < end;
+    return curr <= end;
 }
 
 inline std::vector<std::string>& cbRuntimeArgs() {

@@ -40,8 +40,7 @@ UnionDecl       ::= ["public"] "union" Identifier NEWLINE UnionVariant+ "end uni
 UnionVariant    ::= Identifier "as" Type NEWLINE
 
 TypeDecl        ::= ("public" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
-                  | ["public"] "extern" "type" Identifier NEWLINE
-FieldDecl       ::= ["private"] Identifier "as" Type NEWLINE
+FieldDecl       ::= Identifier "as" Type NEWLINE
 
 FnDecl          ::= ("public" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
                     Statement*
@@ -66,7 +65,7 @@ IfStmt          ::= "if" Expr NEWLINE Statement*
                     ["else" NEWLINE Statement*]
                     "end if" NEWLINE
 
-ForStmt         ::= "for" Identifier "=" Expr ("to" | "until") Expr ["step" Expr] NEWLINE
+ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
                     Statement*
                     "end for" NEWLINE
                   | "for" IdentList "in" Expr NEWLINE

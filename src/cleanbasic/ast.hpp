@@ -58,7 +58,6 @@ struct FieldDecl {
     uint32_t col = 1;
     std::string name;
     TypeId typeId = INVALID_ID;
-    bool isPrivate = false;
 };
 
 // ==========================================
@@ -211,7 +210,6 @@ struct RangeSpec {
     ExprId end = INVALID_ID;
     bool hasStep = false;
     ExprId step = INVALID_ID;
-    bool inclusive = true;
 };
 
 struct ForStmt {

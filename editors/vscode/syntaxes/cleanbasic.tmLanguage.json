@@ -90,7 +90,7 @@
         },
         {
           "name": "keyword.control.cleanbasic",
-          "match": "\\b(?:import|as|public|private|extern|type|alias|enum|union|fn|return|if|else|while|for|until|to|step|in|case|try|catch|defer|break|continue)\\b"
+          "match": "\\b(?:import|as|public|extern|type|alias|enum|union|fn|return|if|else|while|for|to|step|in|case|try|catch|defer|break|continue)\\b"
         },
         {
           "name": "storage.modifier.cleanbasic",

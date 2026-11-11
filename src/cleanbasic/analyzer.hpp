@@ -341,12 +341,8 @@ public:
                         std::string msg = "Type '" + structOpt->name + "' is private to module '" + structOpt->moduleId + "' (missing 'public').";
                         setAnalyzerError(exprNode.line, exprNode.col, msg);
                     }
-                    if (structOpt->moduleId != moduleId) {
-                        for (const auto& fld : structOpt->fieldOrder) {
-                            if (fld.isPrivate) {
-                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot construct type '" + structOpt->name + "' outside module '" + structOpt->moduleId + "' because field '" + fld.name + "' is private.");
-                            }
-                        }
+                    if (structOpt->isExtern && structOpt->fieldOrder.empty()) {
+                        setAnalyzerError(exprNode.line, exprNode.col, "Cannot directly construct opaque extern type '" + structOpt->name + "'.");
                     }
                     for (size_t aIdx = 0; aIdx < call->args.size() && aIdx < structOpt->fieldOrder.size(); ++aIdx) {
                         validateNonNullTarget(exprNode.line, exprNode.col, structOpt->fieldOrder[aIdx].typeId, call->args[aIdx]);
@@ -478,8 +474,8 @@ public:
             const TypeId targetTid = inferExpr(faccess->target, scope);
             const auto tsOpt = resolveTypeSymbol(arena, symbols, moduleId, targetTid);
             if (tsOpt.has_value()) {
-                if (tsOpt->moduleId != moduleId && tsOpt->privateFields.count(faccess->fieldName) > 0) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Field '" + faccess->fieldName + "' of type '" + tsOpt->name + "' is private to module '" + tsOpt->moduleId + "'.");
+                if (tsOpt->fields.find(faccess->fieldName) == tsOpt->fields.end()) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "Type '" + tsOpt->name + "' has no field '" + faccess->fieldName + "'.");
                 }
             }
             validateExprCalls(fn, faccess->target, scope, false);
@@ -505,50 +501,6 @@ public:
                 validateExprCalls(fn, ent.value, scope, false);
             }
             return;
-        }
-    }
-
-    void ensureContainerTypesInExpr(
-        ExprId exprId,
-        const std::unordered_map<std::string, VarSymbol>& scope
-    ) {
-        if (exprId >= arena.exprs.size()) return;
-        if (const auto* llit = arena.getExpr<ListLiteral>(exprId)) {
-            for (const ExprId elId : llit->elements) {
-                ensureContainerTypesInExpr(elId, scope);
-            }
-            if (!llit->elements.empty()) {
-                const TypeId elTid = resolveAlias(arena, symbols, moduleId, inferExpr(llit->elements[0], scope));
-                arena.findOrAddType("list", {elTid});
-            }
-        } else if (const auto* dlit = arena.getExpr<DictLiteral>(exprId)) {
-            for (const auto& ent : dlit->entries) {
-                ensureContainerTypesInExpr(ent.key, scope);
-                ensureContainerTypesInExpr(ent.value, scope);
-            }
-            if (!dlit->entries.empty()) {
-                const TypeId kTid = resolveAlias(arena, symbols, moduleId, inferExpr(dlit->entries[0].key, scope));
-                const TypeId vTid = resolveAlias(arena, symbols, moduleId, inferExpr(dlit->entries[0].value, scope));
-                arena.findOrAddType("dict", {kTid, vTid});
-                arena.findOrAddType("list", {kTid});
-            }
-        } else if (const auto* call = arena.getExpr<FuncCall>(exprId)) {
-            for (const ExprId argId : call->args) {
-                ensureContainerTypesInExpr(argId, scope);
-            }
-            for (const auto& na : call->namedArgs) {
-                ensureContainerTypesInExpr(na.value, scope);
-            }
-        } else if (const auto* bop = arena.getExpr<BinaryOp>(exprId)) {
-            ensureContainerTypesInExpr(bop->left, scope);
-            ensureContainerTypesInExpr(bop->right, scope);
-        } else if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
-            ensureContainerTypesInExpr(uop->operand, scope);
-        } else if (const auto* fa = arena.getExpr<FieldAccess>(exprId)) {
-            ensureContainerTypesInExpr(fa->target, scope);
-        } else if (const auto* ia = arena.getExpr<IndexAccess>(exprId)) {
-            ensureContainerTypesInExpr(ia->target, scope);
-            ensureContainerTypesInExpr(ia->index, scope);
         }
     }
 
@@ -674,7 +626,6 @@ public:
         const auto& stmtNode = arena.stmts[stmtId];
 
         if (auto* vassign = arena.getStmtMut<VarAssignment>(stmtId)) {
-            ensureContainerTypesInExpr(vassign->value, scope);
             checkFallibleUsage(fn, vassign->value, scope, vassign->implicitBubble, vassign->breaksToCatch);
 
             const TypeId valType = inferExpr(vassign->value, scope);
@@ -777,6 +728,7 @@ public:
 
         if (auto* forStmt = arena.getStmtMut<ForStmt>(stmtId)) {
             loopDepth += 1;
+            auto loopScope = scope;
             if (forStmt->rangeSpec.hasRange) {
                 validateExprCalls(fn, forStmt->rangeSpec.start, scope, false);
                 validateExprCalls(fn, forStmt->rangeSpec.end, scope, false);
@@ -784,7 +736,7 @@ public:
                     validateExprCalls(fn, forStmt->rangeSpec.step, scope, false);
                 }
                 if (!forStmt->loopVars.empty()) {
-                    bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
+                    bindLocalVar(loopScope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
                 }
             } else if (forStmt->iterable != INVALID_ID) {
                 validateExprCalls(fn, forStmt->iterable, scope, false);
@@ -794,10 +746,10 @@ public:
                     setAnalyzerError(stmtNode.line, stmtNode.col, loopErr);
                 }
                 for (const auto& kv : bindings) {
-                    bindLocalVar(scope, kv.first, kv.second, false, true, stmtNode.line, stmtNode.col);
+                    bindLocalVar(loopScope, kv.first, kv.second, false, true, stmtNode.line, stmtNode.col);
                 }
             }
-            analyzeBlock(fn, forStmt->body, scope);
+            analyzeBlock(fn, forStmt->body, loopScope);
             loopDepth -= 1;
             return;
         }
@@ -850,11 +802,6 @@ public:
                         bindLocalVar(caseScope, scase.bindingName, boundPayloadTid, false, true, scase.line, scase.col);
                     }
                     analyzeBlock(fn, scase.body, caseScope);
-                    for (const auto& kv : caseScope) {
-                        if (kv.first != scase.bindingName) {
-                            scope[kv.first] = kv.second;
-                        }
-                    }
                 } else {
                     if (!scase.bindingName.empty()) {
                         setAnalyzerError(scase.line, scase.col, "Case payload binding ('as <ident>') is only supported when 'select case' target is a union");
@@ -949,7 +896,7 @@ public:
     void analyzeBlock(
         const FnDecl& fn,
         const std::vector<StmtId>& stmts,
-        std::unordered_map<std::string, VarSymbol>& scope
+        std::unordered_map<std::string, VarSymbol> scope
     ) {
         for (const StmtId sid : stmts) {
             analyzeStmt(fn, sid, scope);
@@ -1050,47 +997,20 @@ public:
                 }
             } else if (const auto* adecl = arena.getDecl<AliasDecl>(did)) {
                 AliasSymbol asym{};
-                asym.name = adecl->name;
-                asym.moduleId = declNode.moduleId;
-                asym.key = symbolKey(declNode.moduleId, adecl->name);
+                populateSymbolMeta(asym, declNode, adecl->name, adecl->isPub, makeCppTypeName(declNode.moduleId, adecl->name, false));
                 asym.targetType = adecl->targetType;
-                asym.isPub = adecl->isPub;
-                asym.cppName = makeCppTypeName(declNode.moduleId, adecl->name, false);
-                asym.fileName = declNode.fileName;
-                asym.line = declNode.nameLine;
-                asym.col = declNode.nameCol;
-                asym.endLine = declNode.endLine;
-                asym.docComment = declNode.docComment;
                 symbols.aliases[asym.key] = std::move(asym);
             } else if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
                 TypeSymbol tsym{};
-                tsym.name = tdecl->name;
-                tsym.moduleId = declNode.moduleId;
-                tsym.key = symbolKey(declNode.moduleId, tdecl->name);
-                tsym.isPub = tdecl->isPub;
+                populateSymbolMeta(tsym, declNode, tdecl->name, tdecl->isPub, makeCppTypeName(declNode.moduleId, tdecl->name, tdecl->isExtern));
                 tsym.isExtern = tdecl->isExtern;
-                tsym.cppName = makeCppTypeName(declNode.moduleId, tdecl->name, tdecl->isExtern);
                 tsym.fieldOrder = tdecl->fields;
-                tsym.fileName = declNode.fileName;
-                tsym.line = declNode.nameLine;
-                tsym.col = declNode.nameCol;
-                tsym.endLine = declNode.endLine;
-                tsym.docComment = declNode.docComment;
                 const std::string keyCopy = tsym.key;
                 symbols.types[keyCopy] = std::move(tsym);
                 arena.findOrAddType(keyCopy, {});
             } else if (const auto* edecl = arena.getDecl<EnumDecl>(did)) {
                 EnumSymbol esym{};
-                esym.name = edecl->name;
-                esym.moduleId = declNode.moduleId;
-                esym.key = symbolKey(declNode.moduleId, edecl->name);
-                esym.isPub = edecl->isPub;
-                esym.cppName = makeCppTypeName(declNode.moduleId, edecl->name, false);
-                esym.fileName = declNode.fileName;
-                esym.line = declNode.nameLine;
-                esym.col = declNode.nameCol;
-                esym.endLine = declNode.endLine;
-                esym.docComment = declNode.docComment;
+                populateSymbolMeta(esym, declNode, edecl->name, edecl->isPub, makeCppTypeName(declNode.moduleId, edecl->name, false));
                 std::unordered_set<std::string> seen;
                 for (const auto& mem : edecl->members) {
                     if (seen.count(mem.name) > 0) {
@@ -1105,16 +1025,7 @@ public:
                 arena.findOrAddType(keyCopy, {});
             } else if (const auto* udecl = arena.getDecl<UnionDecl>(did)) {
                 UnionSymbol usym{};
-                usym.name = udecl->name;
-                usym.moduleId = declNode.moduleId;
-                usym.key = symbolKey(declNode.moduleId, udecl->name);
-                usym.isPub = udecl->isPub;
-                usym.cppName = makeCppTypeName(declNode.moduleId, udecl->name, false);
-                usym.fileName = declNode.fileName;
-                usym.line = declNode.nameLine;
-                usym.col = declNode.nameCol;
-                usym.endLine = declNode.endLine;
-                usym.docComment = declNode.docComment;
+                populateSymbolMeta(usym, declNode, udecl->name, udecl->isPub, makeCppTypeName(declNode.moduleId, udecl->name, false));
                 std::unordered_set<std::string> seen;
                 for (size_t i = 0; i < udecl->variants.size(); ++i) {
                     const auto& uv = udecl->variants[i];
@@ -1166,14 +1077,10 @@ public:
                 const std::string key = symbolKey(declNode.moduleId, tdecl->name);
                 auto& tsym = symbols.types[key];
                 tsym.fieldOrder.clear();
-                tsym.privateFields.clear();
                 tsym.fieldOrder.reserve(tdecl->fields.size());
                 for (const auto& fld : tdecl->fields) {
                     const TypeId resolvedFid = canonicalizeType(arena, symbols, declNode.moduleId, fld.typeId);
                     tsym.fields[fld.name] = resolvedFid;
-                    if (fld.isPrivate) {
-                        tsym.privateFields.insert(fld.name);
-                    }
                     FieldDecl resolvedFld = fld;
                     resolvedFld.typeId = resolvedFid;
                     tsym.fieldOrder.push_back(std::move(resolvedFld));
@@ -1206,33 +1113,15 @@ public:
                     throw makeError("AnalyzerError", "CleanBasic types use non-nullable value semantics; only 'cptr' can be 'null'.", declNode.fileName, declNode.line, declNode.col);
                 }
                 ConstSymbol csym{};
-                csym.name = cdecl->name;
-                csym.moduleId = declNode.moduleId;
-                csym.key = key;
+                populateSymbolMeta(csym, declNode, cdecl->name, cdecl->isPub, makeCppConstName(declNode.moduleId, cdecl->name));
                 csym.typeId = constTid;
                 csym.value = cdecl->value;
-                csym.isPub = cdecl->isPub;
-                csym.cppName = makeCppConstName(declNode.moduleId, cdecl->name);
-                csym.fileName = declNode.fileName;
-                csym.line = declNode.nameLine;
-                csym.col = declNode.nameCol;
-                csym.endLine = declNode.endLine;
-                csym.docComment = declNode.docComment;
                 symbols.constants[key] = std::move(csym);
             } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 FnSymbol fsym{};
-                fsym.name = fdecl->name;
-                fsym.moduleId = declNode.moduleId;
-                fsym.key = symbolKey(declNode.moduleId, fdecl->name);
-                fsym.isPub = fdecl->isPub;
+                populateSymbolMeta(fsym, declNode, fdecl->name, fdecl->isPub, makeCppFnName(declNode.moduleId, fdecl->name, fdecl->isExtern));
                 fsym.isExtern = fdecl->isExtern;
                 fsym.isFallible = fdecl->isFallible;
-                fsym.cppName = makeCppFnName(declNode.moduleId, fdecl->name, fdecl->isExtern);
-                fsym.fileName = declNode.fileName;
-                fsym.line = declNode.nameLine;
-                fsym.col = declNode.nameCol;
-                fsym.endLine = declNode.endLine;
-                fsym.docComment = declNode.docComment;
                 fsym.params.reserve(fdecl->params.size());
                 for (const auto& p : fdecl->params) {
                     Param resolvedP = p;

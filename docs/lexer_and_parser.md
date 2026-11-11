@@ -33,7 +33,7 @@ struct LexResult {
 
 | Token `kind` | Examples (`Token::value`) | Description |
 | :--- | :--- | :--- |
-| `KEYWORD` | `public`, `private`, `extern`, `import`, `import header`, `import link`, `const`, `dim`, `byref`, `enum`, `end enum`, `union`, `end union`, `while`, `end while`, `until`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
+| `KEYWORD` | `public`, `extern`, `import`, `import header`, `import link`, `const`, `dim`, `byref`, `enum`, `end enum`, `union`, `end union`, `while`, `end while`, `fn`, `end fn`, `if`, `else if`, `end if`, `select case`, `can error`, `continue`, `break`, `and`, `or`, `not`, `true`, `false`, `null` | Single-word and coalesced two-word language keywords. |
 | `TYPE_KW` | `int`, `float`, `bool`, `str`, `list`, `dict`, `err`, `cptr` | Built-in primitive, container, error, and opaque C-pointer type keywords (`isTypeKeyword`). |
 | `IDENT` | `player`, `heal`, `maxPotion` | User-defined identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`) not matching a keyword or type keyword. |
 | `NUMBER` | `42`, `1_000_000`, `0xFF_00`, `0b1010_0101`, `3.141_592` | Decimal, hexadecimal (`0x...`), or binary (`0b...`) integer literals and decimal floating-point literals (supporting `_` digit separators). |
@@ -147,8 +147,7 @@ At the top level of a `.cb` file, seven declaration families are supported:
 2. **Type Aliases (`AliasDecl`)**:
    * `[public] alias Name = Type` (Applying `extern` to an `alias` is rejected with a `ParseError`).
 3. **Struct / Extern Types (`TypeDecl`)**:
-   * `[public] [extern] type Name ... end type` for struct definitions with `[private] field as Type` declarations.
-   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `enum`, `union`, `const`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
+   * `[public] [extern] type Name ... end type` for struct definitions with `field as Type` declarations (or zero fields for opaque `extern type Name ... end type` handles).
 4. **Enums (`EnumDecl`)**:
    * `[public] enum Name ... end enum` for 64-bit integer-backed enumeration types.
 5. **Tagged Unions (`UnionDecl`)**:
@@ -169,7 +168,7 @@ Inside a function body, `parseStatement()` dispatches on leading keywords:
 | `dim` or `const` | `parseAssignmentOrExprStmt` | Parses `(dim\|const) <IDENT> [as <Type>] = <Expr>` into a `VarAssignment` with `isDim = true` or `isConst = true`. |
 | Any expression starter | `parseAssignmentOrExprStmt` | Parses lhs `firstExpr = parseExpr()`. If the next token is `ASSIGN` (`=`) or `COMPOUND_ASSIGN` (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`), parses rhs `valExpr` and emits a `VarAssignment` (covering variable reassignment, struct field mutation `p.health = 10`, and container index assignment `nums[0] = 5`). Otherwise, emits an `ExprStmt` (e.g., `print("hi")` or `hero.heal(10)`). |
 | `if` | `parseIfStmt` | Parses `if <Expr>`, zero or more `else if <Expr>` branches (`ElseIfBranch`), optional `else` branch, and terminating `end if` into `IfStmt`. |
-| `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, and parses inclusive `<start> to <end> [step <step>]` or exclusive `<start> until <end> [step <step>]` into `rangeSpec`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal`, `for ch in strVal`, or `for k, v in dictVal`). Terminated by `end for`. |
+| `for` | `parseForStmt` | Parses one or more comma-separated loop variable identifiers (`loopVars`).<br>• **Range Loop:** If followed by `ASSIGN` (`=`), requires `loopVars.size() == 1`, and parses `<start> to <end> [step <step>]` into `rangeSpec`.<br>• **Collection Loop:** Otherwise, matches `in <iterableExpr>` (supporting `for item in listVal`, `for ch in strVal`, or `for k, v in dictVal`). Terminated by `end for`. |
 | `while` | `parseWhileStmt` | Parses `while <Expr>`, statement list body, and `end while` into `WhileStmt`. |
 | `select case` | `parseSelectStmt` | Parses `select case <target>`, zero or more `case <matchExpr1>[, <matchExpr2>...] [as <binding>]` blocks (`SelectCase`), optional `case else` block, and `end select` into `SelectStmt`. |
 | `try` | `parseTryCatchStmt` | Parses `try`, try statement list, `catch <errIdent>`, catch statement list, and `end try` into `TryCatchStmt`. |

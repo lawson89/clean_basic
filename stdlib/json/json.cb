@@ -5,12 +5,10 @@ import header "json/json_bridge.hpp"
 
 '' External arena-backed JSON document value type.
 public extern type CbJsonDoc
-    private docId as int
 end type
 
 '' External handle to a node within a JSON document arena.
 public extern type CbJsonVal
-    private nodeId as int
 end type
 
 '' Value-semantic RFC 8259 JSON document owning an internal node arena.

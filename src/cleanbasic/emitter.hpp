@@ -743,11 +743,10 @@ public:
     void emitStmtList(
     const FnDecl& fn,
     const std::vector<StmtId>& stmts,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
+    std::unordered_map<std::string, VarSymbol> scope
 ) {
     for (const StmtId sid : stmts) {
-        emitStmt(fn, sid, scope, declaredVars);
+        emitStmt(fn, sid, scope);
     }
 }
 
@@ -799,8 +798,7 @@ public:
         const FnDecl& fn,
         const VarAssignment& stmt,
         const FnSymbol& fnSym,
-        std::unordered_map<std::string, VarSymbol>& scope,
-        std::unordered_set<std::string>& declaredVars
+        std::unordered_map<std::string, VarSymbol>& scope
     ) {
         const std::string callCpp = emitExpr(stmt.value, scope);
         const bool hasValue = (fnSym.returnType != INVALID_ID && !arena.isVoid(fnSym.returnType));
@@ -820,9 +818,10 @@ public:
             } else if (hasValue) {
                 retT = resolveAlias(arena, symbols, fnSym.moduleId, fnSym.returnType);
             }
-            const bool isNewDecl = stmt.isDim || stmt.isConst || (declaredVars.find(name) == declaredVars.end());
-            scope[name] = VarSymbol{name, retT, false, stmt.isConst};
-            declaredVars.insert(name);
+            const bool isNewDecl = stmt.isDim || stmt.isConst;
+            if (isNewDecl) {
+                scope[name] = VarSymbol{name, retT, false, stmt.isConst};
+            }
             const std::string cppVarName = sanitizeCppIdent(name);
             if (isNewDecl) {
                 std::string prefix = "auto ";
@@ -843,11 +842,10 @@ public:
     void emitVarAssignment(uint32_t line, 
     const FnDecl& fn,
     const VarAssignment& stmt,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
+    std::unordered_map<std::string, VarSymbol>& scope
 ) {
     if (const auto fnSym = resolveFallibleCallExpr(stmt.value, scope)) {
-        emitFallibleAssignment(line, fn, stmt, *fnSym, scope, declaredVars);
+        emitFallibleAssignment(line, fn, stmt, *fnSym, scope);
         return;
     }
 
@@ -860,7 +858,6 @@ public:
             const std::string& name = ident->name;
             const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, stmt.declaredType);
             scope[name] = VarSymbol{name, resolvedT, false, stmt.isConst};
-            declaredVars.insert(name);
             const std::string cppType = mapTypeNode(currentModuleId, arena.getType(resolvedT));
             std::string prefix;
             if (stmt.isConst) {
@@ -881,9 +878,8 @@ public:
         if (const auto* ident = arena.getExpr<Identifier>(targetId)) {
             const std::string& name = ident->name;
             const std::string cppVarName = sanitizeCppIdent(name);
-            if (stmt.isDim || stmt.isConst || declaredVars.find(name) == declaredVars.end()) {
+            if (stmt.isDim || stmt.isConst) {
                 scope[name] = VarSymbol{name, inferredT, false, stmt.isConst};
-                declaredVars.insert(name);
                 std::string inferredName = "auto";
                 if (inferredT < arena.types.size()) {
                     inferredName = arena.types[inferredT].name;
@@ -1014,8 +1010,7 @@ public:
     void emitStmt(
     const FnDecl& fn,
     StmtId stmtId,
-    std::unordered_map<std::string, VarSymbol>& scope,
-    std::unordered_set<std::string>& declaredVars
+    std::unordered_map<std::string, VarSymbol>& scope
 ) {
     if (stmtId >= arena.stmts.size()) {
         return;
@@ -1023,7 +1018,7 @@ public:
     const auto& stmtNode = arena.stmts[stmtId];
 
     if (const auto* vassign = arena.getStmt<VarAssignment>(stmtId)) {
-        emitVarAssignment(stmtNode.line, fn, *vassign, scope, declaredVars);
+        emitVarAssignment(stmtNode.line, fn, *vassign, scope);
         return;
     }
 
@@ -1036,24 +1031,21 @@ public:
         const std::string condCpp = emitExpr(ifS->condition, scope);
         emitLine("if (" + condCpp + ") {");
         indentLevel += 1;
-        auto thenDecls = declaredVars;
-        emitStmtList(fn, ifS->thenBody, scope, thenDecls);
+        emitStmtList(fn, ifS->thenBody, scope);
         indentLevel -= 1;
 
         for (const auto& branch : ifS->elifBranches) {
             const std::string elifCond = emitExpr(branch.condition, scope);
             emitLine("} else if (" + elifCond + ") {");
             indentLevel += 1;
-            auto elifDecls = declaredVars;
-            emitStmtList(fn, branch.body, scope, elifDecls);
+            emitStmtList(fn, branch.body, scope);
             indentLevel -= 1;
         }
 
         if (ifS->hasElse) {
             emitLine("} else {");
             indentLevel += 1;
-            auto elseDecls = declaredVars;
-            emitStmtList(fn, ifS->elseBody, scope, elseDecls);
+            emitStmtList(fn, ifS->elseBody, scope);
             indentLevel -= 1;
         }
 
@@ -1086,33 +1078,19 @@ public:
             }
             std::string condCpp;
             if (isKnownPositiveStep) {
-                if (forS->rangeSpec.inclusive) {
-                    condCpp = cppLoopVar + " <= " + endCpp;
-                } else {
-                    condCpp = cppLoopVar + " < " + endCpp;
-                }
+                condCpp = cppLoopVar + " <= " + endCpp;
             } else if (isKnownNegativeStep) {
-                if (forS->rangeSpec.inclusive) {
-                    condCpp = cppLoopVar + " >= " + endCpp;
-                } else {
-                    condCpp = cppLoopVar + " > " + endCpp;
-                }
+                condCpp = cppLoopVar + " >= " + endCpp;
             } else {
-                std::string inclStr = "true";
-                if (!forS->rangeSpec.inclusive) {
-                    inclStr = "false";
-                }
-                condCpp = "cbRangeCond(" + cppLoopVar + ", " + endCpp + ", " + stepCpp + ", " + inclStr + ")";
+                condCpp = "cbRangeCond(" + cppLoopVar + ", " + endCpp + ", " + stepCpp + ")";
             }
 
             auto loopScope = scope;
             loopScope[loopVar] = VarSymbol{loopVar, symbols.typeInt, false};
-            auto loopDecls = declaredVars;
-            loopDecls.insert(loopVar);
 
             emitLine("for (int64_t " + cppLoopVar + " = " + startCpp + "; " + condCpp + "; " + cppLoopVar + " += " + stepCpp + ") {");
             indentLevel += 1;
-            emitStmtList(fn, forS->body, loopScope, loopDecls);
+            emitStmtList(fn, forS->body, loopScope);
             indentLevel -= 1;
             emitLine("}");
             emitCatchBreakIfPending();
@@ -1126,10 +1104,6 @@ public:
 
             auto loopScope = scope;
             bindForInLoopVars(arena, symbols, currentModuleId, *forS, loopScope);
-            auto loopDecls = declaredVars;
-            for (const auto& lv : forS->loopVars) {
-                loopDecls.insert(lv);
-            }
 
             if (forS->loopVars.size() == 1) {
                 const std::string& lv = forS->loopVars[0];
@@ -1142,7 +1116,7 @@ public:
                 emitLine("for (const auto& [" + joinStrings(forS->loopVars) + "] : " + iterCpp + ") {");
             }
             indentLevel += 1;
-            emitStmtList(fn, forS->body, loopScope, loopDecls);
+            emitStmtList(fn, forS->body, loopScope);
             indentLevel -= 1;
             emitLine("}");
             emitCatchBreakIfPending();
@@ -1151,12 +1125,10 @@ public:
     }
 
     if (const auto* whileS = arena.getStmt<WhileStmt>(stmtId)) {
-        auto whileScope = scope;
-        auto whileDecls = declaredVars;
         const std::string condCpp = emitExpr(whileS->condition, scope);
         emitLine("while (" + condCpp + ") {");
         indentLevel += 1;
-        emitStmtList(fn, whileS->body, whileScope, whileDecls);
+        emitStmtList(fn, whileS->body, scope);
         indentLevel -= 1;
         emitLine("}");
         emitCatchBreakIfPending();
@@ -1192,13 +1164,11 @@ public:
                 }
                 indentLevel += 1;
                 auto caseScope = scope;
-                auto cDecls = declaredVars;
                 if (!c.bindingName.empty()) {
                     caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, true};
-                    cDecls.insert(c.bindingName);
                     emitLine("const auto& " + sanitizeCppIdent(c.bindingName) + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
                 }
-                emitStmtList(fn, c.body, caseScope, cDecls);
+                emitStmtList(fn, c.body, caseScope);
                 emitLine("break;");
                 indentLevel -= 1;
                 emitLine("}");
@@ -1206,8 +1176,7 @@ public:
             if (selS->hasCaseElse) {
                 emitLine("default: {");
                 indentLevel += 1;
-                auto elseDecls = declaredVars;
-                emitStmtList(fn, selS->caseElse, scope, elseDecls);
+                emitStmtList(fn, selS->caseElse, scope);
                 emitLine("break;");
                 indentLevel -= 1;
                 emitLine("}");
@@ -1245,23 +1214,20 @@ public:
                     emitLine("} else if (" + cond + ") {");
                 }
                 indentLevel += 1;
-                auto cDecls = declaredVars;
-                emitStmtList(fn, c.body, scope, cDecls);
+                emitStmtList(fn, c.body, scope);
                 indentLevel -= 1;
             }
             if (selS->hasCaseElse) {
                 if (isFirst) {
                     emitLine("{");
                     indentLevel += 1;
-                    auto elseDecls = declaredVars;
-                    emitStmtList(fn, selS->caseElse, scope, elseDecls);
+                    emitStmtList(fn, selS->caseElse, scope);
                     indentLevel -= 1;
                     emitLine("}");
                 } else {
                     emitLine("} else {");
                     indentLevel += 1;
-                    auto elseDecls = declaredVars;
-                    emitStmtList(fn, selS->caseElse, scope, elseDecls);
+                    emitStmtList(fn, selS->caseElse, scope);
                     indentLevel -= 1;
                     emitLine("}");
                 }
@@ -1290,8 +1256,7 @@ public:
                 }
             }
             indentLevel += 1;
-            auto cDecls = declaredVars;
-            emitStmtList(fn, c.body, scope, cDecls);
+            emitStmtList(fn, c.body, scope);
             emitLine("break;");
             indentLevel -= 1;
             emitLine("}");
@@ -1300,8 +1265,7 @@ public:
         if (selS->hasCaseElse) {
             emitLine("default: {");
             indentLevel += 1;
-            auto elseDecls = declaredVars;
-            emitStmtList(fn, selS->caseElse, scope, elseDecls);
+            emitStmtList(fn, selS->caseElse, scope);
             emitLine("break;");
             indentLevel -= 1;
             emitLine("}");
@@ -1321,9 +1285,7 @@ public:
         emitLine("do {");
         indentLevel += 1;
         catchErrStack.push_back(catchErr);
-        auto tryScope = scope;
-        auto tryDecls = declaredVars;
-        emitStmtList(fn, tryCatch->tryBody, tryScope, tryDecls);
+        emitStmtList(fn, tryCatch->tryBody, scope);
         catchErrStack.pop_back();
         indentLevel -= 1;
         emitLine("} while(false);");
@@ -1332,9 +1294,7 @@ public:
         emitLine("CbError " + sanitizeCppIdent(tryCatch->catchVarName) + " = " + catchErr + ";");
         auto catchScope = scope;
         catchScope[tryCatch->catchVarName] = VarSymbol{tryCatch->catchVarName, symbols.typeErr, false, false};
-        auto catchDecls = declaredVars;
-        catchDecls.insert(tryCatch->catchVarName);
-        emitStmtList(fn, tryCatch->catchBody, catchScope, catchDecls);
+        emitStmtList(fn, tryCatch->catchBody, catchScope);
         indentLevel -= 1;
         emitLine("}");
         indentLevel -= 1;
@@ -1348,10 +1308,9 @@ public:
         emitLine("auto " + deferVar + " = cbDefer([&]() {");
         indentLevel += 1;
         deferDepth += 1;
-        auto defDecls = declaredVars;
         const auto savedCatchStack = catchErrStack;
         catchErrStack.clear();
-        emitStmtList(fn, defS->body, scope, defDecls);
+        emitStmtList(fn, defS->body, scope);
         catchErrStack = savedCatchStack;
         deferDepth -= 1;
         indentLevel -= 1;
@@ -1470,14 +1429,12 @@ public:
         // Seed scope strictly from fn.params to avoid cross-overload type collisions in symbols.fnScopes.
         // Local variables will be added to this scope as they are encountered in emitStmtList -> emitVarAssignment.
         std::unordered_map<std::string, VarSymbol> scope;
-        std::unordered_set<std::string> declaredVars;
         for (const auto& p : fn.params) {
             const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, p.typeId);
             scope[p.name] = VarSymbol{p.name, resolvedT, p.isByref, !p.isByref};
-            declaredVars.insert(p.name);
         }
 
-        emitStmtList(fn, fn.body, scope, declaredVars);
+        emitStmtList(fn, fn.body, scope);
 
         bool endsWithReturn = false;
         if (!fn.body.empty()) {

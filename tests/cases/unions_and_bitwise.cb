@@ -65,7 +65,7 @@ fn main() as int
 
     dim mask = 0xFF_00.bitAnd(0x0F_00).bitOr(0b0000_0011).bitXor(1).shl(2).shr(1).bitNot()
     dim sum = 0
-    for i = 0 until ks.len()
+    for i = 0 to ks.len() - 1
         sum += table[ks[i]]
     end for
     if has20

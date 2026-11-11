@@ -47,7 +47,7 @@ struct GlobalSymbolTable {
 ```
 
 ### Symbol Table Components
-* **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `privateFields` set of private field names, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
+* **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
 * **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `members`, `memberValues` map, `cppName`).
 * **`unions` (`key -> UnionSymbol`)**: Stores every `union Name` declaration (`name`, `moduleId`, `key`, `isPub`, `variants`, `variantTypes` map, `variantIndices` map, `cppName`).
 * **`aliases` (`key -> AliasSymbol`)**: Stores every `alias Name = TargetType` declaration (`name`, `moduleId`, `key`, `targetType`, `isPub`, `cppName`).
@@ -143,7 +143,7 @@ partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
   :Iterate over program.declarations:
   1. TypeDecl:
      - Canonicalize each field's TypeId through canonicalizeType()
-     - Populate TypeSymbol::fields[fieldName] and privateFields
+      - Populate TypeSymbol::fields[fieldName]
   2. UnionDecl:
      - Canonicalize each variant's TypeId through canonicalizeType()
      - Populate UnionSymbol::variants, variantTypes, and variantIndices
@@ -178,7 +178,7 @@ Modules can define local or public type aliases (`alias UserId = int` or `public
 1. Starts with `curr = arena.types[tid]` and `activeModId = currentModuleId`.
 2. Maintains a `std::unordered_set<std::string> seen` of visited alias symbol keys.
 3. In a `while` loop, computes `key = resolveSymbolKey(symbols, activeModId, curr.name)` and looks up `key` in `symbols.aliases`:
-   * If not an alias, stops unwrapping (cross-module `isPub` visibility is enforced by `resolveTypeSymbolByName` / `ensureContainerTypesInExpr`).
+   * If not an alias, stops unwrapping (cross-module `isPub` visibility is enforced by `resolveTypeSymbolByName`).
    * **Cycle Detection:** If `key` is already in `seen` (e.g., `alias A = B` and `alias B = A`), breaks out of the loop immediately to prevent infinite recursion.
    * Otherwise, inserts `key` into `seen`, updates `activeModId = aliasSym.moduleId` (so relative type references inside the alias resolve in the alias's defining module), and advances `curr` to the target `TypeNode`.
 4. Finally, if `curr.name` resolves to a user-defined `TypeSymbol` in `symbols.types`, `EnumSymbol` in `symbols.enums`, or `UnionSymbol` in `symbols.unions`, normalizes `curr.name` to its canonical symbol key (e.g., `"entities/hero::Hero"`).

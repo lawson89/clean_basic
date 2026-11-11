@@ -303,12 +303,13 @@ CleanBasic supports two forms of `extern type`:
    public extern fn vec2Length(v as Vec2) as float
    ```
 
-2. **Single-Line Opaque External Value Types:**
-   If a C++ header defines a copyable/movable C++ value type or type alias (e.g., `using Regex = std::regex;`) whose internal fields should remain opaque to CleanBasic, use the single-line `public extern type` declaration and pass instances via `byref` to avoid unnecessary copies:
+2. **Opaque Fieldless External Value Types:**
+   If a C++ header defines a copyable/movable C++ value type or type alias (e.g., `using Regex = std::regex;`) whose internal fields should remain opaque to CleanBasic, use a fieldless `public extern type ... end type` declaration and pass instances via `byref` to avoid unnecessary copies:
    ```vb
    import header "regexBridge.hpp"
 
    public extern type Regex
+   end type
    public extern fn compileRegex(pattern as str) as Regex
    public extern fn regexMatches(byref rx as Regex, text as str) as bool
    ```

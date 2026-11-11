@@ -125,7 +125,7 @@ Circular module import detected when importing '<target>' (module '<targetModule
 
 ## 3. Visibility Rules (`public` vs. Private)
 
-By default, every `type`, `enum`, `union`, `alias`, `const`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`). Struct fields are public by default and can be marked `private` to restrict direct field access and struct construction to the defining module.
+By default, every `type`, `enum`, `union`, `alias`, `const`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`).
 
 | Access Context | Private Symbol (`isPub == false`) | Public Symbol (`isPub == true`) |
 | :--- | :--- | :--- |

@@ -38,42 +38,6 @@ fn isPublicHeader(header as str) as bool
     return header.startsWith("public ") or header.contains(" public ")
 end fn
 
-'' Returns true if the header declares an extern item.
-fn isExternHeader(header as str) as bool
-    return header.startsWith("extern ") or header.contains(" extern ")
-end fn
-
-'' Returns true if codePart is a top-level starter that terminates a single-line extern type declaration.
-fn isTopLevelStarter(codePart as str) as bool
-    if codePart.startsWith("public ") or codePart.startsWith("extern ")
-        return true
-    end if
-    if codePart.startsWith("fn ") or codePart.startsWith("type ") or codePart.startsWith("enum ") or codePart.startsWith("union ")
-        return true
-    end if
-    if codePart.startsWith("alias ") or codePart.startsWith("const ") or codePart.startsWith("import ")
-        return true
-    end if
-    return false
-end fn
-
-'' Determines whether an extern type declaration on lineIdx has a multi-line body ending in "end type".
-fn externTypeHasBody(lines as list[str], lineIdx as int) as bool
-    dim j = lineIdx + 1
-    while j < lines.len()
-        const t = lines[j].trim()
-        if t == "" or t.startsWith("'") or t.startsWith("#")
-            j += 1
-            continue
-        end if
-        if isTopLevelStarter(t)
-            return false
-        end if
-        return true
-    end while
-    return false
-end fn
-
 '' Extracts the declaration header if it is public or includePrivate is true.
 fn extractDeclHeader(line as str, includePrivate as bool) as str
     const t = line.trim()
@@ -113,17 +77,8 @@ fn parseDeclKindAndName(header as str) as list[str]
 end fn
 
 '' Returns true if the declaration kind represents a multi-line block (e.g., type...end type).
-fn isBlockDeclKind(header as str, kind as str, lines as list[str], lineIdx as int) as bool
-    if kind == "enum" or kind == "union"
-        return true
-    end if
-    if kind == "type"
-        if isExternHeader(header)
-            return externTypeHasBody(lines, lineIdx)
-        end if
-        return true
-    end if
-    return false
+fn isBlockDeclKind(kind as str) as bool
+    return kind == "type" or kind == "enum" or kind == "union"
 end fn
 
 '' Parses all documented declarations from a .cb file.
@@ -154,14 +109,12 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
             const name = kindAndName[1]
             if kind != "" and name != ""
                 dim sigLines as list[str] = [trimmed]
-                if isBlockDeclKind(header, kind, lines, i)
+                if isBlockDeclKind(kind)
                     const endMarker = $"end {kind}"
                     i += 1
                     while i < lines.len()
                         const bodyTrimmed = lines[i].trim()
-                        if includePrivate or not bodyTrimmed.startsWith("private ")
-                            sigLines.push(lines[i])
-                        end if
+                        sigLines.push(lines[i])
                         if bodyTrimmed == endMarker
                             break
                         end if

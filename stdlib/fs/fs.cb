@@ -5,7 +5,6 @@ import header "fs/fs_bridge.hpp"
 
 '' Opaque value-semantic handle to an open streaming file slot.
 public extern type CbFile
-    private handle as int
 end type
 
 '' Value-semantic handle to an open streaming file.
