@@ -1,6 +1,6 @@
 ' CleanBasic Tool: cbdoc
 '' Markdown API documentation generator for CleanBasic (.cb) source files and directories
-'' Extracts '' doc-comments paired with pub declarations using std/cli, std/fs, and std/str
+'' Extracts '' doc-comments paired with public declarations using std/cli, std/fs, and std/str
 '
 '' Usage:
 ''   cbdoc [-o <output.md>] [-t <title>] [-p] <target>
@@ -11,7 +11,7 @@ import "std/os"
 import "std/str"
 
 '' Represents a documented declaration extracted from a source file.
-pub type DocEntry
+public type DocEntry
     name as str
     kind as str
     signature as str
@@ -21,7 +21,7 @@ end type
 '' Extracts the declaration header if it is public or includePrivate is true.
 fn extractDeclHeader(line as str, includePrivate as bool) as str
     const t = line.trim()
-    if t.startsWith("pub ")
+    if t.startsWith("public ")
         return t
     end if
     if includePrivate
@@ -35,8 +35,8 @@ end fn
 '' Parses the declaration kind (e.g., "fn") and identifier name from a header line.
 fn parseDeclKindAndName(header as str) as list[str]
     dim work = header
-    if work.startsWith("pub ")
-        work = work.sliceFrom(4).ltrim()
+    if work.startsWith("public ")
+        work = work.sliceFrom(7).ltrim()
     end if
     if work.startsWith("extern ")
         work = work.sliceFrom(7).ltrim()
@@ -108,14 +108,17 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
                     const endMarker = $"end {kind}"
                     i += 1
                     while i < lines.len()
-                        sigLines.push(lines[i])
-                        if lines[i].trim() == endMarker
+                        const bodyTrimmed = lines[i].trim()
+                        if includePrivate or not bodyTrimmed.startsWith("private ")
+                            sigLines.push(lines[i])
+                        end if
+                        if bodyTrimmed == endMarker
                             break
                         end if
                         i += 1
                     end while
                 end if
-                if header.startsWith("pub ") or pendingDoc.len() > 0
+                if header.startsWith("public ") or pendingDoc.len() > 0
                     entries.push(DocEntry(
                         name=name,
                         kind=kind,

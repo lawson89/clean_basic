@@ -144,7 +144,7 @@ When a `can error` function calls another fallible function outside of a `try / 
 
 **CleanBasic Source:**
 ```vb
-pub fn processNetwork() as int can error
+public fn processNetwork() as int can error
     dim conn = connect("192.168.1.1")
     defer
         closeConnection(conn)
@@ -275,30 +275,30 @@ fn main()
 end fn
 ```
 
-### 6.3 Pattern 2: Wrapping External C/C++ Structs & Value Classes (`pub extern type`)
+### 6.3 Pattern 2: Wrapping External C/C++ Structs & Value Classes (`public extern type`)
 CleanBasic supports two forms of `extern type`:
 
 1. **External Structs with Known Fields:**
-   If a C/C++ header defines a POD struct `struct Vec2 { double x; double y; };`, declare its fields inside `pub extern type Vec2 ... end type`. CleanBasic will **not** re-emit `struct Vec2` in `build.cpp` (avoiding redefinition errors), but the semantic analyzer will type-check field accesses (`v.x`, `v.y`) and aggregate constructors (`Vec2(x=1.0, y=2.0)`).
+   If a C/C++ header defines a POD struct `struct Vec2 { double x; double y; };`, declare its fields inside `public extern type Vec2 ... end type`. CleanBasic will **not** re-emit `struct Vec2` in `build.cpp` (avoiding redefinition errors), but the semantic analyzer will type-check field accesses (`v.x`, `v.y`) and aggregate constructors (`Vec2(x=1.0, y=2.0)`).
    ```vb
    import header "vec2.hpp"
 
-   pub extern type Vec2
+   public extern type Vec2
        x as float
        y as float
    end type
 
-   pub extern fn vec2Length(v as Vec2) as float
+   public extern fn vec2Length(v as Vec2) as float
    ```
 
 2. **Single-Line Opaque External Value Types:**
-   If a C++ header defines a copyable/movable C++ value type or type alias (e.g., `using Regex = std::regex;`) whose internal fields should remain opaque to CleanBasic, use the single-line `pub extern type` declaration and pass instances via `byref` to avoid unnecessary copies:
+   If a C++ header defines a copyable/movable C++ value type or type alias (e.g., `using Regex = std::regex;`) whose internal fields should remain opaque to CleanBasic, use the single-line `public extern type` declaration and pass instances via `byref` to avoid unnecessary copies:
    ```vb
    import header "regexBridge.hpp"
 
-   pub extern type Regex
-   pub extern fn compileRegex(pattern as str) as Regex
-   pub extern fn regexMatches(byref rx as Regex, text as str) as bool
+   public extern type Regex
+   public extern fn compileRegex(pattern as str) as Regex
+   public extern fn regexMatches(byref rx as Regex, text as str) as bool
    ```
 
 ### 6.4 Pattern 3: Slot-Table Handles for Non-Copyable C++ RAII Types

@@ -55,7 +55,7 @@ To launch the included VS Code extension (`editors/vscode/`) in an Extension Dev
 
 CleanBasic includes first-party command-line tools written in pure CleanBasic under `tools/`:
 - `tools/cbfmt.cb`: CleanBasic source code formatter supporting `stdin`/`stdout` piping, in-place formatting (`-w` / `--write`), formatting verification (`-c` / `--check`), and configurable indentation (`-i <n>`).
-- `tools/cbdoc.cb`: Markdown API reference generator that extracts `''` doc-comments and `pub` declarations from `.cb` files and directories.
+- `tools/cbdoc.cb`: Markdown API reference generator that extracts `''` doc-comments and `public` declarations from `.cb` files and directories.
 
 Compile them into `build/` with:
 

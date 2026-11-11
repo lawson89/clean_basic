@@ -13,12 +13,12 @@
 ' EXPECT_OUT: Overload str: hi
 ' EXPECT_OUT: Enum assignment success
 
-pub enum Status
+public enum Status
     Active = 1
     Inactive = 2
 end enum
 
-pub type State
+public type State
     val as Status
 end type
 

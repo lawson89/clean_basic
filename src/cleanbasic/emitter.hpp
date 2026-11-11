@@ -24,6 +24,12 @@ inline std::string joinStrings(const std::vector<std::string>& items, std::strin
 }
 
 inline std::string sanitizeCppIdent(std::string_view name) {
+    static const std::unordered_set<std::string_view> cMacroNames = {
+        "errno", "stdin", "stdout", "stderr", "EOF", "NULL", "unix", "linux"
+    };
+    if (cMacroNames.count(name) > 0) {
+        return std::string(name) + "_cb";
+    }
     static const std::unordered_set<std::string_view> cppKeywords = {
         "alignas", "alignof", "and_eq", "asm", "atomic_cancel", "atomic_commit",
         "atomic_noexcept", "auto", "bitand", "bitor", "bool", "break", "case",
@@ -301,7 +307,7 @@ public:
         std::vector<std::string> paramItems;
         paramItems.reserve(fn.params.size());
         for (const auto& p : fn.params) {
-            paramItems.push_back(mapParamType(modId, p) + " " + p.name);
+            paramItems.push_back(mapParamType(modId, p) + " " + sanitizeCppIdent(p.name));
         }
         const std::string key = resolveSymbolKey(symbols, modId, fn.name);
         std::string cppName = makeCppFnName(modId, fn.name, fn.isExtern);
@@ -502,7 +508,7 @@ public:
         if (bareFnOpt.has_value()) {
             return bareFnOpt->cppName;
         }
-        return ident->name;
+        return sanitizeCppIdent(ident->name);
     }
 
     if (const auto* uop = arena.getExpr<UnaryOp>(exprId)) {
@@ -905,14 +911,15 @@ public:
             const bool isNewDecl = stmt.isDim || stmt.isConst || (declaredVars.find(name) == declaredVars.end());
             scope[name] = VarSymbol{name, retT, false, stmt.isConst};
             declaredVars.insert(name);
+            const std::string cppVarName = sanitizeCppIdent(name);
             if (isNewDecl) {
                 std::string prefix = "auto ";
                 if (stmt.isConst) {
                     prefix = "const auto ";
                 }
-                emitLine(prefix + name + " = " + rhs + ";");
+                emitLine(prefix + cppVarName + " = " + rhs + ";");
             } else {
-                emitLine(name + " = " + rhs + ";");
+                emitLine(cppVarName + " = " + rhs + ";");
             }
         } else {
             const std::string lhsCpp = emitExpr(tid, scope, true);
@@ -955,7 +962,7 @@ public:
             if (stmt.isConst) {
                 prefix = "const ";
             }
-            emitLine(prefix + cppType + " " + name + " = " + valCpp + ";");
+            emitLine(prefix + cppType + " " + sanitizeCppIdent(name) + " = " + valCpp + ";");
             return;
         }
     }
@@ -969,6 +976,7 @@ public:
 
         if (const auto* ident = arena.getExpr<Identifier>(targetId)) {
             const std::string& name = ident->name;
+            const std::string cppVarName = sanitizeCppIdent(name);
             if (stmt.isDim || stmt.isConst || declaredVars.find(name) == declaredVars.end()) {
                 scope[name] = VarSymbol{name, inferredT, false, stmt.isConst};
                 declaredVars.insert(name);
@@ -984,9 +992,9 @@ public:
                 if (stmt.isConst) {
                     prefix = "const ";
                 }
-                emitLine(prefix + cppT + " " + name + " = " + valCpp + ";");
+                emitLine(prefix + cppT + " " + cppVarName + " = " + valCpp + ";");
             } else {
-                emitLine(name + " = " + valCpp + ";");
+                emitLine(cppVarName + " = " + valCpp + ";");
             }
         } else {
             const std::string lhsCpp = emitExpr(targetId, scope, true);
@@ -1163,6 +1171,7 @@ public:
     if (const auto* forS = arena.getStmt<ForStmt>(stmtId)) {
         if (forS->rangeSpec.hasRange && !forS->loopVars.empty()) {
             const std::string& loopVar = forS->loopVars[0];
+            const std::string cppLoopVar = sanitizeCppIdent(loopVar);
             const std::string startCpp = emitExpr(forS->rangeSpec.start, scope);
             const std::string endCpp = emitExpr(forS->rangeSpec.end, scope);
             std::string stepCpp = "1";
@@ -1184,22 +1193,22 @@ public:
             std::string condCpp;
             if (isKnownPositiveStep) {
                 if (forS->rangeSpec.inclusive) {
-                    condCpp = loopVar + " <= " + endCpp;
+                    condCpp = cppLoopVar + " <= " + endCpp;
                 } else {
-                    condCpp = loopVar + " < " + endCpp;
+                    condCpp = cppLoopVar + " < " + endCpp;
                 }
             } else if (isKnownNegativeStep) {
                 if (forS->rangeSpec.inclusive) {
-                    condCpp = loopVar + " >= " + endCpp;
+                    condCpp = cppLoopVar + " >= " + endCpp;
                 } else {
-                    condCpp = loopVar + " > " + endCpp;
+                    condCpp = cppLoopVar + " > " + endCpp;
                 }
             } else {
                 std::string inclStr = "true";
                 if (!forS->rangeSpec.inclusive) {
                     inclStr = "false";
                 }
-                condCpp = "cbRangeCond(" + loopVar + ", " + endCpp + ", " + stepCpp + ", " + inclStr + ")";
+                condCpp = "cbRangeCond(" + cppLoopVar + ", " + endCpp + ", " + stepCpp + ", " + inclStr + ")";
             }
 
             auto loopScope = scope;
@@ -1211,7 +1220,7 @@ public:
             auto loopDecls = declaredVars;
             loopDecls.insert(loopVar);
 
-            emitLine("for (int64_t " + loopVar + " = " + startCpp + "; " + condCpp + "; " + loopVar + " += " + stepCpp + ") {");
+            emitLine("for (int64_t " + cppLoopVar + " = " + startCpp + "; " + condCpp + "; " + cppLoopVar + " += " + stepCpp + ") {");
             indentLevel += 1;
             emitStmtList(fn, forS->body, loopScope, loopDecls);
             indentLevel -= 1;
@@ -1409,7 +1418,7 @@ public:
                 auto caseScope = scope;
                 auto cDecls = declaredVars;
                 if (!c.bindingName.empty()) {
-                    emitLine("auto " + c.bindingName + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
+                    emitLine("auto " + sanitizeCppIdent(c.bindingName) + " = std::get<" + std::to_string(lastVarIndex) + ">(" + selVar + "._data);");
                     caseScope[c.bindingName] = VarSymbol{c.bindingName, lastPayloadTid, false, false};
                     cDecls.insert(c.bindingName);
                 }
@@ -1544,7 +1553,7 @@ public:
         emitLine("} while(false);");
         emitLine("if (cbHasError(" + catchErr + ")) {");
         indentLevel += 1;
-        emitLine("CbError " + tryCatch->catchVarName + " = " + catchErr + ";");
+        emitLine("CbError " + sanitizeCppIdent(tryCatch->catchVarName) + " = " + catchErr + ";");
         auto catchScope = scope;
         TypeId errTid = symbols.typeErr;
         if (errTid == INVALID_ID) {
@@ -2086,6 +2095,9 @@ public:
         for (const auto& hdr : symbols.headers) {
             emitLine(R"(#include ")" + hdr + R"(")");
         }
+        emitLine("#undef min");
+        emitLine("#undef max");
+        emitLine("#undef ERROR");
     }
 
     std::vector<std::pair<std::string, EnumDecl>> enumDecls;
@@ -2182,8 +2194,60 @@ public:
     }
 
     if (!orderedCompositeDecls.empty()) {
-        emitLine();
+        std::unordered_map<std::string, std::pair<std::string, DeclId>> compositeByKey;
+        std::vector<std::string> initialCompositeKeys;
+        initialCompositeKeys.reserve(orderedCompositeDecls.size());
         for (const auto& pair : orderedCompositeDecls) {
+            const DeclId did = pair.second;
+            std::string key;
+            if (const auto* td = arena.getDecl<TypeDecl>(did)) {
+                key = symbolKey(pair.first, td->name);
+            } else if (const auto* ud = arena.getDecl<UnionDecl>(did)) {
+                key = symbolKey(pair.first, ud->name);
+            }
+            if (!key.empty() && compositeByKey.count(key) == 0) {
+                compositeByKey[key] = pair;
+                initialCompositeKeys.push_back(key);
+            }
+        }
+
+        std::unordered_set<std::string> visitedCompositeKeys;
+        std::vector<std::pair<std::string, DeclId>> sortedCompositeDecls;
+        sortedCompositeDecls.reserve(orderedCompositeDecls.size());
+
+        auto visitComposite = [&](auto& self, const std::string& key) -> void {
+            if (visitedCompositeKeys.count(key) > 0 || compositeByKey.count(key) == 0) {
+                return;
+            }
+            visitedCompositeKeys.insert(key);
+            const auto tit = symbols.types.find(key);
+            if (tit != symbols.types.end()) {
+                for (const auto& fld : tit->second.fieldOrder) {
+                    const TypeNode& tn = arena.getType(fld.typeId);
+                    if (tn.typeArgs.empty() && tn.returnType == INVALID_ID && compositeByKey.count(tn.name) > 0) {
+                        self(self, tn.name);
+                    }
+                }
+            } else {
+                const auto uit = symbols.unions.find(key);
+                if (uit != symbols.unions.end()) {
+                    for (const auto& uv : uit->second.variants) {
+                        const TypeNode& tn = arena.getType(uv.type);
+                        if (tn.typeArgs.empty() && tn.returnType == INVALID_ID && compositeByKey.count(tn.name) > 0) {
+                            self(self, tn.name);
+                        }
+                    }
+                }
+            }
+            sortedCompositeDecls.push_back(compositeByKey.at(key));
+        };
+
+        for (const std::string& key : initialCompositeKeys) {
+            visitComposite(visitComposite, key);
+        }
+
+        emitLine();
+        for (const auto& pair : sortedCompositeDecls) {
             currentModuleId = pair.first;
             const DeclId did = pair.second;
             if (const auto* td = arena.getDecl<TypeDecl>(did)) {

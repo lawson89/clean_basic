@@ -1,6 +1,6 @@
 # Multi-File Module Resolution, Scoping & Name Mangling
 
-This document explains how CleanBasic resolves multi-file `.cb` module graphs, normalizes relative paths, handles module aliases, deduplicates diamond imports, detects circular dependencies, enforces `pub` visibility, and mangles C++ identifiers for collision-free Unity Builds.
+This document explains how CleanBasic resolves multi-file `.cb` module graphs, normalizes relative paths, handles module aliases, deduplicates diamond imports, detects circular dependencies, enforces `public` visibility, and mangles C++ identifiers for collision-free Unity Builds.
 
 ### Related Documentation
 * [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
@@ -119,15 +119,15 @@ Circular module import detected when importing '<target>' (module '<targetModule
 
 ---
 
-## 3. Visibility Rules (`pub` vs. Private)
+## 3. Visibility Rules (`public` vs. Private)
 
-By default, every `type`, `alias`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `pub` keyword exports the declaration (`isPub = true`).
+By default, every `type`, `alias`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`).
 
 | Access Context | Private Symbol (`isPub == false`) | Public Symbol (`isPub == true`) |
 | :--- | :--- | :--- |
 | **Same Module (`currentModuleId == decl.moduleId`)** | Allowed (direct unqualified access & local UFCS). | Allowed. |
-| **Cross-Module Qualified Call/Type (`modAlias.Symbol`)** | **Rejected** by `analyzeProgram()` with `AnalyzerError: Function/Type/Alias '<name>' is private to module '<mod>' (missing 'pub').` | Allowed if `modAlias` is imported in the current module. |
-| **Cross-Module UFCS Call (`recv.method()`)** | **Rejected** (`resolveFuncCall` requires `isPub == true` for functions in the receiver's defining module or imported modules). | Allowed if the receiver's defining module or a directly imported module defines `pub fn method(recv, ...)`. |
+| **Cross-Module Qualified Call/Type (`modAlias.Symbol`)** | **Rejected** by `analyzeProgram()` with `AnalyzerError: Function/Type/Alias '<name>' is private to module '<mod>' (missing 'public').` | Allowed if `modAlias` is imported in the current module. |
+| **Cross-Module UFCS Call (`recv.method()`)** | **Rejected** (`resolveFuncCall` requires `isPub == true` for functions in the receiver's defining module or imported modules). | Allowed if the receiver's defining module or a directly imported module defines `public fn method(recv, ...)`. |
 | **Transitive (Unimported) Module Access** | **Rejected.** | **Rejected** for direct qualified `unimportedAlias.fn()`, because `isModuleAliasInScope` only checks `symbols.modules[currentModuleId]`. |
 
 ---

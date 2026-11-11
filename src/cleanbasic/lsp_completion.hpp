@@ -210,7 +210,7 @@ inline void collectModuleSymbolCompletions(const LspDocumentSnapshot& snap, std:
     for (const auto& kv : snap.symbols.types) {
         const TypeSymbol& ts = kv.second;
         if (ts.moduleId != targetModuleId || (requirePub && !ts.isPub) || (!requirePub && isBuiltinTypeName(ts.name))) continue;
-        if (matchesCompletionPrefix(ts.name, prefix)) addCompletionEntry(items, seen, ts.name, 22, "type " + ts.name, ts.name, formatTypeHoverMarkdown(snap.arena, ts));
+        if (matchesCompletionPrefix(ts.name, prefix)) addCompletionEntry(items, seen, ts.name, 22, "type " + ts.name, ts.name, formatTypeHoverMarkdown(snap.arena, ts, !requirePub));
     }
     for (const auto& kv : snap.symbols.enums) {
         const EnumSymbol& es = kv.second;
@@ -355,7 +355,9 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
 
     const auto tsOpt = resolveTypeSymbol(snap.arena, snap.symbols, currentModuleId, recvTid);
     if (tsOpt.has_value()) {
+        const bool isSameModule = (tsOpt->moduleId == currentModuleId);
         for (const auto& f : tsOpt->fieldOrder) {
+            if (f.isPrivate && !isSameModule) continue;
             if (!matchesCompletionPrefix(f.name, prefix)) continue;
             TypeId ftid = f.typeId;
             const auto fit = tsOpt->fields.find(f.name);
@@ -410,7 +412,12 @@ inline void collectNamedArgumentCompletions(const LspDocumentSnapshot& snap, std
     }
     const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
     if (tsOpt.has_value()) {
+        const bool isSameModule = (tsOpt->moduleId == currentModuleId);
+        if (!isSameModule && !tsOpt->privateFields.empty()) {
+            return;
+        }
         for (const auto& f : tsOpt->fieldOrder) {
+            if (f.isPrivate && !isSameModule) continue;
             if (!matchesCompletionPrefix(f.name, callCtx.argPrefix)) continue;
             TypeId ftid = f.typeId;
             const auto fit = tsOpt->fields.find(f.name);
@@ -455,7 +462,7 @@ inline void collectGeneralScopeCompletions(const LspDocumentSnapshot& snap, std:
         if (docOpt.has_value()) doc = docOpt.value();
         addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
     }
-    const std::vector<std::string> keywords = {"fn", "end fn", "pub", "extern", "type", "end type", "enum", "end enum", "union", "end union", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "until", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
+    const std::vector<std::string> keywords = {"fn", "end fn", "public", "private", "extern", "type", "end type", "enum", "end enum", "union", "end union", "alias", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "until", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
     for (const auto& kw : keywords) if (matchesCompletionPrefix(kw, prefix)) addCompletionEntry(items, seen, kw, 14, "keyword");
 }
 
@@ -563,6 +570,10 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
     }
     const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
     if (tsOpt.has_value()) {
+        const bool isSameModule = (tsOpt->moduleId == currentModuleId);
+        if (!isSameModule && !tsOpt->privateFields.empty()) {
+            return std::nullopt;
+        }
         SignatureHelpData sig{};
         sig.label = tsOpt->name + "(";
         for (size_t i = 0; i < tsOpt->fieldOrder.size(); ++i) {
@@ -575,7 +586,7 @@ inline std::optional<SignatureHelpData> resolveSignatureHelp(const LspDocumentSn
             sig.paramLabels.push_back(pLabel);
         }
         sig.label += ") as " + tsOpt->name;
-        sig.documentation = formatTypeHoverMarkdown(snap.arena, tsOpt.value());
+        sig.documentation = formatTypeHoverMarkdown(snap.arena, tsOpt.value(), isSameModule);
         sig.activeParameter = callCtx.activeParam;
         if (!sig.paramLabels.empty() && sig.activeParameter >= sig.paramLabels.size()) sig.activeParameter = static_cast<uint32_t>(sig.paramLabels.size() - 1);
         return sig;

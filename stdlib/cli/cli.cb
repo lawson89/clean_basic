@@ -5,14 +5,14 @@ import "std/os"
 import "std/str"
 
 '' Specification for a boolean command-line flag (e.g., --verbose / -v).
-pub type FlagSpec
+public type FlagSpec
     name as str
     shortName as str = ""
     help as str = ""
 end type
 
 '' Specification for a key-value command-line option (e.g., --output <val> / -o <val>).
-pub type OptionSpec
+public type OptionSpec
     name as str
     shortName as str = ""
     help as str = ""
@@ -21,14 +21,14 @@ pub type OptionSpec
 end type
 
 '' Specification for a positional command-line argument (e.g., <pattern>).
-pub type ArgSpec
+public type ArgSpec
     name as str
     help as str = ""
     required as bool = true
 end type
 
 '' Declarative command-line parser definition holding flags, options, and positional argument specs.
-pub type Parser
+public type Parser
     name as str
     version as str = ""
     description as str = ""
@@ -38,7 +38,7 @@ pub type Parser
 end type
 
 '' Parsed command-line arguments result containing matched flags, options, positional arguments, and trailing rest arguments.
-pub type Args
+public type Args
     flags as dict[str, bool]
     options as dict[str, str]
     positional as dict[str, str]
@@ -48,7 +48,7 @@ pub type Args
 end type
 
 '' Creates a new declarative command-line Parser with the given program name, optional version, and optional description.
-pub fn newParser(name as str, version as str = "", description as str = "") as Parser
+public fn newParser(name as str, version as str = "", description as str = "") as Parser
     dim flags as list[FlagSpec] = []
     dim options as list[OptionSpec] = []
     dim args as list[ArgSpec] = []
@@ -56,17 +56,17 @@ pub fn newParser(name as str, version as str = "", description as str = "") as P
 end fn
 
 '' Registers a boolean flag (--name and optional -shortName) on the parser.
-pub fn addFlag(byref p as Parser, name as str, shortName as str = "", help as str = "")
+public fn addFlag(byref p as Parser, name as str, shortName as str = "", help as str = "")
     p.flags.push(FlagSpec(name=name, shortName=shortName, help=help))
 end fn
 
 '' Registers a value-taking option (--name <val> and optional -shortName <val>) on the parser.
-pub fn addOption(byref p as Parser, name as str, shortName as str = "", help as str = "", defaultVal as str = "", required as bool = false)
+public fn addOption(byref p as Parser, name as str, shortName as str = "", help as str = "", defaultVal as str = "", required as bool = false)
     p.options.push(OptionSpec(name=name, shortName=shortName, help=help, defaultVal=defaultVal, required=required))
 end fn
 
 '' Registers a positional argument on the parser in declaration order.
-pub fn addArg(byref p as Parser, name as str, help as str = "", required as bool = true)
+public fn addArg(byref p as Parser, name as str, help as str = "", required as bool = true)
     p.args.push(ArgSpec(name=name, help=help, required=required))
 end fn
 
@@ -113,7 +113,7 @@ fn findOptionByShort(p as Parser, shortName as str) as int
 end fn
 
 '' Generates a formatted multi-line usage and help string for the parser.
-pub fn usage(p as Parser) as str
+public fn usage(p as Parser) as str
     dim lines as list[str] = []
     if p.description != "" and p.version != ""
         lines.push($"{p.name} {p.version} - {p.description}")
@@ -201,12 +201,12 @@ pub fn usage(p as Parser) as str
 end fn
 
 '' Prints the formatted usage and help message to standard output.
-pub fn printUsage(p as Parser)
+public fn printUsage(p as Parser)
     print(p.usage())
 end fn
 
 '' Parses an explicit list of command-line arguments (excluding argv[0]) according to the parser specification.
-pub fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
+public fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
     dim flags as dict[str, bool] = {}
     dim options as dict[str, str] = {}
     dim providedOptions as dict[str, bool] = {}
@@ -366,7 +366,7 @@ pub fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
 end fn
 
 '' Parses the process command-line arguments from os.args() (automatically skipping argv[0]).
-pub fn parse(p as Parser) as Args can error
+public fn parse(p as Parser) as Args can error
     dim argv = os.args()
     dim rawArgs as list[str] = []
     if argv.len() > 1
@@ -376,7 +376,7 @@ pub fn parse(p as Parser) as Args can error
 end fn
 
 '' Returns true if a boolean flag is set or if an option or positional argument with the given name is present.
-pub fn has(a as Args, name as str) as bool
+public fn has(a as Args, name as str) as bool
     if a.flags.get(name, false)
         return true
     end if
@@ -390,7 +390,7 @@ pub fn has(a as Args, name as str) as bool
 end fn
 
 '' Returns the string value of an option or positional argument, or defaultVal if not present.
-pub fn get(a as Args, name as str, defaultVal as str = "") as str
+public fn get(a as Args, name as str, defaultVal as str = "") as str
     if a.options.has(name)
         return a.options[name]
     end if
@@ -401,7 +401,7 @@ pub fn get(a as Args, name as str, defaultVal as str = "") as str
 end fn
 
 '' Parses and returns the integer value of an option or positional argument, or defaultVal if empty.
-pub fn getInt(a as Args, name as str, defaultVal as int = 0) as int can error
+public fn getInt(a as Args, name as str, defaultVal as int = 0) as int can error
     dim raw = a.get(name, "")
     if raw == ""
         return defaultVal

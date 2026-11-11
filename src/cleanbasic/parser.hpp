@@ -922,7 +922,7 @@ public:
         std::vector<FieldDecl> fields;
         if (isExtern && !check("KEYWORD", "end type")) {
             if (check("EOF") ||
-                check("KEYWORD", "pub") ||
+                check("KEYWORD", "public") ||
                 check("KEYWORD", "extern") ||
                 check("KEYWORD", "fn") ||
                 check("KEYWORD", "type") ||
@@ -946,6 +946,11 @@ public:
             if (check("EOF")) {
                 setParseError(current(), "Unclosed 'type " + nameTok.value + "', expected 'end type'");
             }
+            bool isPrivateField = false;
+            if (check("KEYWORD", "private")) {
+                match("KEYWORD", "private");
+                isPrivateField = true;
+            }
             const Token fieldTok = match("IDENT");
             match("KEYWORD", "as");
             const TypeId fieldType = parseType();
@@ -954,6 +959,7 @@ public:
             fd.col = fieldTok.col;
             fd.name = fieldTok.value;
             fd.typeId = fieldType;
+            fd.isPrivate = isPrivateField;
             if (check("ASSIGN")) {
                 if (isExtern) {
                     setParseError(current(), "Default field values are not allowed on 'extern type' declarations");
@@ -1183,9 +1189,9 @@ public:
 
         bool isPub = false;
         bool isExtern = false;
-        while (check("KEYWORD", "pub") || check("KEYWORD", "extern")) {
-            if (check("KEYWORD", "pub")) {
-                match("KEYWORD", "pub");
+        while (check("KEYWORD", "public") || check("KEYWORD", "extern")) {
+            if (check("KEYWORD", "public")) {
+                match("KEYWORD", "public");
                 isPub = true;
             } else if (check("KEYWORD", "extern")) {
                 match("KEYWORD", "extern");

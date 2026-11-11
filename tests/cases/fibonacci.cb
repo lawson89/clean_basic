@@ -4,7 +4,7 @@
 ' EXPECT_OUT: Iterative Fib(10) = 55
 ' EXPECT_OUT: Recursive Fib(10) = 55
 
-pub fn fibIterative(n as int) as int
+public fn fibIterative(n as int) as int
     if n <= 0
         return 0
     else if n == 1
@@ -24,7 +24,7 @@ pub fn fibIterative(n as int) as int
     return b
 end fn
 
-pub fn fibRecursive(n as int) as int
+public fn fibRecursive(n as int) as int
     if n <= 0
         return 0
     else if n == 1

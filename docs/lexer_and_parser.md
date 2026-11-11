@@ -146,18 +146,18 @@ At the top level of a `.cb` file, only four declaration families are legal:
    * `import header "header.hpp"` (`kind = "header"`)
    * `import link "m"` (`kind = "link"`)
 2. **Type Aliases (`AliasDecl`)**:
-   * `[pub] alias Name = Type` (Applying `extern` to an `alias` is rejected with a `ParseError`).
+   * `[public] alias Name = Type` (Applying `extern` to an `alias` is rejected with a `ParseError`).
 3. **Struct / Extern Types (`TypeDecl`)**:
-   * `[pub] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
-   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`pub`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
+   * `[public] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
+   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
 4. **Enums (`EnumDecl`)**:
-   * `[pub] enum Name [as int] ... end enum` for enumeration types.
-   * `[pub] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
-   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`pub`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
+   * `[public] enum Name [as int] ... end enum` for enumeration types.
+   * `[public] [extern] type Name ... end type` for struct definitions with `field as Type` declarations.
+   * **Single-Line Opaque Extern Type:** When `isExtern` is true and the newline after `type Name` is immediately followed by another top-level starter (`public`, `extern`, `fn`, `type`, `alias`, `import`, or `EOF`) rather than field declarations or `end type`, `parseTypeDecl()` produces a fieldless extern `TypeDecl` without requiring `end type`.
 5. **Module Constants (`ConstDecl`)**:
-   * `[pub] const name [as Type] = Expr` declares a module-level constant.
+   * `[public] const name [as Type] = Expr` declares a module-level constant.
 6. **Functions (`FnDecl`)**:
-   * `[pub] [extern] fn name([byref] p as Type [= defaultExpr], ...) [as ReturnType] [can error]`
+   * `[public] [extern] fn name([byref] p as Type [= defaultExpr], ...) [as ReturnType] [can error]`
    * Fallible functions declare `can error` at the end of the signature (the legacy `as err` return shorthand is rejected with a `ParseError`).
    * If `isExtern` is true and `end fn` is not present, `parseFnDecl()` returns a bodyless extern `FnDecl` immediately after the signature line.
 

@@ -65,6 +65,7 @@ struct FieldDecl {
     uint32_t col = 1;
     std::string name;
     TypeId typeId = INVALID_ID;
+    bool isPrivate = false;
     bool hasDefault = false;
     ExprId defaultValue = INVALID_ID;
 };
@@ -376,7 +377,7 @@ using DeclVariant = std::variant<
 >;
 
 // Top-level declaration wrapper storing three distinct source coordinate anchors for diagnostics & LSP:
-// - line / col: Start of the declaration (e.g., leading 'pub', 'extern', or keyword token).
+// - line / col: Start of the declaration (e.g., leading 'public', 'extern', or keyword token).
 // - nameLine / nameCol: Exact 1-based position of the declared identifier for LSP Go-to-Definition.
 // - endLine: Closing line of multi-line declarations ('end fn', 'end type', etc.) for LSP DocumentSymbols.
 struct DeclNode {
@@ -811,12 +812,14 @@ inline std::string defaultImportAlias(std::string_view importTarget) {
 
 inline std::string sanitizeModuleId(std::string_view moduleId) {
     std::string out;
-    out.reserve(moduleId.size());
+    out.reserve(moduleId.size() + 4);
     for (const char c : moduleId) {
         const bool isAlpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
         const bool isNum = (c >= '0' && c <= '9');
-        if (isAlpha || isNum || c == '_') {
+        if (isAlpha || isNum) {
             out.push_back(c);
+        } else if (c == '_') {
+            out.append("__");
         } else {
             out.push_back('_');
         }

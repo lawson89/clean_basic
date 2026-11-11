@@ -7,6 +7,12 @@ namespace cb {
 
 constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#ifndef CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 #define CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -19,6 +25,9 @@ constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#ifndef CLEANBASIC_RUNTIME_
 #include <variant>
 #include <algorithm>
 #include <type_traits>
+#undef min
+#undef max
+#undef ERROR
 
 struct [[nodiscard]] CbError {
     std::string msg = "";

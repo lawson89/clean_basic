@@ -30,95 +30,95 @@ extern fn cbOsExit(code as int)
 ' --- Public API: CLI & Standard Streams ---
 
 '' Returns the command-line arguments passed to the program (including argv[0]).
-pub fn args() as list[str]
+public fn args() as list[str]
     return cbOsArgs()
 end fn
 
 '' Writes text to standard output without appending a trailing newline and flushes the stream.
-pub fn printRaw(text as str)
+public fn printRaw(text as str)
     cbOsPrintRaw(text)
 end fn
 
 '' Writes a message to standard error followed by a newline.
-pub fn eprint(msg as str)
+public fn eprint(msg as str)
     cbOsEprint(msg)
 end fn
 
 '' Writes text to standard error without appending a trailing newline and flushes the stream.
-pub fn eprintRaw(text as str)
+public fn eprintRaw(text as str)
     cbOsEprintRaw(text)
 end fn
 
 '' Reads a single line from standard input into outLine, returning false on EOF.
-pub fn readLine(byref outLine as str) as bool
+public fn readLine(byref outLine as str) as bool
     return cbOsReadLine(outLine)
 end fn
 
 '' Reads up to count bytes from standard input as a string.
-pub fn readExact(count as int) as str
+public fn readExact(count as int) as str
     return cbOsReadExact(count)
 end fn
 
 '' Reads all remaining bytes from standard input until EOF.
-pub fn readAll() as str
+public fn readAll() as str
     return cbOsReadAll()
 end fn
 
 ' --- Public API: Environment, Working Directory & Platform ---
 
 '' Returns the value of environment variable name, or "" if not set.
-pub fn env(name as str) as str
+public fn env(name as str) as str
     return cbOsEnv(name)
 end fn
 
 '' Returns true if environment variable name is defined in the process environment.
-pub fn hasEnv(name as str) as bool
+public fn hasEnv(name as str) as bool
     return cbOsHasEnv(name)
 end fn
 
 '' Returns the current working directory path.
-pub fn cwd() as str can error
+public fn cwd() as str can error
     return cbOsCwd()
 end fn
 
 '' Changes the current working directory to path.
-pub fn chdir(path as str) can error
+public fn chdir(path as str) can error
     cbOsChdir(path)
 end fn
 
 '' Returns the host operating system identifier ("linux", "macos", "windows", or "unknown").
-pub fn platform() as str
+public fn platform() as str
     return cbOsPlatform()
 end fn
 
 '' Returns the resolved filesystem path of the currently running executable, or "" if unavailable.
-pub fn exePath() as str
+public fn exePath() as str
     return cbOsExePath()
 end fn
 
 ' --- Public API: Timing & Process Control ---
 
 '' Returns a monotonic clock timestamp in milliseconds.
-pub fn clock() as int
+public fn clock() as int
     return cbOsClock()
 end fn
 
 '' Suspends execution of the current thread for ms milliseconds.
-pub fn sleep(ms as int)
+public fn sleep(ms as int)
     cbOsSleep(ms)
 end fn
 
 '' Executes a shell command and returns its exit status code.
-pub fn run(cmd as str) as int
+public fn run(cmd as str) as int
     return cbOsRun(cmd)
 end fn
 
 '' Executes a shell command, captures its standard output, and raises an error if the command fails.
-pub fn exec(cmd as str) as str can error
+public fn exec(cmd as str) as str can error
     return cbOsExec(cmd)
 end fn
 
 '' Terminates the process immediately with the specified exit status code.
-pub fn exit(code as int)
+public fn exit(code as int)
     cbOsExit(code)
 end fn

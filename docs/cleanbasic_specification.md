@@ -6,7 +6,7 @@ CleanBasic is a statically typed, procedural systems programming language. It co
 For deep-dive technical documentation on each compiler stage, consult:
 * [Transpiler Architecture & Arena Design](transpilerArchitecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
 * [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
-* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `pub` visibility, and C++ identifier mangling.
+* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `public` visibility, and C++ identifier mangling.
 * [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `try / catch` verification.
 * [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cppEmitterAndInterop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
 * [C++17 Strict Data-Oriented Subset](cppSubset.md) — Coding standards for the transpiler implementation.
@@ -29,24 +29,24 @@ ImportDecl      ::= "import" (StringLiteral | QualifiedIdent) ["as" Identifier] 
                   | "import header" StringLiteral NEWLINE
                   | "import link" StringLiteral NEWLINE
 
-ConstDecl       ::= ["pub"] "const" Identifier ["as" Type] "=" Expr NEWLINE
+ConstDecl       ::= ["public"] "const" Identifier ["as" Type] "=" Expr NEWLINE
 
-AliasDecl       ::= ["pub"] "alias" Identifier "=" Type NEWLINE
+AliasDecl       ::= ["public"] "alias" Identifier "=" Type NEWLINE
 
-EnumDecl        ::= ["pub"] "enum" Identifier ["as" "int"] NEWLINE EnumMember* "end enum" NEWLINE
+EnumDecl        ::= ["public"] "enum" Identifier ["as" "int"] NEWLINE EnumMember* "end enum" NEWLINE
 EnumMember      ::= Identifier ["=" Expr] NEWLINE
 
-UnionDecl       ::= ["pub"] "union" Identifier NEWLINE UnionVariant+ "end union" NEWLINE
+UnionDecl       ::= ["public"] "union" Identifier NEWLINE UnionVariant+ "end union" NEWLINE
 UnionVariant    ::= Identifier "as" Type NEWLINE
 
-TypeDecl        ::= ("pub" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
-                  | ["pub"] "extern" "type" Identifier NEWLINE
+TypeDecl        ::= ("public" | "extern")* "type" Identifier NEWLINE FieldDecl* "end type" NEWLINE
+                  | ["public"] "extern" "type" Identifier NEWLINE
 FieldDecl       ::= Identifier "as" Type ["=" Expr] NEWLINE
 
-FnDecl          ::= ("pub" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
+FnDecl          ::= ("public" | "extern")* "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
                     Statement*
                     "end fn" NEWLINE
-                  | ["pub"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
+                  | ["public"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
 ParamList       ::= Param ("," Param)* [","]
 Param           ::= ["byref"] Identifier "as" Type ["=" Expr]
 
@@ -129,7 +129,7 @@ QualifiedIdent  ::= Identifier ("." Identifier)*
 
 ### 1. Multi-File Modules, Nested Folder Imports & Visibility
 
-Every `.cb` file is implicitly a module. Everything is private by default; the `pub` keyword exposes types, aliases, and functions to the importer.
+Every `.cb` file is implicitly a module. Everything is private by default; the `public` keyword exposes types, aliases, and functions to the importer.
 * **Relative Nested Paths:** Module imports (`import "entities/hero.cb"` or `import "../shared/math.cb"`) are resolved relative to the directory of the importing file and normalized to canonical project-relative module IDs (e.g., `entities/hero`).
 * **Default & Explicit Aliases (`as`):** `import "entities/hero.cb"` binds the module alias `hero` (the filename stem). When two modules share a stem (e.g., `ui/button.cb` and `input/button.cb`), use `import "input/button.cb" as inputBtn` to disambiguate. Duplicate module aliases in the same file are rejected at compile time.
 * **Diamond Deduplication & Circular Import Rejection:** Shared dependencies imported across multiple modules are loaded once in topological order; circular import chains are rejected with a clear diagnostic.
@@ -139,17 +139,17 @@ Every `.cb` file is implicitly a module. Everything is private by default; the `
 
 ```vb
 ' Expose the type to other files
-pub type Player
+public type Player
     name as str
     health as int
 end type
 
 ' Expose the function
-pub fn heal(byref p as Player, amount as int)
+public fn heal(byref p as Player, amount as int)
     p.health = p.health + amount
 end fn
 
-' Private function (no 'pub')
+' Private function (no 'public')
 fn calculateMaxHealth() as int
     return 100
 end fn
@@ -194,12 +194,12 @@ CleanBasic provides systems-level safety without `try/catch` performance penalti
 **network.cb (Error Bubbling & Cleanup)**
 
 ```vb
-pub type Connection
+public type Connection
     id as int
 end type
 
 ' Function can return a Connection OR raise a structured error
-pub fn connect(ip as str) as Connection can error
+public fn connect(ip as str) as Connection can error
     if ip == ""
         error("IP cannot be empty", code=408)
     end if
@@ -207,12 +207,12 @@ pub fn connect(ip as str) as Connection can error
     return Connection(id=1)
 end fn
 
-pub fn closeConnection(conn as Connection)
+public fn closeConnection(conn as Connection)
     ' Cleanup logic goes here
 end fn
 
 ' Declares 'can error', enabling implicit error bubbling
-pub fn processNetwork() as int can error
+public fn processNetwork() as int can error
     ' IMPLICIT BUBBLING: If connect fails, processNetwork immediately returns the error.
     dim conn = connect("192.168.1.1")
     
@@ -273,7 +273,7 @@ Declarations preceded by contiguous `''` (double-single-quote) doc-comment lines
 import "std/cli"
 
 '' Searches files for a matching pattern.
-pub fn runSearch() as int
+public fn runSearch() as int
     dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files")
     p.addFlag("ignore-case", "i", "Case-insensitive search")
     p.addOption("output", "o", "Output file path", defaultVal="out.txt")

@@ -209,7 +209,7 @@ end defer
 
 TEST_CASE("Parser builds AST for control flow, ranges, and fallible signatures", "[parser]") {
     const std::string code = R"(
-pub alias ScoreMap = dict[str, list[int]]
+public alias ScoreMap = dict[str, list[int]]
 
 fn compute(byref items as list[int], tag as str) as int
     dim total = 0
@@ -553,9 +553,9 @@ end fn
 
 TEST_CASE("Emitter generates C++17 error bubbling and defer for extern declarations", "[emitter]") {
     const std::string code = R"(
-pub extern type SQL_DB
-pub extern fn connect(path as str) as SQL_DB can error
-pub extern fn SQL_close(db as SQL_DB)
+public extern type SQL_DB
+public extern fn connect(path as str) as SQL_DB can error
+public extern fn SQL_close(db as SQL_DB)
 
 fn processData() as int can error
     ' Implicit bubble (needs if (cbHasError(_err1)) return ...)
@@ -605,7 +605,7 @@ end fn
 
     SECTION("Deduplicates canonical TypeNodes in AstArena and emits from const AstArena&") {
         const std::string immutCode = R"(
-pub type Box
+public type Box
     val as int
 end type
 
@@ -655,7 +655,7 @@ TEST_CASE("End-to-end fixture: nested folder modules, name collision mangling, a
     cb::testE2E::runE2EFixture("nested_modules", "tests/cases/nested_modules/main.cb");
 }
 
-TEST_CASE("Module scoping, pub visibility, duplicate aliases, diamond deduplication, and circular imports", "[modules]") {
+TEST_CASE("Module scoping, public visibility, duplicate aliases, diamond deduplication, and circular imports", "[modules]") {
     const std::string baseDir = "build/testArtifacts/moduleEdgeCases";
     std::error_code ec;
     std::filesystem::remove_all(baseDir, ec);
@@ -666,7 +666,7 @@ TEST_CASE("Module scoping, pub visibility, duplicate aliases, diamond deduplicat
         {
             std::ofstream fa(baseDir + "/a.cb");
             fa << R"(import "sub/b.cb"
-pub fn fa() as int
+public fn fa() as int
     return 1
 end fn
 )";
@@ -674,7 +674,7 @@ end fn
         {
             std::ofstream fb(baseDir + "/sub/b.cb");
             fb << R"(import "../a.cb"
-pub fn fb() as int
+public fn fb() as int
     return 2
 end fn
 )";
@@ -697,14 +697,14 @@ end fn
     SECTION("Rejects duplicate module import aliases in the same file") {
         {
             std::ofstream f1(baseDir + "/mod.cb");
-            f1 << R"(pub fn f() as int
+            f1 << R"(public fn f() as int
     return 1
 end fn
 )";
         }
         {
             std::ofstream f2(baseDir + "/sub/mod.cb");
-            f2 << R"(pub fn f() as int
+            f2 << R"(public fn f() as int
     return 2
 end fn
 )";
@@ -724,7 +724,7 @@ end fn
         CHECK(res.error.message.find("Duplicate module import alias 'mod'") != std::string::npos);
     }
 
-    SECTION("Enforces private by default (non-pub functions and types are rejected across modules)") {
+    SECTION("Enforces private by default (non-public functions and types are rejected across modules)") {
         {
             std::ofstream flib(baseDir + "/secret.cb");
             flib << R"(type HiddenType
@@ -735,7 +735,7 @@ fn hiddenFn() as int
     return 42
 end fn
 
-pub fn publicFn() as int
+public fn publicFn() as int
     return hiddenFn()
 end fn
 )";
@@ -1266,7 +1266,7 @@ end fn
             cb::jsonObjectSet(arena, td, "uri", cb::jsonAddString(arena, "file:///virtualWs/mathUtil.cb"));
             cb::jsonObjectSet(arena, td, "languageId", cb::jsonAddString(arena, "cleanbasic"));
             cb::jsonObjectSet(arena, td, "version", cb::jsonAddInt(arena, 1));
-            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(pub fn doubleVal(x as int) as int
+            cb::jsonObjectSet(arena, td, "text", cb::jsonAddString(arena, R"(public fn doubleVal(x as int) as int
     return x * 2
 end fn
 )"));
@@ -1296,7 +1296,7 @@ end fn
             cb::writeJsonrpcMessage(clientToServer, cb::serializeJson(arena, msg));
         }
 
-        // Modify mathUtil.cb in memory to remove 'pub' from doubleVal, then re-validate main.cb
+        // Modify mathUtil.cb in memory to remove 'public' from doubleVal, then re-validate main.cb
         {
             cb::JsonArena arena;
             const cb::JsonId msg = cb::jsonAddObject(arena);
@@ -1490,12 +1490,12 @@ TEST_CASE("LSP DocumentSymbol Provider outlines types, fields, aliases, and func
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
-pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+public type Player
     name as str
     health as int
 end type
-pub fn heal(byref p as Player, amount as int) as int can error
+public fn heal(byref p as Player, amount as int) as int can error
     p.health = p.health + amount
     return p.health
 end fn
@@ -1554,12 +1554,12 @@ TEST_CASE("LSP Hover Provider resolves variables, UFCS methods, struct fields, a
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
-pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+public type Player
     name as str
     health as int
 end type
-pub fn heal(byref p as Player, amount as int) as int can error
+public fn heal(byref p as Player, amount as int) as int can error
     p.health = p.health + amount
     return p.health
 end fn
@@ -1625,7 +1625,7 @@ end fn
     };
 
     CHECK(getHoverValue(3).find("dim hero as Player") != std::string::npos);
-    CHECK(getHoverValue(4).find("pub fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
+    CHECK(getHoverValue(4).find("public fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
     CHECK(getHoverValue(5).find("(field) Player.health as int") != std::string::npos);
     CHECK(getHoverValue(6).find("fn print(values...)") != std::string::npos);
 }
@@ -1639,12 +1639,12 @@ TEST_CASE("LSP Definition Provider resolves same-file, cross-module UFCS, struct
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
-pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+public type Player
     name as str
     health as int
 end type
-pub fn heal(byref p as Player, amount as int) as int can error
+public fn heal(byref p as Player, amount as int) as int can error
     p.health = p.health + amount
     return p.health
 end fn
@@ -1707,7 +1707,7 @@ end fn
     };
 
     checkDefLocation(7, "file:///ws/main.cb", 1, 3);
-    checkDefLocation(8, "file:///ws/player.cb", 5, 7);
+    checkDefLocation(8, "file:///ws/player.cb", 5, 10);
     checkDefLocation(9, "file:///ws/player.cb", 3, 4);
     checkDefLocation(10, "file:///ws/main.cb", 5, 10);
 }
@@ -1721,7 +1721,7 @@ TEST_CASE("LSP Snapshot Fallback preserves symbols and hover during transient sy
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public type Player
     name as str
     health as int
 end type
@@ -1787,12 +1787,12 @@ TEST_CASE("LSP Completion Provider resolves UFCS and fields", "[lsp][completion]
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub alias Score = int
-pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public alias Score = int
+public type Player
     name as str
     health as int
 end type
-pub fn heal(byref p as Player, amount as int, bonus as int) as int can error
+public fn heal(byref p as Player, amount as int, bonus as int) as int can error
     p.health = p.health + amount + bonus
     return p.health
 end fn
@@ -1911,7 +1911,7 @@ TEST_CASE("LSP Completion Provider resolves named arguments, type annotations, a
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public type Player
     name as str
     health as int
 end type
@@ -1988,11 +1988,11 @@ TEST_CASE("LSP Signature Help Provider resolves struct constructors and UFCS act
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///ws"}})"
     );
 
-    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(pub type Player
+    cb::testLsp::sendDidOpen(clientToServer, "file:///ws/player.cb", R"(public type Player
     name as str
     health as int
 end type
-pub fn heal(byref p as Player, amount as int, bonus as int) as int can error
+public fn heal(byref p as Player, amount as int, bonus as int) as int can error
     p.health = p.health + amount + bonus
     return p.health
 end fn
@@ -3030,7 +3030,7 @@ end fn
     SECTION("LSP supports enum symbols/hover/completions and bytes receiver completions") {
         cb::LspServerState state{};
         const std::string uri = "file:///ws/enum_bytes_lsp.cb";
-        const std::string text = R"CB(pub enum Color
+        const std::string text = R"CB(public enum Color
     red = 1
     blue = 2
 end enum
@@ -3076,7 +3076,7 @@ TEST_CASE("Analyzer guardrails for module constants, defaults, const containers,
     SECTION("Rejects private cross-module constant access and constant reassignment") {
         std::unordered_map<std::string, std::string> memFiles;
         memFiles["cfg.cb"] = R"CB(
-pub const defaultPort = 8080
+public const defaultPort = 8080
 const secretKey = "hidden"
 )CB";
 
@@ -3188,7 +3188,7 @@ end fn
     SECTION("LSP surfaces top-level constants and new container receiver methods") {
         cb::LspServerState state{};
         const std::string uri = "file:///ws/const_and_containers.cb";
-        const std::string text = R"CB(pub const maxConnections = 128
+        const std::string text = R"CB(public const maxConnections = 128
 fn demo()
     dim table as dict[str, int] = {"k": 1}
     dim n = maxConnections
@@ -3204,7 +3204,7 @@ end fn
         REQUIRE(constRefCtx.found);
         const cb::ResolvedCursorSymbol constHover = cb::resolveCursorSymbolInfo(snap, "/ws/const_and_containers.cb", constRefCtx);
         REQUIRE(constHover.hoverMarkdown.has_value());
-        CHECK(constHover.hoverMarkdown.value().find("pub const maxConnections as int") != std::string::npos);
+        CHECK(constHover.hoverMarkdown.value().find("public const maxConnections as int") != std::string::npos);
         REQUIRE(constHover.definition.has_value());
         CHECK(constHover.definition->line == 1);
 
@@ -3464,7 +3464,7 @@ end fn
         const auto cursorCtx = cb::resolveCursorToken(src, "/workspace/lspPrelude.cb", 5, 16);
         const auto symInfo = cb::resolveCursorSymbolInfo(snap, "/workspace/lspPrelude.cb", cursorCtx);
         REQUIRE(symInfo.hoverMarkdown.has_value());
-        CHECK(symInfo.hoverMarkdown.value().find("pub fn trim(s as str) as str") != std::string::npos);
+        CHECK(symInfo.hoverMarkdown.value().find("public fn trim(s as str) as str") != std::string::npos);
         REQUIRE(symInfo.definition.has_value());
         CHECK(symInfo.definition.value().fileName.find("stdlib/str/str.cb") != std::string::npos);
     }
@@ -3508,7 +3508,7 @@ end fn
 }
 
 TEST_CASE("Tools cbdoc and cbfmt, LSP '' doc-comments, and collection loop const enforcement", "[cbdoc][cbfmt][lsp][e2e]") {
-    SECTION("tools/cbdoc.cb extracts '' doc-comments and pub signatures into Markdown") {
+    SECTION("tools/cbdoc.cb extracts '' doc-comments and public signatures into Markdown") {
         const std::string workDir = "build/testArtifacts/tool_cbdoc";
         std::error_code ec;
         std::filesystem::create_directories(workDir, ec);
@@ -3535,7 +3535,7 @@ TEST_CASE("Tools cbdoc and cbfmt, LSP '' doc-comments, and collection loop const
         CHECK(mdText.find("(type)") != std::string::npos);
         CHECK(mdText.find("Declarative command-line parser definition") != std::string::npos);
         CHECK(mdText.find("newParser") != std::string::npos);
-        CHECK(mdText.find("pub fn newParser(") != std::string::npos);
+        CHECK(mdText.find("public fn newParser(") != std::string::npos);
         CHECK(mdText.find("Creates a new declarative command-line Parser") != std::string::npos);
     }
 
@@ -3558,7 +3558,7 @@ TEST_CASE("Tools cbdoc and cbfmt, LSP '' doc-comments, and collection loop const
 
 'unspaced comment
 ''doc comment
-pub type Item
+public type Item
 id as int
 name as str
 end type
@@ -3585,7 +3585,7 @@ end fn
 
         const std::string expectedFormatted = R"CB(' unspaced comment
 '' doc comment
-pub type Item
+public type Item
     id as int
     name as str
 end type
@@ -3664,14 +3664,14 @@ end fn
         const std::string docSource = R"(import "std/cli"
 
 '' Represents a documented server endpoint.
-pub type Endpoint
+public type Endpoint
     host as str
     port as int
 end type
 
 '' Connects to the target Endpoint.
 '' Raises an error if the port is invalid.
-pub fn connectEndpoint(ep as Endpoint, timeoutMs as int = 1000) as bool can error
+public fn connectEndpoint(ep as Endpoint, timeoutMs as int = 1000) as bool can error
     return ep.port > 0 and timeoutMs > 0
 end fn
 
@@ -3745,14 +3745,14 @@ end fn
         const cb::JsonId hoverFnRes = cb::jsonGetField(hoverFn.arena, hoverFn.root, "result");
         const cb::JsonId hoverFnContents = cb::jsonGetField(hoverFn.arena, hoverFnRes, "contents");
         const std::string hoverFnVal = cb::jsonGetString(hoverFn.arena, cb::jsonGetField(hoverFn.arena, hoverFnContents, "value")).value_or("");
-        CHECK(hoverFnVal.find("pub fn connectEndpoint(ep as Endpoint, timeoutMs as int) as bool can error") != std::string::npos);
+        CHECK(hoverFnVal.find("public fn connectEndpoint(ep as Endpoint, timeoutMs as int) as bool can error") != std::string::npos);
         CHECK(hoverFnVal.find("Connects to the target Endpoint.\nRaises an error if the port is invalid.") != std::string::npos);
 
         const auto hoverStdCli = readResponseForId(3);
         const cb::JsonId hoverStdRes = cb::jsonGetField(hoverStdCli.arena, hoverStdCli.root, "result");
         const cb::JsonId hoverStdContents = cb::jsonGetField(hoverStdCli.arena, hoverStdRes, "contents");
         const std::string hoverStdVal = cb::jsonGetString(hoverStdCli.arena, cb::jsonGetField(hoverStdCli.arena, hoverStdContents, "value")).value_or("");
-        CHECK(hoverStdVal.find("pub fn newParser(name as str, version as str, description as str) as Parser") != std::string::npos);
+        CHECK(hoverStdVal.find("public fn newParser(name as str, version as str, description as str) as Parser") != std::string::npos);
         CHECK(hoverStdVal.find("Creates a new declarative command-line Parser") != std::string::npos);
 
         const auto sigResp = readResponseForId(4);
@@ -3799,12 +3799,12 @@ TEST_CASE("Tagged union guardrails, const list sort/removeAt checks, overload ar
     SECTION("Analyzer rejects private union access, unknown union variants, and invalid case payload bindings") {
         std::unordered_map<std::string, std::string> memFiles;
         memFiles["ast.cb"] = R"CB(
-pub type Span
+public type Span
     line as int
     col as int
 end type
 
-pub union AstNode
+public union AstNode
     intVal as int
     textVal as str
     spanVal as Span
@@ -3884,7 +3884,7 @@ end fn
     SECTION("LSP hover, definition, dot-completion, and signatureHelp for union types and variants") {
         cb::LspServerState state{};
         const std::string uri = "file:///ws/union_lsp.cb";
-        const std::string text = R"CB(pub union TokenVal
+        const std::string text = R"CB(public union TokenVal
     intTok as int
     strTok as str
 end union
@@ -3948,12 +3948,12 @@ end fn
 
         // Verify LSP dot-completion on 'arena' in analyzer.cb discovers 'resolveAlias' from imported symbols.cb
         cb::LspServerState lspState{};
-        lspState.openDocuments["file:///ws/ast.cb"] = R"CB(pub type AstArena
+        lspState.openDocuments["file:///ws/ast.cb"] = R"CB(public type AstArena
     types as list[str]
 end type
 )CB";
         lspState.openDocuments["file:///ws/symbols.cb"] = R"CB(import "ast.cb"
-pub fn resolveAlias(arena as ast.AstArena, tid as int) as str
+public fn resolveAlias(arena as ast.AstArena, tid as int) as str
     return arena.types[tid]
 end fn
 )CB";
@@ -4094,5 +4094,242 @@ end fn
         const auto valIt = fnScopeIt->second.find("val");
         REQUIRE(valIt != fnScopeIt->second.end());
         CHECK(valIt->second.typeId == checkRes.symbols.typeInt);
+    }
+}
+
+TEST_CASE("Private struct fields, recursive value type cycle detection, topological struct ordering, 1-to-1 module mangling, and macro hygiene", "[access][analyzer][emitter][mangling]") {
+    SECTION("Same-module private field access and construction succeed while cross-module access and direct construction are rejected") {
+        std::unordered_map<std::string, std::string> memFiles;
+        memFiles["vault.cb"] = R"CB(
+public type Account
+    private secretPin as int = 1234
+    owner as str
+end type
+
+public fn openAccount(owner as str, pin as int) as Account
+    dim acc = Account(secretPin=pin, owner=owner)
+    acc.secretPin = pin + 1
+    return acc
+end fn
+
+public fn checkPin(acc as Account) as int
+    return acc.secretPin
+end fn
+)CB";
+
+        const std::string okMain = R"CB(import "vault.cb"
+fn main() as int
+    dim a = vault.openAccount("Alice", 999)
+    print(a.owner, vault.checkPin(a))
+    return 0
+end fn
+)CB";
+        const auto okRes = cb::checkSource(okMain, "main.cb", memFiles);
+        REQUIRE(okRes.ok);
+
+        const std::string badReadMain = R"CB(import "vault.cb"
+fn main() as int
+    dim a = vault.openAccount("Alice", 999)
+    return a.secretPin
+end fn
+)CB";
+        const auto badReadRes = cb::checkSource(badReadMain, "main.cb", memFiles);
+        REQUIRE_FALSE(badReadRes.ok);
+        CHECK(badReadRes.error.message.find("Field 'secretPin' of type 'Account' is private to module 'vault'.") != std::string::npos);
+
+        const std::string badWriteMain = R"CB(import "vault.cb"
+fn main() as int
+    dim a = vault.openAccount("Alice", 999)
+    a.secretPin = 0
+    return 0
+end fn
+)CB";
+        const auto badWriteRes = cb::checkSource(badWriteMain, "main.cb", memFiles);
+        REQUIRE_FALSE(badWriteRes.ok);
+        CHECK(badWriteRes.error.message.find("Field 'secretPin' of type 'Account' is private to module 'vault'.") != std::string::npos);
+
+        const std::string badConstructMain = R"CB(import "vault.cb"
+fn main() as int
+    dim a = vault.Account(owner="Alice")
+    return 0
+end fn
+)CB";
+        const auto badConstructRes = cb::checkSource(badConstructMain, "main.cb", memFiles);
+        REQUIRE_FALSE(badConstructRes.ok);
+        CHECK(badConstructRes.error.message.find("Cannot construct type 'Account' outside module 'vault' because field 'secretPin' is private.") != std::string::npos);
+    }
+
+    SECTION("Standard library handles in std/fs and std/json are encapsulated with private fields") {
+        const std::string badFsHandle = R"CB(import "std/fs"
+fn main() as int
+    dim f = fs.stdin()
+    return f.handle
+end fn
+)CB";
+        const auto resFs = cb::checkSource(badFsHandle, "bad_fs.cb");
+        REQUIRE_FALSE(resFs.ok);
+        CHECK(resFs.error.message.find("Field 'handle' of type 'CbFile' is private to module 'std/fs'.") != std::string::npos);
+
+        const std::string badJsonConstruct = R"CB(import "std/json"
+fn main() as int
+    dim d = json.JsonDoc()
+    return 0
+end fn
+)CB";
+        const auto resJson = cb::checkSource(badJsonConstruct, "bad_json.cb");
+        REQUIRE_FALSE(resJson.ok);
+        CHECK(resJson.error.message.find("Cannot construct type 'CbJsonDoc' outside module 'std/json' because field 'docId' is private.") != std::string::npos);
+    }
+
+    SECTION("LSP dot-completion and hover hide private fields across modules while showing them in the defining module") {
+        cb::LspServerState state{};
+        state.openDocuments["file:///ws/vault.cb"] = R"CB(public type Account
+    private secretPin as int
+    owner as str
+end type
+)CB";
+        state.openDocuments["file:///ws/main.cb"] = R"CB(import "vault.cb"
+fn run(acc as vault.Account) as int
+    return 0
+end fn
+)CB";
+        const cb::LspDocumentSnapshot snap = cb::getOrBuildSnapshot(state, "file:///ws/main.cb");
+        REQUIRE(snap.valid);
+
+        std::vector<cb::CompletionItemEntry> dotItems;
+        std::unordered_map<std::string, bool> seen;
+        cb::collectDotCompletions(snap, "", std::string("run"), "acc", "", dotItems, seen);
+        bool sawOwner = false;
+        bool sawSecretPin = false;
+        for (const auto& item : dotItems) {
+            if (item.label == "owner") sawOwner = true;
+            if (item.label == "secretPin") sawSecretPin = true;
+        }
+        CHECK(sawOwner);
+        CHECK_FALSE(sawSecretPin);
+
+        const auto& ts = snap.symbols.types.at("vault::Account");
+        const std::string crossHover = cb::formatTypeHoverMarkdown(snap.arena, ts, false);
+        CHECK(crossHover.find("owner as str") != std::string::npos);
+        CHECK(crossHover.find("secretPin") == std::string::npos);
+
+        const std::string sameHover = cb::formatTypeHoverMarkdown(snap.arena, ts, true);
+        CHECK(sameHover.find("private secretPin as int") != std::string::npos);
+    }
+
+    SECTION("Detects direct by-value recursive cycles in structs and unions while allowing list[T] and dict[K, V] self-references") {
+        const std::string directCycle = R"CB(
+type A
+    b as B
+end type
+
+type B
+    a as A
+end type
+
+fn main() as int
+    return 0
+end fn
+)CB";
+        const auto cycleRes = cb::checkSource(directCycle, "cycle.cb");
+        REQUIRE_FALSE(cycleRes.ok);
+        CHECK(cycleRes.error.message.find("Recursive value type cycle detected involving 'A'") != std::string::npos);
+
+        const std::string unionCycle = R"CB(
+type ExprBox
+    node as ExprNode
+end type
+
+union ExprNode
+    lit as int
+    boxed as ExprBox
+end union
+
+fn main() as int
+    return 0
+end fn
+)CB";
+        const auto uCycleRes = cb::checkSource(unionCycle, "ucycle.cb");
+        REQUIRE_FALSE(uCycleRes.ok);
+        CHECK(uCycleRes.error.message.find("Recursive value type cycle detected involving 'ExprBox'") != std::string::npos);
+
+        const std::string heapRecursive = R"CB(
+type TreeNode
+    label as str
+    children as list[TreeNode]
+    lookup as dict[str, TreeNode]
+end type
+
+fn main() as int
+    dim root = TreeNode(label="root", children=[], lookup={})
+    return root.children.len()
+end fn
+)CB";
+        const auto heapRes = cb::checkSource(heapRecursive, "tree.cb");
+        REQUIRE(heapRes.ok);
+    }
+
+    SECTION("Topologically sorts emitted by-value structs and unions regardless of source declaration order") {
+        const std::string outOfOrderSrc = R"CB(
+type Car
+    engine as Engine
+end type
+
+type Engine
+    cylinders as CylinderSpec
+end type
+
+type CylinderSpec
+    count as int = 8
+end type
+
+fn main() as int
+    dim c = Car(engine=Engine(cylinders=CylinderSpec(count=6)))
+    return c.engine.cylinders.count
+end fn
+)CB";
+        const auto tpRes = cb::transpileSource(outOfOrderSrc, "topo.cb");
+        REQUIRE(tpRes.ok);
+        const size_t posCyl = tpRes.cppCode.find("struct CylinderSpec {");
+        const size_t posEng = tpRes.cppCode.find("struct Engine {");
+        const size_t posCar = tpRes.cppCode.find("struct Car {");
+        REQUIRE(posCyl != std::string::npos);
+        REQUIRE(posEng != std::string::npos);
+        REQUIRE(posCar != std::string::npos);
+        CHECK(posCyl < posEng);
+        CHECK(posEng < posCar);
+    }
+
+    SECTION("1-to-1 collision-free module mangling and C/POSIX macro identifier sanitization") {
+        CHECK(cb::sanitizeModuleId("foo/bar") == "foo_bar");
+        CHECK(cb::sanitizeModuleId("foo_bar") == "foo__bar");
+        CHECK(cb::sanitizeModuleId("foo/bar") != cb::sanitizeModuleId("foo_bar"));
+        CHECK(cb::makeCppFnName("foo/bar", "run") == "cb_foo_bar__run");
+        CHECK(cb::makeCppFnName("foo_bar", "run") == "cb_foo__bar__run");
+
+        CHECK(cb::sanitizeCppIdent("errno") == "errno_cb");
+        CHECK(cb::sanitizeCppIdent("stdin") == "stdin_cb");
+        CHECK(cb::sanitizeCppIdent("stdout") == "stdout_cb");
+        CHECK(cb::sanitizeCppIdent("stderr") == "stderr_cb");
+        CHECK(cb::sanitizeCppIdent("EOF") == "EOF_cb");
+        CHECK(cb::sanitizeCppIdent("NULL") == "NULL_cb");
+        CHECK(cb::sanitizeCppIdent("unix") == "unix_cb");
+        CHECK(cb::sanitizeCppIdent("linux") == "linux_cb");
+
+        const std::string macroSrc = R"CB(
+fn testMacros(errno as int) as int
+    dim EOF = errno + 1
+    dim stdout = EOF + 1
+    return stdout
+end fn
+)CB";
+        const auto macroTp = cb::transpileSource(macroSrc, "macros.cb");
+        REQUIRE(macroTp.ok);
+        CHECK(macroTp.cppCode.find("#define NOMINMAX") != std::string::npos);
+        CHECK(macroTp.cppCode.find("#undef min") != std::string::npos);
+        CHECK(macroTp.cppCode.find("#undef max") != std::string::npos);
+        CHECK(macroTp.cppCode.find("#undef ERROR") != std::string::npos);
+        CHECK(macroTp.cppCode.find("int64_t errno_cb") != std::string::npos);
+        CHECK(macroTp.cppCode.find("EOF_cb = (errno_cb + 1)") != std::string::npos);
     }
 }

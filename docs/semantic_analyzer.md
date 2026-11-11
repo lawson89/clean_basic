@@ -153,7 +153,7 @@ stop
 
 ## 4. Type Alias Resolution & Cycle Detection (`resolveAliasNode` & `resolveAlias`)
 
-Modules can define local or public type aliases (`alias UserId = int` or `pub alias HeroList = list[hero.Hero]`), including chains of aliases across modules.
+Modules can define local or public type aliases (`alias UserId = int` or `public alias HeroList = list[hero.Hero]`), including chains of aliases across modules.
 
 `cb::resolveAliasNode(arena, symbols, currentModuleId, tid)` unwraps alias chains safely:
 1. Starts with `curr = arena.types[tid]` and `activeModId = currentModuleId`.
@@ -201,7 +201,7 @@ partition "UFCS Resolution (target is a value expression)" {
   :UFCS Step 1 (Current Module):
   Look up symbolKey(currentModuleId, name);
   if (Found in current module AND first param matches recvTypeKey?) then (yes)
-    :Return FnSymbol (private or pub allowed);
+    :Return FnSymbol (private or public allowed);
     stop
   endif
 

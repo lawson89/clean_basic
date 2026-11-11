@@ -140,7 +140,7 @@ public:
                     symbols.referencedModules.insert(bareFnOpt->moduleId);
                 }
                 if (bareFnOpt->moduleId != moduleId && !bareFnOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Function '" + bareFnOpt->name + "' is private to module '" + bareFnOpt->moduleId + "' (missing 'pub').");
+                    setAnalyzerError(exprNode.line, exprNode.col, "Function '" + bareFnOpt->name + "' is private to module '" + bareFnOpt->moduleId + "' (missing 'public').");
                 }
             }
             return;
@@ -305,7 +305,7 @@ public:
                         std::string targetModId;
                         if (isModuleAliasInScope(symbols, moduleId, tgtIdent->name, scope, targetModId)) {
                             if (!fnSym.isPub && fnSym.moduleId != moduleId) {
-                                std::string msg = "Function '" + calleeFa->fieldName + "' is private to module '" + targetModId + "' (missing 'pub').";
+                                std::string msg = "Function '" + calleeFa->fieldName + "' is private to module '" + targetModId + "' (missing 'public').";
                                 setAnalyzerError(exprNode.line, exprNode.col, msg);
                             }
                         }
@@ -318,8 +318,15 @@ public:
                         symbols.referencedModules.insert(structOpt->moduleId);
                     }
                     if (!structOpt->isPub && structOpt->moduleId != moduleId) {
-                        std::string msg = "Type '" + structOpt->name + "' is private to module '" + structOpt->moduleId + "' (missing 'pub').";
+                        std::string msg = "Type '" + structOpt->name + "' is private to module '" + structOpt->moduleId + "' (missing 'public').";
                         setAnalyzerError(exprNode.line, exprNode.col, msg);
+                    }
+                    if (structOpt->moduleId != moduleId) {
+                        for (const auto& fld : structOpt->fieldOrder) {
+                            if (fld.isPrivate) {
+                                setAnalyzerError(exprNode.line, exprNode.col, "Cannot construct type '" + structOpt->name + "' outside module '" + structOpt->moduleId + "' because field '" + fld.name + "' is private.");
+                            }
+                        }
                     }
                     for (size_t aIdx = 0; aIdx < call->args.size() && aIdx < structOpt->fieldOrder.size(); ++aIdx) {
                         validateNonNullTarget(exprNode.line, exprNode.col, structOpt->fieldOrder[aIdx].typeId, call->args[aIdx]);
@@ -341,7 +348,7 @@ public:
                             symbols.referencedModules.insert(uOpt->moduleId);
                         }
                         if (!uOpt->isPub && uOpt->moduleId != moduleId) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Union '" + uOpt->name + "' is private to module '" + uOpt->moduleId + "' (missing 'pub').");
+                            setAnalyzerError(exprNode.line, exprNode.col, "Union '" + uOpt->name + "' is private to module '" + uOpt->moduleId + "' (missing 'public').");
                         }
                         const auto vTypeIt = uOpt->variantTypes.find(fa->fieldName);
                         if (vTypeIt == uOpt->variantTypes.end()) {
@@ -429,7 +436,7 @@ public:
                     symbols.referencedModules.insert(enumOpt->moduleId);
                 }
                 if (enumOpt->moduleId != moduleId && !enumOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'pub').");
+                    setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' is private to module '" + enumOpt->moduleId + "' (missing 'public').");
                 }
                 if (enumOpt->memberValues.count(faccess->fieldName) == 0) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' has no member '" + faccess->fieldName + "'.");
@@ -442,7 +449,7 @@ public:
                     symbols.referencedModules.insert(cOpt->moduleId);
                 }
                 if (cOpt->moduleId != moduleId && !cOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Constant '" + cOpt->name + "' is private to module '" + cOpt->moduleId + "' (missing 'pub').");
+                    setAnalyzerError(exprNode.line, exprNode.col, "Constant '" + cOpt->name + "' is private to module '" + cOpt->moduleId + "' (missing 'public').");
                 }
                 return;
             }
@@ -452,9 +459,16 @@ public:
                     symbols.referencedModules.insert(bareFnOpt->moduleId);
                 }
                 if (bareFnOpt->moduleId != moduleId && !bareFnOpt->isPub) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Function '" + bareFnOpt->name + "' is private to module '" + bareFnOpt->moduleId + "' (missing 'pub').");
+                    setAnalyzerError(exprNode.line, exprNode.col, "Function '" + bareFnOpt->name + "' is private to module '" + bareFnOpt->moduleId + "' (missing 'public').");
                 }
                 return;
+            }
+            const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, moduleId);
+            const auto tsOpt = resolveTypeSymbol(arena, symbols, moduleId, targetTid);
+            if (tsOpt.has_value()) {
+                if (tsOpt->moduleId != moduleId && tsOpt->privateFields.count(faccess->fieldName) > 0) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "Field '" + faccess->fieldName + "' of type '" + tsOpt->name + "' is private to module '" + tsOpt->moduleId + "'.");
+                }
             }
             validateExprCalls(fn, faccess->target, scope, false);
             return;
@@ -1203,10 +1217,14 @@ public:
                 const std::string key = symbolKey(declNode.moduleId, tdecl->name);
                 auto& tsym = symbols.types[key];
                 tsym.fieldOrder.clear();
+                tsym.privateFields.clear();
                 tsym.fieldOrder.reserve(tdecl->fields.size());
                 for (const auto& fld : tdecl->fields) {
                     const TypeId resolvedFid = canonicalizeType(arena, symbols, declNode.moduleId, fld.typeId);
                     tsym.fields[fld.name] = resolvedFid;
+                    if (fld.isPrivate) {
+                        tsym.privateFields.insert(fld.name);
+                    }
                     FieldDecl resolvedFld = fld;
                     resolvedFld.typeId = resolvedFid;
                     tsym.fieldOrder.push_back(std::move(resolvedFld));
@@ -1283,6 +1301,89 @@ public:
                     existing->second.overloads.push_back(std::move(fsym));
                 } else {
                     symbols.functions[fsym.key] = std::move(fsym);
+                }
+            }
+        }
+
+        // Validate that composite value types (structs and unions) have no direct by-value recursive cycles
+        {
+            std::unordered_map<std::string, int> visitState;
+            auto collectDirectValueDeps = [&](const std::string& key) -> std::vector<std::string> {
+                std::vector<std::string> deps;
+                const auto tit = symbols.types.find(key);
+                if (tit != symbols.types.end() && !tit->second.isExtern) {
+                    for (const auto& fld : tit->second.fieldOrder) {
+                        const TypeNode& tn = arena.getType(fld.typeId);
+                        if (tn.typeArgs.empty() && tn.returnType == INVALID_ID) {
+                            if (symbols.types.count(tn.name) > 0 || symbols.unions.count(tn.name) > 0) {
+                                deps.push_back(tn.name);
+                            }
+                        }
+                    }
+                } else {
+                    const auto uit = symbols.unions.find(key);
+                    if (uit != symbols.unions.end()) {
+                        for (const auto& uv : uit->second.variants) {
+                            const TypeNode& tn = arena.getType(uv.type);
+                            if (tn.typeArgs.empty() && tn.returnType == INVALID_ID) {
+                                if (symbols.types.count(tn.name) > 0 || symbols.unions.count(tn.name) > 0) {
+                                    deps.push_back(tn.name);
+                                }
+                            }
+                        }
+                    }
+                }
+                return deps;
+            };
+
+            auto dfsCycleCheck = [&](auto& self, const std::string& currKey) -> void {
+                visitState[currKey] = 1;
+                for (const std::string& depKey : collectDirectValueDeps(currKey)) {
+                    const int st = visitState[depKey];
+                    if (st == 1) {
+                        std::string errFile = fileName;
+                        uint32_t errLine = 1;
+                        uint32_t errCol = 1;
+                        std::string errName = stripModulePrefix(depKey);
+                        const auto tit = symbols.types.find(depKey);
+                        if (tit != symbols.types.end()) {
+                            errName = tit->second.name;
+                            errFile = tit->second.fileName;
+                            errLine = tit->second.line;
+                            errCol = tit->second.col;
+                        } else {
+                            const auto uit = symbols.unions.find(depKey);
+                            if (uit != symbols.unions.end()) {
+                                errName = uit->second.name;
+                                errFile = uit->second.fileName;
+                                errLine = uit->second.line;
+                                errCol = uit->second.col;
+                            }
+                        }
+                        throw makeError("AnalyzerError", "Recursive value type cycle detected involving '" + errName + "'.", errFile, errLine, errCol);
+                    }
+                    if (st == 0) {
+                        self(self, depKey);
+                    }
+                }
+                visitState[currKey] = 2;
+            };
+
+            for (const DeclId did : program.declarations) {
+                if (did >= arena.decls.size()) continue;
+                const auto& declNode = arena.decls[did];
+                if (const auto* tdecl = arena.getDecl<TypeDecl>(did)) {
+                    if (!tdecl->isExtern) {
+                        const std::string key = symbolKey(declNode.moduleId, tdecl->name);
+                        if (visitState[key] == 0) {
+                            dfsCycleCheck(dfsCycleCheck, key);
+                        }
+                    }
+                } else if (const auto* udecl = arena.getDecl<UnionDecl>(did)) {
+                    const std::string key = symbolKey(declNode.moduleId, udecl->name);
+                    if (visitState[key] == 0) {
+                        dfsCycleCheck(dfsCycleCheck, key);
+                    }
                 }
             }
         }

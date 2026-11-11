@@ -17,6 +17,7 @@ struct TypeSymbol {
     std::string moduleId;
     std::string key;
     std::unordered_map<std::string, TypeId> fields;
+    std::unordered_set<std::string> privateFields;
     std::vector<FieldDecl> fieldOrder;
     bool isPub = false;
     bool isExtern = false;
@@ -839,7 +840,7 @@ inline std::optional<FnSymbol> selectMatchingUfcsOverload(
 
 // Resolves a UFCS method call 'recv.method(args...)' across 4 priority tiers:
 // 0. Built-in receiver methods (list/dict/str/bytes/int/union intrinsics).
-// 1. Free functions in the caller's current module (pub or private).
+// 1. Free functions in the caller's current module (public or private).
 // 2. Public free functions in the receiver type's defining module (or 'std/str' for 'str').
 // 3. Public free functions in any module directly imported by currentModuleId.
 inline std::optional<FnSymbol> resolveUfcsFn(
@@ -1383,6 +1384,9 @@ inline TypeId inferExprType(
         const TypeId targetTid = inferExprType(arena, faccess->target, symbols, scope, currentModuleId);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, targetTid);
         if (tsOpt.has_value()) {
+            if (tsOpt->moduleId != currentModuleId && tsOpt->privateFields.count(faccess->fieldName) > 0) {
+                return symbols.typeAuto;
+            }
             const auto fit = tsOpt->fields.find(faccess->fieldName);
             if (fit != tsOpt->fields.end()) {
                 return fit->second;

@@ -1,9 +1,9 @@
-pub type Unit
+public type Unit
     name as str
     hp as int
 end type
 
-pub fn boost(byref u as Unit, amount as int)
+public fn boost(byref u as Unit, amount as int)
     u.hp = u.hp + amount
 end fn
 

@@ -129,12 +129,12 @@ fn scanTrimmedLine(trimmed as str) as LineScan
     )
 end fn
 
-'' Strips leading "pub " and "extern " modifiers from a code line for declaration inspection.
+'' Strips leading "public " and "extern " modifiers from a code line for declaration inspection.
 fn stripModifiers(codePart as str) as str
     dim work = codePart
     while true
-        if work.startsWith("pub ")
-            work = work.sliceFrom(4).ltrim()
+        if work.startsWith("public ")
+            work = work.sliceFrom(7).ltrim()
         else if work.startsWith("extern ")
             work = work.sliceFrom(7).ltrim()
         else
@@ -146,7 +146,7 @@ end fn
 
 '' Returns true if codePart is a top-level starter that terminates a single-line extern type declaration.
 fn isTopLevelStarter(codePart as str) as bool
-    if codePart.startsWith("pub ") or codePart.startsWith("extern ")
+    if codePart.startsWith("public ") or codePart.startsWith("extern ")
         return true
     end if
     if codePart.startsWith("fn ") or codePart.startsWith("type ") or codePart.startsWith("enum ") or codePart.startsWith("union ")
@@ -270,7 +270,7 @@ fn consumeBrackets(byref bracketStack as list[int], count as int)
 end fn
 
 '' Formats a CleanBasic source string using the specified indentation width in spaces.
-pub fn formatSource(source as str, indentWidth as int = 4) as str
+public fn formatSource(source as str, indentWidth as int = 4) as str
     const lines = source.lines()
     const indentUnit = " ".repeat(indentWidth)
 

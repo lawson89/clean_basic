@@ -4,16 +4,20 @@
 import header "json/json_bridge.hpp"
 
 '' External arena-backed JSON document value type.
-pub extern type CbJsonDoc
+public extern type CbJsonDoc
+    private docId as int
+end type
 
 '' External handle to a node within a JSON document arena.
-pub extern type CbJsonVal
+public extern type CbJsonVal
+    private nodeId as int
+end type
 
 '' Value-semantic RFC 8259 JSON document owning an internal node arena.
-pub alias JsonDoc = CbJsonDoc
+public alias JsonDoc = CbJsonDoc
 
 '' Lightweight value handle referencing a JSON node inside a JsonDoc.
-pub alias JsonVal = CbJsonVal
+public alias JsonVal = CbJsonVal
 
 extern fn cbJsonNewDoc() as CbJsonDoc
 extern fn cbJsonParse(text as str) as CbJsonDoc can error
@@ -45,131 +49,131 @@ extern fn cbJsonKind(doc as CbJsonDoc, val as CbJsonVal) as str
 extern fn cbJsonObjectKeys(doc as CbJsonDoc, obj as CbJsonVal) as list[str]
 
 '' Creates a new empty JsonDoc ready for building JSON nodes.
-pub fn newDoc() as JsonDoc
+public fn newDoc() as JsonDoc
     return cbJsonNewDoc()
 end fn
 
 '' Parses an RFC 8259 JSON string into a JsonDoc, raising an error on invalid JSON syntax.
-pub fn parse(text as str) as JsonDoc can error
+public fn parse(text as str) as JsonDoc can error
     return cbJsonParse(text)
 end fn
 
 '' Returns the root JsonVal node of the document.
-pub fn root(doc as JsonDoc) as JsonVal
+public fn root(doc as JsonDoc) as JsonVal
     return cbJsonRoot(doc)
 end fn
 
 '' Sets the root JsonVal node of the document.
-pub fn setRoot(byref doc as JsonDoc, val as JsonVal)
+public fn setRoot(byref doc as JsonDoc, val as JsonVal)
     cbJsonSetRoot(doc, val)
 end fn
 
 '' Serializes the document root node into a compact JSON string.
-pub fn stringify(doc as JsonDoc) as str
+public fn stringify(doc as JsonDoc) as str
     return cbJsonStringify(doc)
 end fn
 
 '' Serializes a specific JsonVal node within the document into a compact JSON string.
-pub fn stringifyVal(doc as JsonDoc, val as JsonVal) as str
+public fn stringifyVal(doc as JsonDoc, val as JsonVal) as str
     return cbJsonStringifyVal(doc, val)
 end fn
 
 '' Allocates and returns a new JSON object node in the document.
-pub fn newObject(byref doc as JsonDoc) as JsonVal
+public fn newObject(byref doc as JsonDoc) as JsonVal
     return cbJsonNewObject(doc)
 end fn
 
 '' Allocates and returns a new JSON array node in the document.
-pub fn newArray(byref doc as JsonDoc) as JsonVal
+public fn newArray(byref doc as JsonDoc) as JsonVal
     return cbJsonNewArray(doc)
 end fn
 
 '' Allocates and returns a new JSON string node in the document.
-pub fn newStr(byref doc as JsonDoc, val as str) as JsonVal
+public fn newStr(byref doc as JsonDoc, val as str) as JsonVal
     return cbJsonNewStr(doc, val)
 end fn
 
 '' Allocates and returns a new 64-bit integer JSON number node in the document.
-pub fn newInt(byref doc as JsonDoc, val as int) as JsonVal
+public fn newInt(byref doc as JsonDoc, val as int) as JsonVal
     return cbJsonNewInt(doc, val)
 end fn
 
 '' Allocates and returns a new floating-point JSON number node in the document.
-pub fn newFloat(byref doc as JsonDoc, val as float) as JsonVal
+public fn newFloat(byref doc as JsonDoc, val as float) as JsonVal
     return cbJsonNewFloat(doc, val)
 end fn
 
 '' Allocates and returns a new JSON boolean node in the document.
-pub fn newBool(byref doc as JsonDoc, val as bool) as JsonVal
+public fn newBool(byref doc as JsonDoc, val as bool) as JsonVal
     return cbJsonNewBool(doc, val)
 end fn
 
 '' Allocates and returns a JSON null node in the document.
-pub fn newNull(byref doc as JsonDoc) as JsonVal
+public fn newNull(byref doc as JsonDoc) as JsonVal
     return cbJsonNewNull(doc)
 end fn
 
 '' Sets or overwrites key on a JSON object node with val.
-pub fn objectSet(byref doc as JsonDoc, obj as JsonVal, key as str, val as JsonVal)
+public fn objectSet(byref doc as JsonDoc, obj as JsonVal, key as str, val as JsonVal)
     cbJsonObjectSet(doc, obj, key, val)
 end fn
 
 '' Appends elem to the end of a JSON array node.
-pub fn arrayPush(byref doc as JsonDoc, arr as JsonVal, elem as JsonVal)
+public fn arrayPush(byref doc as JsonDoc, arr as JsonVal, elem as JsonVal)
     cbJsonArrayPush(doc, arr, elem)
 end fn
 
 '' Returns true if obj is a JSON object containing a field named key.
-pub fn hasField(doc as JsonDoc, obj as JsonVal, key as str) as bool
+public fn hasField(doc as JsonDoc, obj as JsonVal, key as str) as bool
     return cbJsonHasField(doc, obj, key)
 end fn
 
 '' Retrieves the child JsonVal for key on a JSON object, or raises an error if missing.
-pub fn getField(doc as JsonDoc, obj as JsonVal, key as str) as JsonVal can error
+public fn getField(doc as JsonDoc, obj as JsonVal, key as str) as JsonVal can error
     return cbJsonGetField(doc, obj, key)
 end fn
 
 '' Extracts the string value of a JSON string node, or raises an error on type mismatch.
-pub fn getStr(doc as JsonDoc, val as JsonVal) as str can error
+public fn getStr(doc as JsonDoc, val as JsonVal) as str can error
     return cbJsonGetStr(doc, val)
 end fn
 
 '' Extracts the 64-bit integer value of a JSON number node, or raises an error on type mismatch.
-pub fn getInt(doc as JsonDoc, val as JsonVal) as int can error
+public fn getInt(doc as JsonDoc, val as JsonVal) as int can error
     return cbJsonGetInt(doc, val)
 end fn
 
 '' Extracts the double-precision float value of a JSON number node, or raises an error on type mismatch.
-pub fn getFloat(doc as JsonDoc, val as JsonVal) as float can error
+public fn getFloat(doc as JsonDoc, val as JsonVal) as float can error
     return cbJsonGetFloat(doc, val)
 end fn
 
 '' Extracts the boolean value of a JSON boolean node, or raises an error on type mismatch.
-pub fn getBool(doc as JsonDoc, val as JsonVal) as bool can error
+public fn getBool(doc as JsonDoc, val as JsonVal) as bool can error
     return cbJsonGetBool(doc, val)
 end fn
 
 '' Returns true if val is a JSON null node.
-pub fn isNull(doc as JsonDoc, val as JsonVal) as bool
+public fn isNull(doc as JsonDoc, val as JsonVal) as bool
     return cbJsonIsNull(doc, val)
 end fn
 
 '' Returns the number of elements in a JSON array node.
-pub fn arrayLen(doc as JsonDoc, arr as JsonVal) as int
+public fn arrayLen(doc as JsonDoc, arr as JsonVal) as int
     return cbJsonArrayLen(doc, arr)
 end fn
 
 '' Returns the element at 0-based index in a JSON array node, or raises an error if out of bounds.
-pub fn arrayAt(doc as JsonDoc, arr as JsonVal, index as int) as JsonVal can error
+public fn arrayAt(doc as JsonDoc, arr as JsonVal, index as int) as JsonVal can error
     return cbJsonArrayAt(doc, arr, index)
 end fn
 
 '' Returns the type kind of val ("null", "bool", "int", "float", "str", "array", "object", or "invalid").
-pub fn kind(doc as JsonDoc, val as JsonVal) as str
+public fn kind(doc as JsonDoc, val as JsonVal) as str
     return cbJsonKind(doc, val)
 end fn
 
 '' Returns all field keys of a JSON object node in insertion order (or an empty list if not an object).
-pub fn keys(doc as JsonDoc, obj as JsonVal) as list[str]
+public fn keys(doc as JsonDoc, obj as JsonVal) as list[str]
     return cbJsonObjectKeys(doc, obj)
 end fn

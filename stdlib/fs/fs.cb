@@ -4,10 +4,12 @@
 import header "fs/fs_bridge.hpp"
 
 '' Opaque value-semantic handle to an open streaming file slot.
-pub extern type CbFile
+public extern type CbFile
+    private handle as int
+end type
 
 '' Value-semantic handle to an open streaming file.
-pub alias File = CbFile
+public alias File = CbFile
 
 ' Whole-file operations
 extern fn cbFsRead(path as str) as str can error
@@ -55,190 +57,190 @@ extern fn cbFsExt(path as str) as str
 ' --- Public API: Whole-file operations ---
 
 '' Reads the entire contents of a file at path as a UTF-8 string.
-pub fn read(path as str) as str can error
+public fn read(path as str) as str can error
     return cbFsRead(path)
 end fn
 
 '' Reads all lines of a text file at path into a list of strings (stripping CR/LF).
-pub fn lines(path as str) as list[str] can error
+public fn lines(path as str) as list[str] can error
     return cbFsLines(path)
 end fn
 
 '' Writes content to the file at path, creating or truncating the file.
-pub fn write(path as str, content as str) can error
+public fn write(path as str, content as str) can error
     cbFsWrite(path, content)
 end fn
 
 '' Appends content to the end of the file at path, creating it if needed.
-pub fn append(path as str, content as str) can error
+public fn append(path as str, content as str) can error
     cbFsAppend(path, content)
 end fn
 
 '' Copies a file from src to dst, overwriting dst if it exists.
-pub fn copy(src as str, dst as str) can error
+public fn copy(src as str, dst as str) can error
     cbFsCopy(src, dst)
 end fn
 
 '' Renames or moves a file or directory from src to dst.
-pub fn rename(src as str, dst as str) can error
+public fn rename(src as str, dst as str) can error
     cbFsRename(src, dst)
 end fn
 
 '' Reads the entire contents of a binary file at path into a bytes buffer.
-pub fn readBytes(path as str) as bytes can error
+public fn readBytes(path as str) as bytes can error
     return cbFsReadBytes(path)
 end fn
 
 '' Writes a bytes buffer to the file at path, creating or truncating the file.
-pub fn writeBytes(path as str, data as bytes) can error
+public fn writeBytes(path as str, data as bytes) can error
     cbFsWriteBytes(path, data)
 end fn
 
 ' --- Public API: Streaming File operations (UFCS on File) ---
 
 '' Returns a streaming File handle for standard input (stdin).
-pub fn stdin() as File
+public fn stdin() as File
     return cbFsStdin()
 end fn
 
 '' Returns a streaming File handle for standard output (stdout).
-pub fn stdout() as File
+public fn stdout() as File
     return cbFsStdout()
 end fn
 
 '' Returns a streaming File handle for standard error (stderr).
-pub fn stderr() as File
+public fn stderr() as File
     return cbFsStderr()
 end fn
 
 '' Opens a file at path for reading ("r" mode) and returns a streaming File handle.
-pub fn open(path as str) as File can error
+public fn open(path as str) as File can error
     return cbFsOpen(path)
 end fn
 
 '' Opens a file at path with explicit mode ("r", "w", "a", "rb", "wb", "ab").
-pub fn openMode(path as str, mode as str) as File can error
+public fn openMode(path as str, mode as str) as File can error
     return cbFsOpenMode(path, mode)
 end fn
 
 '' Reads the next line from an open File into outLine, returning false on EOF.
-pub fn readLine(f as File, byref outLine as str) as bool can error
+public fn readLine(f as File, byref outLine as str) as bool can error
     return cbFsReadLine(f, outLine)
 end fn
 
 '' Returns true if the open File has reached end-of-file.
-pub fn eof(f as File) as bool
+public fn eof(f as File) as bool
     return cbFsEof(f)
 end fn
 
 '' Writes raw text to an open File without appending a newline.
-pub fn writeStr(f as File, text as str) can error
+public fn writeStr(f as File, text as str) can error
     cbFsWriteStream(f, text)
 end fn
 
 '' Writes a line of text followed by a newline to an open File.
-pub fn writeLine(f as File, text as str) can error
+public fn writeLine(f as File, text as str) can error
     cbFsWriteLine(f, text)
 end fn
 
 '' Flushes buffered output for an open File to disk.
-pub fn flush(f as File) can error
+public fn flush(f as File) can error
     cbFsFlush(f)
 end fn
 
 '' Returns true if the File handle refers to a currently open stream.
-pub fn isOpen(f as File) as bool
+public fn isOpen(f as File) as bool
     return cbFsIsOpen(f)
 end fn
 
 '' Closes an open File handle and releases its slot. Safe to call in defer blocks.
-pub fn close(byref f as File)
+public fn close(byref f as File)
     cbFsClose(f)
 end fn
 
 '' Reads up to count raw bytes from an open File handle.
-pub fn readBytes(f as File, count as int) as bytes can error
+public fn readBytes(f as File, count as int) as bytes can error
     return cbFsReadFileBytes(f, count)
 end fn
 
 '' Writes a raw bytes buffer to an open File handle.
-pub fn writeBytes(f as File, data as bytes) can error
+public fn writeBytes(f as File, data as bytes) can error
     cbFsWriteFileBytes(f, data)
 end fn
 
 ' --- Public API: Metadata, directories, and paths ---
 
 '' Returns true if a file or directory exists at path.
-pub fn exists(path as str) as bool
+public fn exists(path as str) as bool
     return cbFsExists(path)
 end fn
 
 '' Recursively collects all regular file paths in the directory tree at path.
-pub fn walkFiles(path as str, includeHidden as bool = false) as list[str] can error
+public fn walkFiles(path as str, includeHidden as bool = false) as list[str] can error
     return cbFsWalkFiles(path, includeHidden)
 end fn
 
 '' Returns true if path exists and is a regular file.
-pub fn isFile(path as str) as bool
+public fn isFile(path as str) as bool
     return cbFsIsFile(path)
 end fn
 
 '' Returns true if path exists and is a directory.
-pub fn isDir(path as str) as bool
+public fn isDir(path as str) as bool
     return cbFsIsDir(path)
 end fn
 
 '' Returns the size in bytes of the file at path.
-pub fn size(path as str) as int can error
+public fn size(path as str) as int can error
     return cbFsSize(path)
 end fn
 
 '' Lists the sorted entry names inside the directory at path.
-pub fn dir(path as str) as list[str] can error
+public fn dir(path as str) as list[str] can error
     return cbFsDir(path)
 end fn
 
 '' Creates a directory and any missing parent directories at path.
-pub fn mkdir(path as str) can error
+public fn mkdir(path as str) can error
     cbFsMkdir(path)
 end fn
 
 '' Removes a single file or empty directory at path.
-pub fn remove(path as str) can error
+public fn remove(path as str) can error
     cbFsRemove(path)
 end fn
 
 '' Recursively removes a file or directory tree at path, returning the number of removed entries.
-pub fn removeAll(path as str) as int can error
+public fn removeAll(path as str) as int can error
     return cbFsRemoveAll(path)
 end fn
 
 '' Resolves path to an absolute filesystem path.
-pub fn absPath(path as str) as str can error
+public fn absPath(path as str) as str can error
     return cbFsAbsPath(path)
 end fn
 
 '' Returns the system temporary directory path.
-pub fn tempDir() as str can error
+public fn tempDir() as str can error
     return cbFsTempDir()
 end fn
 
 '' Joins two path segments using a normalized '/' separator.
-pub fn joinPath(a as str, b as str) as str
+public fn joinPath(a as str, b as str) as str
     return cbFsJoinPath(a, b)
 end fn
 
 '' Returns the parent directory portion of path.
-pub fn parentDir(path as str) as str
+public fn parentDir(path as str) as str
     return cbFsParentDir(path)
 end fn
 
 '' Returns the final filename component of path.
-pub fn fileName(path as str) as str
+public fn fileName(path as str) as str
     return cbFsFileName(path)
 end fn
 
 '' Returns the file extension of path (including the leading dot, e.g. ".cb"), or "" if none.
-pub fn ext(path as str) as str
+public fn ext(path as str) as str
     return cbFsExt(path)
 end fn

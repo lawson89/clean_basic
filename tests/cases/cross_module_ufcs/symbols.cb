@@ -1,14 +1,14 @@
 import "ast.cb"
 
-pub fn makeCfg(s as int) as ast.SharedCfg
+public fn makeCfg(s as int) as ast.SharedCfg
     return ast.SharedCfg(scale=s)
 end fn
 
-pub fn resolveAlias(arena as ast.AstArena, tid as int) as str
+public fn resolveAlias(arena as ast.AstArena, tid as int) as str
     return arena.types[tid]
 end fn
 
-pub fn resolveAlias(arena as ast.AstArena, tid as int, fallback as str) as str
+public fn resolveAlias(arena as ast.AstArena, tid as int, fallback as str) as str
     if tid < 0 or tid >= arena.types.len()
         return fallback
     end if

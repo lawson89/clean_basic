@@ -292,7 +292,7 @@ inline std::string appendDocCommentMarkdown(std::string md, std::string_view doc
 
 inline std::string buildHoverHeader(std::string_view keyword, std::string_view name, bool isPub, bool isExtern = false) {
     std::string header;
-    if (isPub) header += "pub ";
+    if (isPub) header += "public ";
     if (isExtern) header += "extern ";
     header.append(keyword);
     header += " ";
@@ -306,16 +306,23 @@ inline std::string formatFnHoverMarkdown(const AstArena& arena, const FnSymbol& 
     return appendDocCommentMarkdown(wrapVbCodeBlock(sig), fn.docComment);
 }
 
-inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts) {
+inline std::string formatTypeHoverMarkdown(const AstArena& arena, const TypeSymbol& ts, bool includePrivateFields = true) {
     const std::string nl(1, static_cast<char>(10));
     std::string code = buildHoverHeader("type", ts.name, ts.isPub, ts.isExtern);
     if (ts.isExtern && ts.fieldOrder.empty()) return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);
     code += nl;
     for (const auto& f : ts.fieldOrder) {
+        if (f.isPrivate && !includePrivateFields) {
+            continue;
+        }
         TypeId ftid = f.typeId;
         const auto fit = ts.fields.find(f.name);
         if (fit != ts.fields.end()) ftid = fit->second;
-        code += "    " + f.name + " as " + formatCleanbasicType(arena, ftid) + nl;
+        std::string privPrefix;
+        if (f.isPrivate) {
+            privPrefix = "private ";
+        }
+        code += "    " + privPrefix + f.name + " as " + formatCleanbasicType(arena, ftid) + nl;
     }
     code += "end type";
     return appendDocCommentMarkdown(wrapVbCodeBlock(code), ts.docComment);

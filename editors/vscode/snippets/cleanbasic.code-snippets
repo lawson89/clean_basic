@@ -9,9 +9,9 @@
     "description": "Declare a CleanBasic function"
   },
   "Public Function Declaration": {
-    "prefix": "pub fn",
+    "prefix": "public fn",
     "body": [
-      "pub fn ${1:name}(${2}) as ${3:int}",
+      "public fn ${1:name}(${2}) as ${3:int}",
       "\t${0}",
       "end fn"
     ],
@@ -36,9 +36,9 @@
     "description": "Declare a CleanBasic value struct type"
   },
   "Public Type Declaration": {
-    "prefix": "pub type",
+    "prefix": "public type",
     "body": [
-      "pub type ${1:Name}",
+      "public type ${1:Name}",
       "\t${2:field} as ${3:int}",
       "end type"
     ],

@@ -28,33 +28,33 @@
 ' EXPECT_OUT: Fallible loops & compound: total=5, label=items:ac, mode=fast, decoded=ok
 ' EXPECT_OUT: innerCaught(neg:-1)|outerCaught(neg:-2)|m1=6|loopCaught(neg:-5)|direct(directRaise:422)|forCont=6
 
-pub enum Status
+public enum Status
     ok = 10
     bad = 20
 end enum
 
-pub alias StatusAlias = Status
+public alias StatusAlias = Status
 
-pub enum Mode
+public enum Mode
     fast
     safe
 end enum
 
-pub alias ModeAlias = Mode
-pub alias IntList = list[int]
+public alias ModeAlias = Mode
+public alias IntList = list[int]
 
-pub type Connection
+public type Connection
     id as int
 end type
 
-pub fn validatePort(port as int) can error
+public fn validatePort(port as int) can error
     if port <= 0
         error("Invalid port ", port)
     end if
 end fn
 
 ' Function can return a Connection OR an error
-pub fn connect(ip as str) as Connection can error
+public fn connect(ip as str) as Connection can error
     if ip == ""
         error("IP cannot be empty", code=408)
     end if
@@ -62,12 +62,12 @@ pub fn connect(ip as str) as Connection can error
     return Connection(id=1)
 end fn
 
-pub fn closeConnection(conn as Connection)
+public fn closeConnection(conn as Connection)
     print("Closing connection: " & conn.id)
 end fn
 
 ' Declares 'can error', enabling implicit error bubbling
-pub fn processNetwork() as int can error
+public fn processNetwork() as int can error
     validatePort(8080)
 
     ' IMPLICIT BUBBLING: If connect fails, processNetwork immediately returns the error.
@@ -131,7 +131,7 @@ fn testMultiCallAndDeferLifo()
     end try
 end fn
 
-pub fn forwardConnect(ip as str) as Connection can error
+public fn forwardConnect(ip as str) as Connection can error
     return connect(ip)
 end fn
 
