@@ -3,10 +3,10 @@
 This document explains how CleanBasic resolves multi-file `.cb` module graphs, normalizes relative paths, handles module aliases, deduplicates diamond imports, detects circular dependencies, enforces `public` visibility, and mangles C++ identifiers for collision-free Unity Builds.
 
 ### Related Documentation
-* [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
-* [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md)
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md)
-* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cppEmitterAndInterop.md)
+* [CleanBasic Transpiler Architecture & Arena Design](transpiler_architecture.md)
+* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md)
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md)
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cpp_emitter_and_interop.md)
 
 ---
 
@@ -33,7 +33,7 @@ Every loaded module is assigned a canonical `moduleId` relative to the root entr
   2. Joins `<importerDir>/<importTarget>` and normalizes it with `normalizeRelPath`.
   3. Strips the trailing `".cb"` extension.
 
-**Example (`tests/cases/nestedModules/`):**
+**Example (`tests/cases/nested_modules/`):**
 * Root `main.cb` (`moduleId = ""`) imports `"combat/battle.cb"` -> `resolvedModuleId = "combat/battle"`.
 * `combat/battle.cb` (`moduleId = "combat/battle"`) imports `"../entities/hero.cb"`:
   * Importer dir is `"combat"`.
@@ -96,11 +96,15 @@ stop
 @enduml
 ```
 
-### 2.1 Candidate File Search Order
-When resolving `import "path.cb"` from `currentFilePath`, the loader checks three candidate filesystem paths in order:
-1. `<parentDirOf(currentFilePath)>/<imp.target>` (relative to the importing file)
-2. `<loader.rootBaseDir>/<imp.target>` (relative to the root entry file's directory)
-3. `<imp.target>` (relative to the current working directory)
+### 2.1 Candidate File Search Order & `std/<mod>` Resolution
+Before resolving user imports, `preloadStdStrPrelude()` automatically loads the `std/str` standard library module into the `AstArena` (whose unreferenced functions and headers are later tree-shaken by the emitter).
+
+When resolving an `import` declaration from `currentFilePath`:
+* **Standard Library Imports (`import "std/<name>"`):** `isStdImportTarget` resolves `<sdkRoot>/stdlib/<name>/<name>.cb` (and fallback `stdlib/<name>/<name>.cb`) with canonical module ID `std/<name>` and default alias `<name>`.
+* **Relative File Imports (`import "path.cb"`):** The loader checks three candidate filesystem paths in order:
+  1. `<parentDirOf(currentFilePath)>/<imp.target>` (relative to the importing file)
+  2. `<loader.rootBaseDir>/<imp.target>` (relative to the root entry file's directory)
+  3. `<imp.target>` (relative to the current working directory)
 
 ### 2.2 Diamond Dependency Deduplication
 `ModuleLoaderState::loadedModules` (`std::unordered_set<std::string>`) records every `targetModuleId` whose declarations have already been loaded and merged.
@@ -121,7 +125,7 @@ Circular module import detected when importing '<target>' (module '<targetModule
 
 ## 3. Visibility Rules (`public` vs. Private)
 
-By default, every `type`, `alias`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`).
+By default, every `type`, `enum`, `union`, `alias`, `const`, and `fn` declared in a CleanBasic module is **private** to that module (`isPub = false`). Adding the `public` keyword exports the declaration (`isPub = true`). Struct fields are public by default and can be marked `private` to restrict direct field access and struct construction to the defining module.
 
 | Access Context | Private Symbol (`isPub == false`) | Public Symbol (`isPub == true`) |
 | :--- | :--- | :--- |

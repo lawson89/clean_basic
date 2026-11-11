@@ -238,7 +238,7 @@ inline std::string resolveCompilerCommand(
     if (targetSpec.isCross) {
         return "zig c++ -target " + targetSpec.zigTriple;
     }
-    const std::string envCxx = getEnvVar("CXX");
+    const std::string envCxx = cbOsEnv("CXX");
     if (!envCxx.empty()) {
         return envCxx;
     }
@@ -507,7 +507,7 @@ inline std::string detectFastLinkerFlag(std::string_view compilerCmd) {
         return it->second;
     }
 
-    const std::string pathEnv = getEnvVar("PATH");
+    const std::string pathEnv = cbOsEnv("PATH");
     std::string detectedFlag;
     if (findExecutableInPath("mold", pathEnv)) {
         const std::string probeCmd = key + " -fuse-ld=mold -Wl,--version >/dev/null 2>&1";
@@ -712,38 +712,51 @@ struct ModuleLoadResult {
     bool parseOk = false;
 };
 
-inline ModuleLoadResult loadAndParseModuleFile(
-    AstArena& arena,
+inline ModuleLoadResult resolveAndReadModuleFile(
     const std::vector<std::string>& candidates,
     const std::unordered_map<std::string, std::string>& openBuffers
 ) {
     ModuleLoadResult res;
     for (size_t i = 0; i < candidates.size(); ++i) {
-        res.candidatePath = candidates[i];
-        auto memSource = findInMemorySource(openBuffers, res.candidatePath);
+        auto memSource = findInMemorySource(openBuffers, candidates[i]);
         if (!memSource.has_value()) {
-            memSource = readFileToString(res.candidatePath);
+            memSource = readFileToString(candidates[i]);
         }
         if (memSource.has_value()) {
             res.found = true;
             res.candidateIndex = i;
-            res.source = *memSource;
-
-            const auto lex = tokenize(res.source, res.candidatePath);
-            if (!lex.ok) {
-                res.error = lex.error;
-                return res;
-            }
-            auto parse = parseTokensWithArena(lex.tokens, std::move(arena), res.candidatePath);
-            arena = std::move(parse.arena);
-            if (!parse.ok) {
-                res.error = parse.error;
-                return res;
-            }
-            res.parseOk = true;
-            res.program = parse.program;
+            res.candidatePath = candidates[i];
+            res.source = std::move(*memSource);
             return res;
         }
+    }
+    return res;
+}
+
+inline void parseLoadedModuleSource(AstArena& arena, ModuleLoadResult& res) {
+    const auto lex = tokenize(res.source, res.candidatePath);
+    if (!lex.ok) {
+        res.error = lex.error;
+        return;
+    }
+    auto parse = parseTokensWithArena(lex.tokens, std::move(arena), res.candidatePath);
+    arena = std::move(parse.arena);
+    if (!parse.ok) {
+        res.error = parse.error;
+        return;
+    }
+    res.parseOk = true;
+    res.program = std::move(parse.program);
+}
+
+inline ModuleLoadResult loadAndParseModuleFile(
+    AstArena& arena,
+    const std::vector<std::string>& candidates,
+    const std::unordered_map<std::string, std::string>& openBuffers
+) {
+    ModuleLoadResult res = resolveAndReadModuleFile(candidates, openBuffers);
+    if (res.found) {
+        parseLoadedModuleSource(arena, res);
     }
     return res;
 }
@@ -775,31 +788,29 @@ inline void loadModuleDeclarationsRecursive(
             if (imp->kind == "module" && (isCbFile || isStdMod)) {
                 std::string targetModuleId = resolveModuleId(currentModuleId, impTarget);
                 const std::vector<std::string> candidates = buildModuleCandidatePaths(currentDir, loader.rootBaseDir, impTarget);
-                
-                // Check for existence and circularity before parsing to avoid redundant work
-                std::string candidatePath = candidates.front();
-                bool found = false;
-                for (size_t cIdx = 0; cIdx < candidates.size(); ++cIdx) {
-                    if (findInMemorySource(loader.openBuffers, candidates[cIdx]).has_value() || std::ifstream(candidates[cIdx]).is_open()) {
-                        candidatePath = candidates[cIdx];
-                        if (!isStdMod && cIdx > 0) targetModuleId = resolveModuleId("", impTarget);
-                        found = true;
-                        break;
-                    }
+
+                auto loadRes = resolveAndReadModuleFile(candidates, loader.openBuffers);
+                if (!loadRes.found) {
+                    loader.hasError = true;
+                    loader.error = makeError("ImportError", "Module file not found: '" + impTarget + "'.",
+                        std::string(currentFilePath), arena.decls[did].line, arena.decls[did].col);
+                    return;
+                }
+                if (!isStdMod && loadRes.candidateIndex > 0) {
+                    targetModuleId = resolveModuleId("", impTarget);
                 }
                 imp->resolvedModuleId = targetModuleId;
-                const std::string normCandidate = normalizeRelPath(candidatePath);
+                const std::string normCandidate = normalizeRelPath(loadRes.candidatePath);
 
-                if (found && (isInStack(loader.loadingStack, targetModuleId) || isInStack(loader.loadingPathStack, normCandidate))) {
+                if (isInStack(loader.loadingStack, targetModuleId) || isInStack(loader.loadingPathStack, normCandidate)) {
                     loader.hasError = true;
                     loader.error = makeError("ImportError", "Circular module import detected when importing '" + impTarget + "' (module '" + targetModuleId + "').",
                         std::string(currentFilePath), arena.decls[did].line, arena.decls[did].col);
                     return;
                 }
 
-                if (found && loader.loadedModules.find(targetModuleId) == loader.loadedModules.end()) {
-                    auto loadRes = loadAndParseModuleFile(arena, candidates, loader.openBuffers);
-                    if (!loadRes.found) return; // Should not happen given 'found' check
+                if (loader.loadedModules.find(targetModuleId) == loader.loadedModules.end()) {
+                    parseLoadedModuleSource(arena, loadRes);
                     if (!loadRes.parseOk) {
                         loader.hasError = true;
                         loader.error = loadRes.error;

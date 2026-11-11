@@ -637,14 +637,6 @@ inline std::string parentDirOf(std::string_view filePath) {
     return ".";
 }
 
-inline std::string getEnvVar(const std::string& name) {
-    return cbOsEnv(name);
-}
-
-inline std::string detectExecutablePath() {
-    return cbOsExePath();
-}
-
 inline bool isValidSdkRoot(std::string_view candidateDir) {
     if (candidateDir.empty()) {
         return false;
@@ -721,8 +713,8 @@ inline std::string resolveSdkRootDir(
 
 inline std::string cleanbasicRootDir() {
     return resolveSdkRootDir(
-        getEnvVar("CLEANBASIC_HOME"),
-        detectExecutablePath(),
+        cbOsEnv("CLEANBASIC_HOME"),
+        cbOsExePath(),
         compileTimeRootDir()
     );
 }

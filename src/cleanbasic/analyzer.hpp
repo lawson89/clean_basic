@@ -549,7 +549,7 @@ public:
         uint32_t line,
         uint32_t col
     ) {
-        VarSymbol sym{name, tid, isByref, isConst, fileName, line, col, line};
+        VarSymbol sym{name, tid, isByref, isConst, fileName, line, col};
         scope[name] = sym;
         if (!currentFnKey.empty()) {
             auto& fnScope = symbols.fnScopes[currentFnKey];
@@ -791,48 +791,13 @@ public:
             } else if (forStmt->iterable != INVALID_ID) {
                 checkFallibleUsage(fn, forStmt->iterable, scope, forStmt->implicitBubble, forStmt->breaksToCatch);
                 validateExprCalls(fn, forStmt->iterable, scope, true);
-                const TypeId iterTid = inferExprType(arena, forStmt->iterable, symbols, scope, moduleId);
-                if (iterTid < arena.types.size()) {
-                    const TypeNode iterT = resolveAliasNode(arena, symbols, moduleId, iterTid);
-                    if (iterT.name == "list" && !iterT.typeArgs.empty() && !forStmt->loopVars.empty()) {
-                        if (forStmt->loopVars.size() == 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, true, stmtNode.line, stmtNode.col);
-                        } else if (forStmt->loopVars.size() == 2) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
-                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[0], false, true, stmtNode.line, stmtNode.col);
-                        } else {
-                            setAnalyzerError(stmtNode.line, stmtNode.col, "List iteration supports at most 2 loop variables ('for item in list' or 'for i, item in list').");
-                        }
-                    } else if (iterT.name == "bytes" && !forStmt->loopVars.empty()) {
-                        if (forStmt->loopVars.size() == 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
-                        } else if (forStmt->loopVars.size() == 2) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
-                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
-                        } else {
-                            setAnalyzerError(stmtNode.line, stmtNode.col, "Bytes iteration supports at most 2 loop variables ('for b in data' or 'for i, b in data').");
-                        }
-                    } else if (iterT.name == "str" && !forStmt->loopVars.empty()) {
-                        if (forStmt->loopVars.size() == 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeStr, false, true, stmtNode.line, stmtNode.col);
-                        } else if (forStmt->loopVars.size() == 2) {
-                            bindLocalVar(scope, forStmt->loopVars[0], symbols.typeInt, false, true, stmtNode.line, stmtNode.col);
-                            bindLocalVar(scope, forStmt->loopVars[1], symbols.typeStr, false, true, stmtNode.line, stmtNode.col);
-                        } else {
-                            setAnalyzerError(stmtNode.line, stmtNode.col, "String iteration supports at most 2 loop variables ('for ch in s' or 'for i, ch in s').");
-                        }
-                    } else if (iterT.name == "dict" && iterT.typeArgs.size() == 2) {
-                        if (forStmt->loopVars.size() >= 1) {
-                            bindLocalVar(scope, forStmt->loopVars[0], iterT.typeArgs[0], false, true, stmtNode.line, stmtNode.col);
-                        }
-                        if (forStmt->loopVars.size() >= 2) {
-                            bindLocalVar(scope, forStmt->loopVars[1], iterT.typeArgs[1], false, true, stmtNode.line, stmtNode.col);
-                        }
-                    } else {
-                        for (const auto& lv : forStmt->loopVars) {
-                            bindLocalVar(scope, lv, symbols.typeAuto, false, true, stmtNode.line, stmtNode.col);
-                        }
-                    }
+                std::string loopErr;
+                const auto bindings = resolveForInLoopVars(arena, symbols, moduleId, *forStmt, scope, &loopErr);
+                if (!loopErr.empty()) {
+                    setAnalyzerError(stmtNode.line, stmtNode.col, loopErr);
+                }
+                for (const auto& kv : bindings) {
+                    bindLocalVar(scope, kv.first, kv.second, false, true, stmtNode.line, stmtNode.col);
                 }
             }
             analyzeBlock(fn, forStmt->body, scope);
@@ -875,23 +840,25 @@ public:
                 if (isUnionTarget) {
                     TypeId boundPayloadTid = INVALID_ID;
                     for (const auto& mExpr : scase.matchExprs) {
-                        std::string varName;
-                        if (const auto* ident = arena.getExpr<Identifier>(mExpr)) {
-                            varName = ident->name;
-                        } else if (const auto* fa = arena.getExpr<FieldAccess>(mExpr)) {
+                        if (const auto* fa = arena.getExpr<FieldAccess>(mExpr)) {
                             const auto uAccOpt = resolveUnionVariantAccess(arena, symbols, moduleId, scope, *fa);
                             if (!uAccOpt.has_value() || uAccOpt->key != unionOpt->key) {
                                 setAnalyzerError(scase.line, scase.col, "case variant does not match target union '" + unionOpt->name + "'");
                             }
-                            varName = fa->fieldName;
-                        } else {
+                        } else if (arena.getExpr<Identifier>(mExpr) == nullptr) {
                             setAnalyzerError(scase.line, scase.col, "Expected variant name in 'select case' on union '" + unionOpt->name + "'");
                         }
-                        const auto vtIt = unionOpt->variantTypes.find(varName);
-                        if (vtIt == unionOpt->variantTypes.end()) {
+                        const auto varOpt = resolveUnionSelectCaseVariant(arena, *unionOpt, mExpr);
+                        if (!varOpt.has_value()) {
+                            std::string varName;
+                            if (const auto* ident = arena.getExpr<Identifier>(mExpr)) {
+                                varName = ident->name;
+                            } else if (const auto* fa = arena.getExpr<FieldAccess>(mExpr)) {
+                                varName = fa->fieldName;
+                            }
                             setAnalyzerError(scase.line, scase.col, "Union '" + unionOpt->name + "' has no variant '" + varName + "'");
                         }
-                        boundPayloadTid = vtIt->second;
+                        boundPayloadTid = varOpt->payloadType;
                     }
                     auto caseScope = scope;
                     if (!scase.bindingName.empty() && boundPayloadTid != INVALID_ID) {

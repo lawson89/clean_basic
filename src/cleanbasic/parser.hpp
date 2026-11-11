@@ -26,10 +26,30 @@ struct ParseResult {
 
 inline std::string stripQuotes(std::string_view raw) {
     constexpr char singleQuote = static_cast<char>(39);
+    constexpr char backslashChar = static_cast<char>(92);
+    std::string_view inner = raw;
     if (raw.size() >= 2 && (raw.front() == '"' || raw.front() == singleQuote) && raw.back() == raw.front()) {
-        return std::string(raw.substr(1, raw.size() - 2));
+        inner = raw.substr(1, raw.size() - 2);
     }
-    return std::string(raw);
+    std::string out;
+    out.reserve(inner.size());
+    size_t i = 0;
+    while (i < inner.size()) {
+        if (inner[i] == backslashChar && i + 1 < inner.size()) {
+            const char esc = inner[i + 1];
+            out.push_back(backslashChar);
+            if (esc == 'X') {
+                out.push_back('x');
+            } else {
+                out.push_back(esc);
+            }
+            i += 2;
+        } else {
+            out.push_back(inner[i]);
+            i += 1;
+        }
+    }
+    return out;
 }
 
 inline int64_t parseIntegerLiteral(std::string_view raw, bool* okOut = nullptr) {

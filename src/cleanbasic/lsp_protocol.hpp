@@ -388,13 +388,13 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
         return wrapVbCodeBlock("fn assert(cond as bool, [msg as str]) can error") + "\nAsserts that cond is true; raises an err (with .file, .line, and binary comparison details) if cond is false.";
     }
     if (name == "len") {
-        return wrapVbCodeBlock("fn .len() as int") + "\nReturns the number of elements in a list, dict, or str.";
+        return wrapVbCodeBlock("fn .len() as int") + "\nReturns the number of elements in a list, dict, str, or bytes.";
     }
     if (name == "toStr") {
         return wrapVbCodeBlock("fn .toStr() as str") + "\nReturns a string representation of the value.";
     }
     if (name == "toInt") {
-        return wrapVbCodeBlock("fn .toInt() as int") + "\nConverts a numeric or boolean value to an int.";
+        return wrapVbCodeBlock("fn .toInt() as int") + "\nConverts a numeric, boolean, or enum value to an int.";
     }
     if (name == "toFloat") {
         return wrapVbCodeBlock("fn .toFloat() as float") + "\nConverts a numeric value to a float.";

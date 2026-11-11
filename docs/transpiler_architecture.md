@@ -3,12 +3,12 @@
 This document describes the end-to-end architecture of the CleanBasic transpiler, its 5-stage Unity Build compilation pipeline, its strict data-oriented C++17 design, and its command-line interface.
 
 ### Related Documentation
-* [CleanBasic Language Specification](cleanbasicSpecification.md)
-* [C++17 Strict Data-Oriented Subset](cppSubset.md)
-* [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md)
-* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md)
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md)
-* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cppEmitterAndInterop.md)
+* [CleanBasic Language Specification](cleanbasic_specification.md)
+* [C++17 Strict Data-Oriented Subset](cpp_subset.md)
+* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md)
+* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md)
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md)
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cpp_emitter_and_interop.md)
 
 ---
 

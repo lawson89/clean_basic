@@ -3,10 +3,10 @@
 This document details CleanBasic's lexical scanner (`src/cleanbasic/lexer.hpp`) and recursive-descent parser (`src/cleanbasic/parser.hpp`), including token classification, multi-word keyword coalescing, the expression operator precedence ladder, and statement disambiguation.
 
 ### Related Documentation
-* [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
-* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md)
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md)
-* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cppEmitterAndInterop.md)
+* [CleanBasic Transpiler Architecture & Arena Design](transpiler_architecture.md)
+* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md)
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md)
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cpp_emitter_and_interop.md)
 
 ---
 

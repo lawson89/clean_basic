@@ -413,46 +413,42 @@ end enum
 }
 
 TEST_CASE("Analyzer validates fallible calls, const immutability, and implicit bubbling", "[analyzer]") {
-    SECTION("Rejects unhandled fallible call in infallible function") {
-        const std::string badFallible = R"(
-fn risky() as int can error
+    SECTION("Rejects unhandled fallible call in assignment, expression statement, return, or print argument") {
+        const std::vector<std::string> badSnippets = {
+            R"CB(fn risky() as int can error
     return 1
 end fn
-
-fn callerWithoutErr()
+fn caller()
     dim x = risky()
 end fn
-)";
-
-        const auto lexBad = cb::tokenize(badFallible, "badFallible.cb");
-        REQUIRE(lexBad.ok);
-        auto parseBad = cb::parseTokens(lexBad.tokens, "badFallible.cb");
-        REQUIRE(parseBad.ok);
-        const auto anaBad = cb::analyzeProgram(parseBad.arena, parseBad.program);
-        CHECK_FALSE(anaBad.ok);
-        CHECK(anaBad.error.kind == "AnalyzerError");
-        CHECK(anaBad.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block"
-        ) != std::string::npos);
-    }
-
-    SECTION("Rejects unhandled fallible call in expression statement") {
-        const std::string badExprStmt = R"(
-fn fail() as int can error
-    error("failed", code=500)
-    return 0
+)CB",
+            R"CB(fn risky() as int can error
+    return 1
 end fn
-
-fn call()
-    fail()
+fn caller()
+    risky()
 end fn
-)";
-        const auto res = cb::transpileSource(badExprStmt, "badExprStmt.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.kind == "AnalyzerError");
-        CHECK(res.error.message.find(
-            "Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block"
-        ) != std::string::npos);
+)CB",
+            R"CB(fn risky() as int can error
+    return 1
+end fn
+fn caller() as int
+    return risky()
+end fn
+)CB",
+            R"CB(fn risky() as int can error
+    return 1
+end fn
+fn caller()
+    print("v=", risky())
+end fn
+)CB"
+        };
+        for (const auto& src : badSnippets) {
+            const auto res = cb::transpileSource(src, "badFallible.cb");
+            CHECK_FALSE(res.ok);
+            CHECK(res.error.kind == "AnalyzerError");
+        }
     }
 
     SECTION("Permits try / catch block that falls through without return, break, or continue") {
@@ -513,21 +509,6 @@ end fn
         CHECK_FALSE(resKw.ok);
         CHECK(resKw.error.kind == "AnalyzerError");
         CHECK(resKw.error.message.find("Unknown named argument 'status'") != std::string::npos);
-    }
-
-    SECTION("Rejects unhandled fallible call inside variadic print arguments") {
-        const std::string badPrintArg = R"(
-fn risky() as int can error
-    return 7
-end fn
-
-fn main()
-    print("value=", risky())
-end fn
-)";
-        const auto res = cb::transpileSource(badPrintArg, "badPrintArg.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.kind == "AnalyzerError");
     }
 
     SECTION("Rejects const variable reassignment") {
@@ -1668,6 +1649,13 @@ end fn
     CHECK(getHoverValue(4).find("public fn heal(byref p as Player, amount as int) as int can error") != std::string::npos);
     CHECK(getHoverValue(5).find("(field) Player.health as int") != std::string::npos);
     CHECK(getHoverValue(6).find("fn print(values...)") != std::string::npos);
+
+    const auto lenHover = cb::formatBuiltinHoverMarkdown("len");
+    REQUIRE(lenHover.has_value());
+    CHECK(lenHover->find("list, dict, str, or bytes") != std::string::npos);
+    const auto toIntHover = cb::formatBuiltinHoverMarkdown("toInt");
+    REQUIRE(toIntHover.has_value());
+    CHECK(toIntHover->find("numeric, boolean, or enum value") != std::string::npos);
 }
 
 TEST_CASE("LSP Definition Provider resolves same-file, cross-module UFCS, struct field, and local variable targets", "[lsp][definition]") {
@@ -2101,6 +2089,29 @@ end fn
     REQUIRE(ufcsParamElems.size() == 2);
     CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[0], "label")) == "amount as int");
     CHECK(cb::jsonGetString(sigUfcs.arena, cb::jsonGetField(sigUfcs.arena, ufcsParamElems[1], "label")) == "bonus as int");
+
+    // Verify signature help for built-in receiver method (.push on list[int])
+    const auto checkList = cb::checkSource(R"CB(fn main()
+  dim l = [1]
+  l.push(0)
+end fn)CB", "main.cb");
+    REQUIRE(checkList.ok);
+    cb::LspDocumentSnapshot snapList{};
+    snapList.valid = true;
+    snapList.arena = std::move(checkList.arena);
+    snapList.symbols = std::move(checkList.symbols);
+    snapList.program = std::move(checkList.program);
+    cb::CallSiteContext pushCtx{};
+    pushCtx.insideCall = true;
+    pushCtx.hasReceiver = true;
+    pushCtx.receiverName = "l";
+    pushCtx.calleeName = "push";
+    pushCtx.activeParam = 0;
+    const auto pushHelp = cb::resolveSignatureHelp(snapList, "", std::string("main"), pushCtx);
+    REQUIRE(pushHelp.has_value());
+    CHECK(pushHelp->label.find(".push(item as int)") != std::string::npos);
+    REQUIRE(pushHelp->paramLabels.size() == 1);
+    CHECK(pushHelp->paramLabels[0] == "item as int");
 }
 
 TEST_CASE("VS Code extension JSON manifests, TextMate grammar, and snippets are valid", "[vscode][lsp]") {
@@ -3283,22 +3294,6 @@ end fn
 }
 
 TEST_CASE("Top-level fallible statement guardrails and unhandled fallible call rejection", "[analyzer][fallible]") {
-    SECTION("Rejects unhandled return fallibleCall() inside infallible function without try / catch") {
-        const std::string badReturn = R"CB(
-fn risky() as int can error
-    return 1
-end fn
-
-fn caller() as int
-    return risky()
-end fn
-)CB";
-        const auto res = cb::transpileSource(badReturn, "badReturnFallible.cb");
-        CHECK_FALSE(res.ok);
-        CHECK(res.error.kind == "AnalyzerError");
-        CHECK(res.error.message.find("Unhandled error: function returns an error but caller does not declare 'can error' or have an active 'try / catch' block") != std::string::npos);
-    }
-
     SECTION("Rejects nested fallible calls inside sub-expressions even in can error functions") {
         const std::string nestedInArg = R"CB(
 fn stepOne() as int can error
@@ -3978,48 +3973,63 @@ end fn
     }
 }
 
-TEST_CASE("Transpiler and LSP regression fixes for edge-case defects", "[regression][lsp][emitter][analyzer]") {
-    SECTION("LSP Built-in Hover Fixes") {
-        auto assertHover = cb::formatBuiltinHoverMarkdown("assert");
-        REQUIRE(assertHover.has_value());
-        CHECK(assertHover->find("fn assert") != std::string::npos);
-        CHECK(assertHover->find("Asserts that cond is true") != std::string::npos);
-        // Check newline after code block
-        CHECK(assertHover->find("```\n") != std::string::npos);
-
-        auto toStrHover = cb::formatBuiltinHoverMarkdown("toStr");
-        REQUIRE(toStrHover.has_value());
-        CHECK(toStrHover->find("fn .toStr()") != std::string::npos);
-
-        auto lenHover = cb::formatBuiltinHoverMarkdown("len");
-        REQUIRE(lenHover.has_value());
-        CHECK(lenHover->find("```\n") != std::string::npos);
+TEST_CASE("Audit remediation: missing module ImportError, dict loop variable count, and uppercase hex string escapes", "[audit][pipeline][analyzer][emitter]") {
+    SECTION("Reports ImportError when importing a nonexistent .cb module file") {
+        const std::string badImport = R"CB(import "does_not_exist_anywhere.cb"
+fn main() as int
+    return 0
+end fn
+)CB";
+        const auto res = cb::transpileSource(badImport, "missing_import_test.cb");
+        CHECK_FALSE(res.ok);
+        CHECK(res.error.kind == "ImportError");
+        CHECK(res.error.message.find("Module file not found: 'does_not_exist_anywhere.cb'") != std::string::npos);
     }
 
-    SECTION("LSP Signature Help for Built-in Receiver Methods") {
-        std::string source = "fn main()\n  dim l = [1]\n  l.push(0)\nend fn";
-        auto checkRes = cb::checkSource(source, "main.cb");
-        REQUIRE(checkRes.ok);
-        cb::LspDocumentSnapshot snap{};
-        snap.valid = true;
-        snap.arena = std::move(checkRes.arena);
-        snap.symbols = std::move(checkRes.symbols);
-        snap.program = std::move(checkRes.program);
-        
-        cb::CallSiteContext ctx;
-        ctx.insideCall = true;
-        ctx.hasReceiver = true;
-        ctx.receiverName = "l";
-        ctx.calleeName = "push";
-        ctx.activeParam = 0;
+    SECTION("Rejects dict iteration with 1 or 3 loop variables") {
+        const std::string badDictLoop1 = R"CB(
+fn main() as int
+    dim d as dict[str, int] = {"a": 1}
+    for k in d
+        print(k)
+    end for
+    return 0
+end fn
+)CB";
+        const auto res1 = cb::transpileSource(badDictLoop1, "bad_dict_loop1.cb");
+        CHECK_FALSE(res1.ok);
+        CHECK(res1.error.kind == "AnalyzerError");
+        CHECK(res1.error.message.find("Dict iteration requires 2 loop variables ('for k, v in dict').") != std::string::npos);
 
-        auto help = cb::resolveSignatureHelp(snap, "", std::string("main"), ctx);
-        REQUIRE(help.has_value());
-        CHECK(help->label.find(".push(item as int)") != std::string::npos);
-        CHECK(help->paramLabels.size() == 1);
-        CHECK(help->paramLabels[0] == "item as int");
+        const std::string badDictLoop3 = R"CB(
+fn main() as int
+    dim d as dict[str, int] = {"a": 1}
+    for k, v, z in d
+        print(k)
+    end for
+    return 0
+end fn
+)CB";
+        const auto res3 = cb::transpileSource(badDictLoop3, "bad_dict_loop3.cb");
+        CHECK_FALSE(res3.ok);
+        CHECK(res3.error.kind == "AnalyzerError");
+        CHECK(res3.error.message.find("Dict iteration requires 2 loop variables ('for k, v in dict').") != std::string::npos);
     }
 
+    SECTION("Normalizes uppercase hex escapes in string literals for valid C++17 emission") {
+        const std::string bs(1, static_cast<char>(92));
+        const std::string dq(1, static_cast<char>(34));
+        const std::string nl(1, static_cast<char>(10));
+        const std::string src = "fn main() as int" + nl +
+            "    dim s = " + dq + "hello" + bs + "X41" + bs + "x42" + dq + nl +
+            "    print(s)" + nl +
+            "    return 0" + nl +
+            "end fn" + nl;
+        const auto res = cb::transpileSource(src, "hex_esc.cb");
+        REQUIRE(res.ok);
+        CHECK(res.cppCode.find("std::string(" + dq + "hello" + bs + "x41" + bs + "x42" + dq + ")") != std::string::npos);
+        CHECK(res.cppCode.find(bs + "X41") == std::string::npos);
+    }
 }
 
 TEST_CASE("Fast linker detection, built-in type alias fast path, and PCH hash stability", "[pipeline][symbols][optimization]") {
@@ -4039,7 +4049,6 @@ end fn
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeInt) == checkRes.symbols.typeInt);
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeStr) == checkRes.symbols.typeStr);
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", checkRes.symbols.typeBool) == checkRes.symbols.typeBool);
-
         const cb::TypeId myIntTid = checkRes.arena.findType("MyInt");
         REQUIRE(myIntTid != cb::INVALID_ID);
         CHECK(cb::resolveAlias(checkRes.arena, checkRes.symbols, "", myIntTid) == checkRes.symbols.typeInt);

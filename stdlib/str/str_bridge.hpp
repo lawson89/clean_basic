@@ -27,85 +27,6 @@ inline unsigned char cbStrAsciiLowerByte(unsigned char c) {
     return c;
 }
 
-#ifndef CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
-inline size_t cbStrUtf8SeqLen(const std::string& s, size_t idx) {
-    if (idx >= s.size()) {
-        return 0;
-    }
-    const unsigned char b0 = static_cast<unsigned char>(s[idx]);
-    if (b0 <= 0x7Fu) {
-        return 1;
-    }
-    if (b0 >= 0xC2u && b0 <= 0xDFu) {
-        if (idx + 1 >= s.size()) {
-            return 0;
-        }
-        const unsigned char b1 = static_cast<unsigned char>(s[idx + 1]);
-        if ((b1 & 0xC0u) != 0x80u) {
-            return 0;
-        }
-        return 2;
-    }
-    if (b0 >= 0xE0u && b0 <= 0xEFu) {
-        if (idx + 2 >= s.size()) {
-            return 0;
-        }
-        const unsigned char b1 = static_cast<unsigned char>(s[idx + 1]);
-        const unsigned char b2 = static_cast<unsigned char>(s[idx + 2]);
-        if ((b1 & 0xC0u) != 0x80u || (b2 & 0xC0u) != 0x80u) {
-            return 0;
-        }
-        if (b0 == 0xE0u && b1 < 0xA0u) {
-            return 0;
-        }
-        if (b0 == 0xEDu && b1 >= 0xA0u) {
-            return 0;
-        }
-        return 3;
-    }
-    if (b0 >= 0xF0u && b0 <= 0xF4u) {
-        if (idx + 3 >= s.size()) {
-            return 0;
-        }
-        const unsigned char b1 = static_cast<unsigned char>(s[idx + 1]);
-        const unsigned char b2 = static_cast<unsigned char>(s[idx + 2]);
-        const unsigned char b3 = static_cast<unsigned char>(s[idx + 3]);
-        if ((b1 & 0xC0u) != 0x80u || (b2 & 0xC0u) != 0x80u || (b3 & 0xC0u) != 0x80u) {
-            return 0;
-        }
-        if (b0 == 0xF0u && b1 < 0x90u) {
-            return 0;
-        }
-        if (b0 == 0xF4u && b1 > 0x8Fu) {
-            return 0;
-        }
-        return 4;
-    }
-    return 0;
-}
-
-inline size_t cbStrUtf8Step(const std::string& s, size_t idx) {
-    const size_t n = cbStrUtf8SeqLen(s, idx);
-    if (n > 0) {
-        return n;
-    }
-    return 1;
-}
-
-inline int cbHexDigitValue(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return 10 + (c - 'a');
-    }
-    if (c >= 'A' && c <= 'F') {
-        return 10 + (c - 'A');
-    }
-    return -1;
-}
-#endif
-
 inline std::vector<size_t> cbStrUtf8Offsets(const std::string& s) {
     std::vector<size_t> offsets;
     offsets.reserve(s.size() + 1);
@@ -141,14 +62,7 @@ inline bool cbStrUtf8Valid(const std::string& s) {
 }
 
 inline std::vector<std::string> cbStrChars(const std::string& s) {
-    std::vector<std::string> out;
-    size_t i = 0;
-    while (i < s.size()) {
-        const size_t n = cbStrUtf8Step(s, i);
-        out.push_back(s.substr(i, n));
-        i += n;
-    }
-    return out;
+    return cbStrUtf8Chars(s);
 }
 
 inline bool cbStrAsciiEqualsIgnoreCase(const std::string& s, const std::string& other) {
@@ -939,10 +853,6 @@ inline std::string cbStrEscapeCpp(const std::string& s) {
     return out;
 }
 
-inline int cbStrHexDigitValue(char c) {
-    return cbHexDigitValue(c);
-}
-
 inline std::tuple<std::string, CbError> cbStrUnescape(const std::string& s) {
     const char bs = static_cast<char>(92);
     std::string out;
@@ -979,12 +889,12 @@ inline std::tuple<std::string, CbError> cbStrUnescape(const std::string& s) {
         } else if (esc == '0') {
             out.push_back(static_cast<char>(0));
             i += 2;
-        } else if (esc == 'x') {
+        } else if (esc == 'x' || esc == 'X') {
             if (i + 3 >= s.size()) {
                 return {std::string(""), CbError{"Invalid hex escape sequence: expected two hex digits", 400}};
             }
-            const int hi = cbStrHexDigitValue(s[i + 2]);
-            const int lo = cbStrHexDigitValue(s[i + 3]);
+            const int hi = cbHexDigitValue(s[i + 2]);
+            const int lo = cbHexDigitValue(s[i + 3]);
             if (hi < 0 || lo < 0) {
                 return {std::string(""), CbError{"Invalid hex escape sequence: non-hex digit", 400}};
             }

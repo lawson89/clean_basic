@@ -21,42 +21,16 @@ let client = null;
  * 4. Fallback to 'cleanbasic' on system PATH.
  */
 function resolveCleanBasicExecutable() {
-  const config = vscode.workspace.getConfiguration('cleanbasic');
-  const configuredPath = (config.get('executablePath') || '').trim();
-  if (configuredPath.length > 0) {
-    return configuredPath;
-  }
-
-  let exeName = 'cleanbasic';
-  if (process.platform === 'win32') {
-    exeName = 'cleanbasic.exe';
-  }
-
-  const folders = vscode.workspace.workspaceFolders;
-  if (folders && folders.length > 0) {
-    for (const folder of folders) {
-      const candidate = path.join(folder.uri.fsPath, 'build', exeName);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  const repoBuildCandidate = path.resolve(__dirname, '..', '..', 'build', exeName);
-  if (fs.existsSync(repoBuildCandidate)) {
-    return repoBuildCandidate;
-  }
-
-  return 'cleanbasic';
+  return resolveCleanBasicToolExecutable('executablePath', 'cleanbasic');
 }
 
 /**
- * Resolves the path to the 'cbfmt' formatter binary:
- * 1. Explicit 'cleanbasic.formatterPath' setting if configured.
- * 2. '<workspaceFolder>/build/cbfmt' if present inside the current workspace.
- * 3. '<extensionRoot>/../../build/cbfmt' if built inside the cleanbasic repository.
- * 4. Auto-compiles 'tools/cbfmt.cb' to 'build/cbfmt' using 'cleanbasic' if 'tools/cbfmt.cb' is present.
- * 5. Fallback to 'cbfmt' on system PATH.
+ * Resolves the path to a CleanBasic executable ('cleanbasic', 'cbfmt', or 'cbdoc'):
+ * 1. Explicit 'cleanbasic.<settingKey>' setting if configured.
+ * 2. '<workspaceFolder>/build/<toolName>' if present inside the current workspace.
+ * 3. '<extensionRoot>/../../build/<toolName>' if built inside the cleanbasic repository.
+ * 4. Auto-compiles 'tools/<toolName>.cb' to 'build/<toolName>' using 'cleanbasic' if present.
+ * 5. Fallback to '<toolName>' on system PATH.
  */
 function resolveCleanBasicToolExecutable(settingKey, toolName) {
   const config = vscode.workspace.getConfiguration('cleanbasic');
@@ -80,40 +54,42 @@ function resolveCleanBasicToolExecutable(settingKey, toolName) {
     }
   }
 
-  const repoRoot = path.resolve(__dirname, '..', '..');
-  const repoBuildCandidate = path.join(repoRoot, 'build', exeName);
+  const repoBuildCandidate = path.resolve(__dirname, '..', '..', 'build', exeName);
   if (fs.existsSync(repoBuildCandidate)) {
     return repoBuildCandidate;
   }
 
-  const candidateRoots = [];
-  if (folders && folders.length > 0) {
-    for (const folder of folders) {
-      candidateRoots.push(folder.uri.fsPath);
+  if (toolName !== 'cleanbasic') {
+    const repoRoot = path.resolve(__dirname, '..', '..');
+    const candidateRoots = [];
+    if (folders && folders.length > 0) {
+      for (const folder of folders) {
+        candidateRoots.push(folder.uri.fsPath);
+      }
     }
-  }
-  candidateRoots.push(repoRoot);
+    candidateRoots.push(repoRoot);
 
-  for (const rootDir of candidateRoots) {
-    const srcPath = path.join(rootDir, 'tools', toolName + '.cb');
-    if (fs.existsSync(srcPath)) {
-      const buildDir = path.join(rootDir, 'build');
-      const binPath = path.join(buildDir, exeName);
-      const outCpp = path.join(buildDir, toolName + '_build.cpp');
-      try {
-        if (!fs.existsSync(buildDir)) {
-          fs.mkdirSync(buildDir, { recursive: true });
+    for (const rootDir of candidateRoots) {
+      const srcPath = path.join(rootDir, 'tools', toolName + '.cb');
+      if (fs.existsSync(srcPath)) {
+        const buildDir = path.join(rootDir, 'build');
+        const binPath = path.join(buildDir, exeName);
+        const outCpp = path.join(buildDir, toolName + '_build.cpp');
+        try {
+          if (!fs.existsSync(buildDir)) {
+            fs.mkdirSync(buildDir, { recursive: true });
+          }
+          const cbExe = resolveCleanBasicExecutable();
+          cp.execFileSync(cbExe, ['build', srcPath, '-o', outCpp, '-b', binPath], {
+            cwd: rootDir,
+            stdio: 'ignore'
+          });
+          if (fs.existsSync(binPath)) {
+            return binPath;
+          }
+        } catch (_err) {
+          // Fall through to PATH lookup if auto-build fails
         }
-        const cbExe = resolveCleanBasicExecutable();
-        cp.execFileSync(cbExe, ['build', srcPath, '-o', outCpp, '-b', binPath], {
-          cwd: rootDir,
-          stdio: 'ignore'
-        });
-        if (fs.existsSync(binPath)) {
-          return binPath;
-        }
-      } catch (_err) {
-        // Fall through to PATH lookup if auto-build fails
       }
     }
   }

@@ -3,10 +3,10 @@
 This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/runtime_preamble.hpp` and `src/cleanbasic/emitter.hpp`), including the injected C++17 runtime preamble, the CleanBasic-to-C++17 type mapping table, tuple-based error propagation, RAII `defer` guards, native `switch` lowering for `select case`, and C/C++ interoperability patterns.
 
 ### Related Documentation
-* [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
-* [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md)
-* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md)
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md)
+* [CleanBasic Transpiler Architecture & Arena Design](transpiler_architecture.md)
+* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md)
+* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md)
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md)
 
 ---
 
@@ -28,20 +28,20 @@ This document details CleanBasic's Unity C++17 code emitter (`src/cleanbasic/run
 5. **Topological POD Struct & Tagged Union Definitions + Struct Constants**:
    * Full `struct <cppName> { <Type> <field>{}; ... };` and tagged union `std::variant` wrapper definitions ordered topologically by value-type dependencies.
    * Struct/union-typed module constants (`ConstDecl`) once all composite types are complete.
-6. **Function Forward Declarations**:
-   * Forward declarations `<retType> <cppFnName>(<params...>);` for all reachable non-`extern` functions across modules.
+6. **Function Forward Declarations (with Call-Graph Tree-Shaking)**:
+   * `computeReachableFunctions(program)` performs a call-graph traversal from the root module's declarations to prune unreferenced functions and headers from non-explicitly-imported prelude modules (such as `std/str`).
+   * Forward declarations `<retType> <cppFnName>(<params...>);` are emitted for all reachable non-`extern` functions across modules.
 7. **Function Definitions & Entry Point Wrapper**:
    * Full function bodies for all reachable non-`extern` functions across modules.
-   * If a root-module `fn main()` exists (emitted as `cbMain()`), the emitter appends the C++ entry point wrapper populating `cbRuntimeArgs()`:
+   * If a root-module `fn main()` exists (emitted as `cbMain()`, supporting `void`, `as int`, `can error`, and `as int can error` signatures), the emitter appends the C++ entry point wrapper populating `cbRuntimeArgs()`:
      ```cpp
      int main(int argc, char** argv) {
-         auto& _args = cbRuntimeArgs();
-         _args.clear();
+         auto& _cbArgs = cbRuntimeArgs();
+         _cbArgs.clear();
          for (int _i = 0; _i < argc; ++_i) {
-             _args.push_back(std::string(argv[_i]));
+             _cbArgs.emplace_back(argv[_i]);
          }
-         cbMain();
-         return 0;
+         return static_cast<int>(cbMain());
      }
      ```
 
@@ -134,9 +134,9 @@ The emitter lowers CleanBasic types and function signatures directly to value-or
 Inside a `fn connect(ip as str) as Connection can error`:
 * Raising an error (`error("IP cannot be empty", code=408)`) lowers via `buildErrorCallValue()` and `buildErrorBubbleReturn()`:
   ```cpp
-  return { Connection{}, CbError{std::string("IP cannot be empty"), 408} };
+  return { Connection{}, CbError{std::string("IP cannot be empty"), 408, "network.cb", 7} };
   ```
-  (In a void `can error` function, it emits `return CbError{std::string("..."), 408};`).
+  (In a void `can error` function, it emits `return CbError{std::string("..."), 408, "network.cb", 7};`).
 * Returning a normal value (`return Connection(id=1)`) lowers via `emitReturn()`:
   ```cpp
   return { Connection{1}, CbError{"", 0} };
@@ -165,7 +165,10 @@ end fn
 ```cpp
 [[nodiscard]] std::tuple<int64_t, CbError> processNetwork() {
     auto [_val1, _err1] = connect(std::string("192.168.1.1"));
-    if (cbHasError(_err1)) return { {}, _err1 };
+    if (cbHasError(_err1)) {
+        cbStampError(_err1, "network.cb", 20);
+        return { {}, _err1 };
+    }
     auto conn = _val1;
     auto _defer_1 = cbDefer([&]() {
         closeConnection(conn);

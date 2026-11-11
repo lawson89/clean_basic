@@ -3,10 +3,10 @@
 This document describes CleanBasic's semantic analysis phase (`src/cleanbasic/symbols.hpp` and `src/cleanbasic/analyzer.hpp`), including the `GlobalSymbolTable` architecture, two-pass symbol registration, type alias cycle detection, Unified Function Call Syntax (UFCS) resolution, struct constructor resolution, `const`/`dim`/`byref` mutability enforcement, and static error-handling verification.
 
 ### Related Documentation
-* [CleanBasic Transpiler Architecture & Arena Design](transpilerArchitecture.md)
-* [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md)
-* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md)
-* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cppEmitterAndInterop.md)
+* [CleanBasic Transpiler Architecture & Arena Design](transpiler_architecture.md)
+* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md)
+* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md)
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interoperability](cpp_emitter_and_interop.md)
 
 ---
 
@@ -28,7 +28,7 @@ struct GlobalSymbolTable {
     std::unordered_map<std::string, std::unordered_map<std::string, VarSymbol>> fnScopes;
     std::unordered_set<std::string> explicitlyImportedModules;
     std::unordered_set<std::string> referencedModules;
-    std::unordered_map<std::string, std::vector<std::string>> headerModules;
+    std::unordered_map<std::string, std::string> headerModules;
     bool hasStdStr = false;
     TypeId typeInt = INVALID_ID;
     TypeId typeFloat = INVALID_ID;
@@ -46,7 +46,9 @@ struct GlobalSymbolTable {
 ### Symbol Table Components
 * **`types` (`key -> TypeSymbol`)**: Stores every user-defined and built-in struct type (`name`, `moduleId`, `key`, `fields` map of `fieldName -> TypeId`, `fieldOrder` vector of `FieldDecl`, `isPub`, `isExtern`, and mangled `cppName`).
 * **`enums` (`key -> EnumSymbol`)**: Stores every `enum Name` declaration (`name`, `moduleId`, `key`, `isPub`, `members`, `memberValues` map, `cppName`).
+* **`unions` (`key -> UnionSymbol`)**: Stores every `union Name` declaration (`name`, `moduleId`, `key`, `isPub`, `variants`, `variantTypes` map, `variantIndices` map, `cppName`).
 * **`aliases` (`key -> AliasSymbol`)**: Stores every `alias Name = TargetType` declaration (`name`, `moduleId`, `key`, `targetType`, `isPub`, `cppName`).
+* **`constants` (`key -> ConstSymbol`)**: Stores every module-level `const name = expr` declaration (`name`, `moduleId`, `key`, `typeId`, `isPub`, `cppName`).
 * **`functions` (`key -> FnSymbol`)**: Stores every function signature (`name`, `moduleId`, `key`, resolved `params`, resolved `returnType`, `isFallible`, `isPub`, `isExtern`, `cppName`).
 * **`headers` & `linkLibs`**: Deduplicated ordered lists of `import header "..."` and `import link "..."` targets across all loaded modules.
 * **`modules` (`importerModuleId -> {alias -> resolvedModuleId}`)**: Per-module import alias lookup tables.
@@ -97,7 +99,7 @@ CleanBasic provides consistent `camelCase` receiver methods for built-in types:
 * **`union.kind() as str`**: Returns the active variant name of a tagged `union` sum type.
 * **`.toStr() as str`**: Supported on `int`, `float`, `bool`, `str`, `err`, and `enum`. Returns a string representation.
 * **`.toInt() as int`**: Supported on `int`, `float`, `bool`, and `enum`.
-* **`bytes` Methods & Static Constructor**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, `.readU32Le(offset)`, `.writeU16Be(val, offset)`, and static constructor `bytes.fromHex(hex as str) as bytes can error`.
+* **`bytes` Methods & Static Constructor**: `.slice(start, end)`, `.sliceFrom(start)`, `.toUtf8() can error`, `.toHex()`, endian readers (`.readU16Le(offset)`, `.readU16Be(offset)`, `.readU32Le(offset)`, `.readU32Be(offset)`, `.readU64Le(offset)`, `.readU64Be(offset)`), endian writers (`.writeU16Le(val, offset)`, `.writeU16Be(val, offset)`, `.writeU32Le(val, offset)`, `.writeU32Be(val, offset)`, `.writeU64Le(val, offset)`, `.writeU64Be(val, offset)`), and static constructor `bytes.fromHex(hex as str) as bytes can error`.
 * **`str.toBytes() as bytes`**: Encodes a string into UTF-8 bytes.
 * **`str.fromHex() as bytes can error`**: Decodes an even-length hexadecimal string into a `bytes` buffer.
 * **`str.byteAt(idx as int) as int`**: Returns the unsigned byte value (`0..255`) at byte index `idx`, or `-1` if out of bounds.
@@ -143,7 +145,7 @@ partition "Pass 1b: Struct Fields, Unions, Constants & Function Signatures" {
      - Populate TypeSymbol::fields[fieldName]
   2. UnionDecl:
      - Resolve each variant's TypeId through resolveAlias()
-     - Populate UnionSymbol::variants and variantIndex
+     - Populate UnionSymbol::variants, variantTypes, and variantIndices
   3. EnumDecl:
      - Populate EnumSymbol::members and memberValues
   4. ConstDecl:
@@ -175,10 +177,10 @@ Modules can define local or public type aliases (`alias UserId = int` or `public
 1. Starts with `curr = arena.types[tid]` and `activeModId = currentModuleId`.
 2. Maintains a `std::unordered_set<std::string> seen` of visited alias symbol keys.
 3. In a `while` loop, computes `key = resolveSymbolKey(symbols, activeModId, curr.name)` and looks up `key` in `symbols.aliases`:
-   * If not an alias, or if accessed via qualified `mod.Alias` when `!isPub`, stops unwrapping.
+   * If not an alias, stops unwrapping (cross-module `isPub` visibility is enforced by `resolveTypeSymbolByName` / `ensureContainerTypesInExpr`).
    * **Cycle Detection:** If `key` is already in `seen` (e.g., `alias A = B` and `alias B = A`), breaks out of the loop immediately to prevent infinite recursion.
    * Otherwise, inserts `key` into `seen`, updates `activeModId = aliasSym.moduleId` (so relative type references inside the alias resolve in the alias's defining module), and advances `curr` to the target `TypeNode`.
-4. Finally, if `curr.name` resolves to a user-defined `TypeSymbol` in `symbols.types`, normalizes `curr.name` to the canonical `TypeSymbol::key` (e.g., `"entities/hero::Hero"`).
+4. Finally, if `curr.name` resolves to a user-defined `TypeSymbol` in `symbols.types`, `EnumSymbol` in `symbols.enums`, or `UnionSymbol` in `symbols.unions`, normalizes `curr.name` to its canonical symbol key (e.g., `"entities/hero::Hero"`).
 
 ---
 
@@ -297,7 +299,7 @@ CleanBasic enforces exhaustive error handling at compile time without C++ except
 
 ### 7.1 Calling `error(...)` (`validateExprCalls`)
 Whenever `error(msg, [code=N])` is called:
-1. The enclosing function **must** declare `can error` (`fn.isFallible == true`). Calling `error(...)` inside an infallible function fails with:
+1. The enclosing function must declare `can error` (`fn.isFallible == true`) or the call must occur inside an active `try / catch` block (`activeTryDepth > 0`). Calling `error(...)` inside an infallible function outside a `try / catch` block fails with:
    `AnalyzerError: Cannot call 'error(...)' inside infallible function '<fn>'; add 'can error' to the function signature.`
 2. At least one positional message argument must be provided (`'error(...)' requires at least one message argument.`).
 3. Only `code=<intExpr>` is permitted as a named argument (`Unknown named argument '<name>' in 'error(...)'; only 'code=' is supported.`).

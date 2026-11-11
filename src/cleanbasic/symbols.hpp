@@ -202,7 +202,6 @@ struct VarSymbol {
     std::string fileName = "main.cb";
     uint32_t line = 1;
     uint32_t col = 1;
-    uint32_t endLine = 1;
 };
 
 struct GlobalSymbolTable {
@@ -1553,6 +1552,110 @@ inline std::optional<FnSymbol> resolveFuncCall(
     }
 
     return std::nullopt;
+}
+
+struct ResolvedUnionCaseVariant {
+    std::string variantName;
+    size_t variantIndex = 0;
+    TypeId payloadType = INVALID_ID;
+};
+
+inline std::optional<ResolvedUnionCaseVariant> resolveUnionSelectCaseVariant(
+    const AstArena& arena,
+    const UnionSymbol& unionSym,
+    ExprId matchExpr
+) {
+    std::string varName;
+    if (const auto* ident = arena.getExpr<Identifier>(matchExpr)) {
+        varName = ident->name;
+    } else if (const auto* fa = arena.getExpr<FieldAccess>(matchExpr)) {
+        varName = fa->fieldName;
+    } else {
+        return std::nullopt;
+    }
+    const auto vTypeIt = unionSym.variantTypes.find(varName);
+    if (vTypeIt == unionSym.variantTypes.end()) {
+        return std::nullopt;
+    }
+    size_t idx = 0;
+    const auto vIdxIt = unionSym.variantIndices.find(varName);
+    if (vIdxIt != unionSym.variantIndices.end()) {
+        idx = vIdxIt->second;
+    }
+    return ResolvedUnionCaseVariant{varName, idx, vTypeIt->second};
+}
+
+inline std::vector<std::pair<std::string, TypeId>> resolveForInLoopVars(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view modId,
+    const ForStmt& forStmt,
+    const std::unordered_map<std::string, VarSymbol>& scope,
+    std::string* errorOut = nullptr
+) {
+    std::vector<std::pair<std::string, TypeId>> bindings;
+    if (forStmt.iterable == INVALID_ID || forStmt.loopVars.empty()) {
+        return bindings;
+    }
+    const TypeId iterTid = inferExprType(arena, forStmt.iterable, symbols, scope, modId);
+    if (iterTid >= arena.types.size()) {
+        return bindings;
+    }
+    const TypeNode iterT = resolveAliasNode(arena, symbols, modId, iterTid);
+    const size_t nVars = forStmt.loopVars.size();
+    if (iterT.name == "list" && !iterT.typeArgs.empty()) {
+        if (nVars == 1) {
+            bindings.emplace_back(forStmt.loopVars[0], iterT.typeArgs[0]);
+        } else if (nVars == 2) {
+            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
+            bindings.emplace_back(forStmt.loopVars[1], iterT.typeArgs[0]);
+        } else if (errorOut != nullptr) {
+            *errorOut = "List iteration supports at most 2 loop variables ('for item in list' or 'for i, item in list').";
+        }
+    } else if (iterT.name == "bytes") {
+        if (nVars == 1) {
+            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
+        } else if (nVars == 2) {
+            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
+            bindings.emplace_back(forStmt.loopVars[1], symbols.typeInt);
+        } else if (errorOut != nullptr) {
+            *errorOut = "Bytes iteration supports at most 2 loop variables ('for b in data' or 'for i, b in data').";
+        }
+    } else if (iterT.name == "str") {
+        if (nVars == 1) {
+            bindings.emplace_back(forStmt.loopVars[0], symbols.typeStr);
+        } else if (nVars == 2) {
+            bindings.emplace_back(forStmt.loopVars[0], symbols.typeInt);
+            bindings.emplace_back(forStmt.loopVars[1], symbols.typeStr);
+        } else if (errorOut != nullptr) {
+            *errorOut = "String iteration supports at most 2 loop variables ('for ch in s' or 'for i, ch in s').";
+        }
+    } else if (iterT.name == "dict" && iterT.typeArgs.size() == 2) {
+        if (nVars == 2) {
+            bindings.emplace_back(forStmt.loopVars[0], iterT.typeArgs[0]);
+            bindings.emplace_back(forStmt.loopVars[1], iterT.typeArgs[1]);
+        } else if (errorOut != nullptr) {
+            *errorOut = "Dict iteration requires 2 loop variables ('for k, v in dict').";
+        }
+    } else {
+        for (const auto& lv : forStmt.loopVars) {
+            bindings.emplace_back(lv, symbols.typeAuto);
+        }
+    }
+    return bindings;
+}
+
+inline void bindForInLoopVars(
+    const AstArena& arena,
+    const GlobalSymbolTable& symbols,
+    std::string_view modId,
+    const ForStmt& forStmt,
+    std::unordered_map<std::string, VarSymbol>& loopScope
+) {
+    const auto bindings = resolveForInLoopVars(arena, symbols, modId, forStmt, loopScope, nullptr);
+    for (const auto& kv : bindings) {
+        loopScope[kv.first] = VarSymbol{kv.first, kv.second, false, true};
+    }
 }
 
 inline std::vector<std::string> collectDirectCompositeDeps(

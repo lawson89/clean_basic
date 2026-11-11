@@ -38,7 +38,7 @@ inline bool isValidOptLevel(std::string_view level) {
 }
 
 inline void printUsage(std::string_view progName) {
-    std::cout << "Usage: " << progName << " build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [--static] [-r|--release] [--opt level] [--time]" << std::endl
+    std::cout << "Usage: " << progName << " build <file.cb> [-o output.cpp] [-c] [-b binary] [-t target] [--cc compiler] [--static] [-r|--release] [--opt level] [--no-pch] [--rebuild-pch] [--time]" << std::endl
               << "       " << progName << " <file.cb>" << std::endl
               << "       " << progName << " lsp" << std::endl << std::endl
               << "Options:" << std::endl
@@ -52,7 +52,7 @@ inline void printUsage(std::string_view progName) {
               << "  --static              Link a fully static binary executable on Linux/Windows (implies -c)" << std::endl
               << "  -r, --release         Compile with full optimizations (-O3)" << std::endl
               << "  --debug               Compile in debug mode (-O0, default)" << std::endl
-              << "  --opt, -O <0|1|2|3|s> Set C++ optimization level (default: 0)" << std::endl
+              << "  --opt, -O <0|1|2|3|s|z> Set C++ optimization level (default: 0)" << std::endl
               << "  --no-pch              Disable precompiled headers during C++ compilation" << std::endl
               << "  --rebuild-pch         Force regeneration of cached C++ precompiled header" << std::endl
               << "  --time                Display detailed transpiler and compiler timing breakdown" << std::endl

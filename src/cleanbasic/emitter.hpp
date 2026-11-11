@@ -960,10 +960,9 @@ public:
         if (const auto* ident = arena.getExpr<Identifier>(targetId)) {
             const std::string& name = ident->name;
             const TypeId resolvedT = resolveAlias(arena, symbols, currentModuleId, stmt.declaredType);
-            const TypeNode resNode = resolveAliasNode(arena, symbols, currentModuleId, stmt.declaredType);
             scope[name] = VarSymbol{name, resolvedT, false, stmt.isConst};
             declaredVars.insert(name);
-            const std::string cppType = mapTypeNode(currentModuleId, resNode);
+            const std::string cppType = mapTypeNode(currentModuleId, arena.getType(resolvedT));
             std::string prefix;
             if (stmt.isConst) {
                 prefix = "const ";
@@ -1246,6 +1245,7 @@ public:
             const TypeNode iterType = resolveAliasNode(arena, symbols, currentModuleId, iterTid);
 
             auto loopScope = scope;
+            bindForInLoopVars(arena, symbols, currentModuleId, *forS, loopScope);
             auto loopDecls = declaredVars;
             for (const auto& lv : forS->loopVars) {
                 loopDecls.insert(lv);
@@ -1254,23 +1254,8 @@ public:
             if (forS->loopVars.size() == 1) {
                 const std::string& lv = forS->loopVars[0];
                 if (iterType.name == "str") {
-                    loopScope[lv] = VarSymbol{lv, symbols.typeStr, false, true};
                     emitLine("for (const auto& " + lv + " : cbStrUtf8Chars(" + iterCpp + ")) {");
-                    indentLevel += 1;
-                    emitStmtList(fn, forS->body, loopScope, loopDecls);
-                    indentLevel -= 1;
-                    emitLine("}");
-                    emitCatchBreakIfPending();
-                    return;
-                }
-                TypeId elemT = symbols.typeAuto;
-                if (!iterType.typeArgs.empty()) {
-                    elemT = iterType.typeArgs[0];
                 } else if (iterType.name == "bytes") {
-                    elemT = symbols.typeInt;
-                }
-                loopScope[lv] = VarSymbol{lv, elemT, false, true};
-                if (iterType.name == "bytes") {
                     emitLine("for (int64_t " + lv + " : " + iterCpp + ") {");
                 } else {
                     emitLine("for (const auto& " + lv + " : " + iterCpp + ") {");
@@ -1285,8 +1270,6 @@ public:
             if (forS->loopVars.size() == 2 && iterType.name == "str") {
                 const std::string& idxVar = forS->loopVars[0];
                 const std::string& elemVar = forS->loopVars[1];
-                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false, true};
-                loopScope[elemVar] = VarSymbol{elemVar, symbols.typeStr, false, true};
                 const std::string iterRef = nextTemp("_iter");
                 emitLine("{");
                 indentLevel += 1;
@@ -1305,14 +1288,6 @@ public:
             if (forS->loopVars.size() == 2 && (iterType.name == "list" || iterType.name == "bytes")) {
                 const std::string& idxVar = forS->loopVars[0];
                 const std::string& elemVar = forS->loopVars[1];
-                TypeId elemT = symbols.typeAuto;
-                if (!iterType.typeArgs.empty()) {
-                    elemT = iterType.typeArgs[0];
-                } else if (iterType.name == "bytes") {
-                    elemT = symbols.typeInt;
-                }
-                loopScope[idxVar] = VarSymbol{idxVar, symbols.typeInt, false, true};
-                loopScope[elemVar] = VarSymbol{elemVar, elemT, false, true};
                 const std::string iterRef = nextTemp("_iter");
                 emitLine("{");
                 indentLevel += 1;
@@ -1331,10 +1306,6 @@ public:
                 emitLine("}");
                 emitCatchBreakIfPending();
                 return;
-            }
-            if (iterType.typeArgs.size() == 2) {
-                loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], iterType.typeArgs[0], false, true};
-                loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], iterType.typeArgs[1], false, true};
             }
             emitLine("for (const auto& [" + joinStrings(forS->loopVars) + "] : " + iterCpp + ") {");
             indentLevel += 1;
@@ -1389,19 +1360,9 @@ public:
                 size_t lastVarIndex = 0;
                 TypeId lastPayloadTid = INVALID_ID;
                 for (size_t mIdx = 0; mIdx < c.matchExprs.size(); ++mIdx) {
-                    std::string varName;
-                    if (const auto* ident = arena.getExpr<Identifier>(c.matchExprs[mIdx])) {
-                        varName = ident->name;
-                    } else if (const auto* fa = arena.getExpr<FieldAccess>(c.matchExprs[mIdx])) {
-                        varName = fa->fieldName;
-                    }
-                    const auto vIdxIt = unionTargetOpt->variantIndices.find(varName);
-                    if (vIdxIt != unionTargetOpt->variantIndices.end()) {
-                        lastVarIndex = vIdxIt->second;
-                    }
-                    const auto vTypeIt = unionTargetOpt->variantTypes.find(varName);
-                    if (vTypeIt != unionTargetOpt->variantTypes.end()) {
-                        lastPayloadTid = vTypeIt->second;
+                    if (const auto varOpt = resolveUnionSelectCaseVariant(arena, *unionTargetOpt, c.matchExprs[mIdx])) {
+                        lastVarIndex = varOpt->variantIndex;
+                        lastPayloadTid = varOpt->payloadType;
                     }
                     if (mIdx + 1 == c.matchExprs.size()) {
                         emitLine("case " + std::to_string(lastVarIndex) + ": {");
@@ -1909,36 +1870,7 @@ public:
                     }
                 } else if (forS->iterable != INVALID_ID) {
                     scanReachableExpr(forS->iterable, modId, scope, reachable, worklist);
-                    const TypeId iterTid = inferExprType(arena, forS->iterable, symbols, scope, modId);
-                    const TypeNode iterType = resolveAliasNode(arena, symbols, modId, iterTid);
-                    if (forS->loopVars.size() == 1) {
-                        TypeId elemT = symbols.typeAuto;
-                        if (iterType.name == "str") {
-                            elemT = symbols.typeStr;
-                        } else if (!iterType.typeArgs.empty()) {
-                            elemT = iterType.typeArgs[0];
-                        } else if (iterType.name == "bytes") {
-                            elemT = symbols.typeInt;
-                        }
-                        loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], elemT, false, true};
-                    } else if (forS->loopVars.size() == 2) {
-                        if (iterType.name == "str") {
-                            loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, true};
-                            loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], symbols.typeStr, false, true};
-                        } else if (iterType.name == "list" || iterType.name == "bytes") {
-                            TypeId elemT = symbols.typeAuto;
-                            if (!iterType.typeArgs.empty()) {
-                                elemT = iterType.typeArgs[0];
-                            } else if (iterType.name == "bytes") {
-                                elemT = symbols.typeInt;
-                            }
-                            loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], symbols.typeInt, false, true};
-                            loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], elemT, false, true};
-                        } else if (iterType.typeArgs.size() == 2) {
-                            loopScope[forS->loopVars[0]] = VarSymbol{forS->loopVars[0], iterType.typeArgs[0], false, true};
-                            loopScope[forS->loopVars[1]] = VarSymbol{forS->loopVars[1], iterType.typeArgs[1], false, true};
-                        }
-                    }
+                    bindForInLoopVars(arena, symbols, modId, *forS, loopScope);
                 }
                 scanReachableStmtList(forS->body, modId, loopScope, reachable, worklist);
                 continue;
@@ -1960,15 +1892,8 @@ public:
                     for (const ExprId mExpr : c.matchExprs) {
                         scanReachableExpr(mExpr, modId, scope, reachable, worklist);
                         if (unionTargetOpt.has_value()) {
-                            std::string varName;
-                            if (const auto* ident = arena.getExpr<Identifier>(mExpr)) {
-                                varName = ident->name;
-                            } else if (const auto* fa = arena.getExpr<FieldAccess>(mExpr)) {
-                                varName = fa->fieldName;
-                            }
-                            const auto vTypeIt = unionTargetOpt->variantTypes.find(varName);
-                            if (vTypeIt != unionTargetOpt->variantTypes.end()) {
-                                lastPayloadTid = vTypeIt->second;
+                            if (const auto varOpt = resolveUnionSelectCaseVariant(arena, *unionTargetOpt, mExpr)) {
+                                lastPayloadTid = varOpt->payloadType;
                             }
                         }
                     }

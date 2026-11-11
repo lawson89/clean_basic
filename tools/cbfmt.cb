@@ -408,24 +408,6 @@ fn collectCbFiles(targetPath as str) as list[str] can error
     return outFiles
 end fn
 
-'' Reads all text from standard input using fs.stdin().
-fn readStdinAll() as str can error
-    dim f = fs.stdin()
-    defer
-        f.close()
-    end defer
-
-    dim lines as list[str] = []
-    dim line = ""
-    while f.readLine(line)
-        lines.push(line)
-    end while
-    if lines.len() == 0
-        return ""
-    end if
-    return str.join(lines, "\n") & "\n"
-end fn
-
 '' Configures the CLI parser for cbfmt.
 fn buildParser() as cli.Parser
     dim p = cli.newParser(
@@ -468,7 +450,7 @@ fn main() as int
                 os.eprint("cbfmt: cannot use --write with standard input")
                 return 2
             end if
-            const input = readStdinAll()
+            const input = os.readAll()
             const formatted = formatSource(input, indentWidth)
             if checkOnly
                 if input != formatted

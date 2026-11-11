@@ -4,12 +4,12 @@ CleanBasic is a statically typed, procedural systems programming language. It co
 
 ### Transpiler Internals & Architecture Suite
 For deep-dive technical documentation on each compiler stage, consult:
-* [Transpiler Architecture & Arena Design](transpilerArchitecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
-* [Lexical Analysis & Recursive-Descent Parsing](lexerAndParser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
-* [Multi-File Module Resolution, Scoping & Name Mangling](modulesAndSymbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `public` visibility, and C++ identifier mangling.
-* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semanticAnalyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `try / catch` verification.
-* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cppEmitterAndInterop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
-* [C++17 Strict Data-Oriented Subset](cppSubset.md) — Coding standards for the transpiler implementation.
+* [Transpiler Architecture & Arena Design](transpiler_architecture.md) — 5-stage Unity Build pipeline, flat `AstArena` vector storage, `std::variant` sum types, `DiagnosticError` handling, and CLI usage.
+* [Lexical Analysis & Recursive-Descent Parsing](lexer_and_parser.md) — Tokenization, two-word keyword coalescing, forbidden C-style logical operators, and the expression precedence ladder.
+* [Multi-File Module Resolution, Scoping & Name Mangling](modules_and_symbols.md) — Relative path normalization, module aliases, diamond deduplication, circular import detection, `public` visibility, and C++ identifier mangling.
+* [Semantic Analyzer: Type Inference, UFCS, Mutability & Fallibility](semantic_analyzer.md) — Two-pass `GlobalSymbolTable` registration, alias cycle detection, UFCS resolution, `const`/`dim`/`byref` mutability enforcement, and static `can error` / `try / catch` verification.
+* [Unity C++17 Emitter, Runtime Preamble & C/C++ Interop](cpp_emitter_and_interop.md) — Runtime preamble, CleanBasic-to-C++17 type mapping table, tuple error propagation, RAII `defer` guards, native `switch` lowering, and C/C++ FFI wrapping with `cptr` and `extern`.
+* [C++17 Strict Data-Oriented Subset](cpp_subset.md) — Coding standards for the transpiler implementation.
 
 ---
 
@@ -34,7 +34,7 @@ ConstDecl       ::= ["public"] "const" Identifier ["as" Type] "=" Expr NEWLINE
 AliasDecl       ::= ["public"] "alias" Identifier "=" Type NEWLINE
 
 EnumDecl        ::= ["public"] "enum" Identifier ["as" "int"] NEWLINE EnumMember* "end enum" NEWLINE
-EnumMember      ::= Identifier ["=" Expr] NEWLINE
+EnumMember      ::= Identifier ["=" ["+" | "-"] NumberLiteral] NEWLINE
 
 UnionDecl       ::= ["public"] "union" Identifier NEWLINE UnionVariant+ "end union" NEWLINE
 UnionVariant    ::= Identifier "as" Type NEWLINE
@@ -241,7 +241,7 @@ end fn
 
 ### 4. Control Flow, Ranges, and Built-in Containers
 
-CleanBasic provides an auto-included `std/str` prelude (so `str` UFCS methods like `s.trim()`, `s.split(",")`, `s.toInt()`, and `str.join(...)` work out of the box with zero imports and zero dead-code emission when unused), built-in generic containers (`list[T]`, `dict[K, V]` with bounds-safe indexing and `dict.get(key, defaultVal)`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` loops alongside `while` loops, `break` and `continue` control statements, and `select case` blocks on `int`, `bool`, and `str` (lowered to native C++ `switch` jump tables with stacked cases for integral/boolean types, and single-evaluation `if / else if / else` chains for strings, supporting comma-separated multi-value `case expr1, expr2` clauses).
+CleanBasic provides an auto-included `std/str` prelude (so `str` UFCS methods like `s.trim()`, `s.split(",")`, `s.toInt()`, and `str.join(...)` work out of the box with zero imports and zero dead-code emission when unused), built-in generic containers (`list[T]`, `dict[K, V]` with bounds-safe indexing and `dict.get(key, defaultVal)`), auto-coercing `&` string concatenation, variadic `print(...)`, classic BASIC `for i = start to end [step s]` loops alongside `while` loops, `break` and `continue` control statements, and `select case` blocks on `int`, `bool`, `str`, `enum`, and tagged `union` (lowered to native C++ `switch` jump tables with stacked cases for integral/boolean/enum/union types, and single-evaluation `if / else if / else` chains for strings, supporting comma-separated multi-value `case expr1, expr2` clauses and `case Variant as binding` union payload extraction).
 
 ```vb
 fn demoContainers() as int
