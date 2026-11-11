@@ -12,7 +12,7 @@ type Point
 end type
 
 fn main()
-    dim pt = Point(x=1, y=2)
+    dim pt = Point(1, 2)
     print(pt.x.toStr())
     pt.x = 10
     pt.y = 15

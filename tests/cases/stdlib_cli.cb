@@ -8,17 +8,16 @@
 ' EXPECT_OUT: Passed: 4, Failed: 0
 
 import "std/cli"
-import "std/test"
 
 fn buildSampleParser() as cli.Parser
-    dim p = cli.newParser(name="cbgrep", version="1.0", description="Search files for a pattern")
+    dim p = cli.newParser("cbgrep", "1.0", "Search files for a pattern")
     p.addFlag("ignore-case", "i", "Case-insensitive search")
     p.addFlag("line-number", "n", "Show 1-based line numbers")
     p.addFlag("count", "c", "Show only matching line count")
     p.addFlag("invert-match", "v", "Select non-matching lines")
-    p.addOption("output", "o", "Output file path", defaultVal="stdout")
-    p.addOption("max-count", "m", "Maximum matches per file", defaultVal="100")
-    p.addArg("pattern", "Pattern to search for", required=true)
+    p.addOption("output", "o", "Output file path", "stdout")
+    p.addOption("max-count", "m", "Maximum matches per file", "100")
+    p.addArg("pattern", "Pattern to search for", true)
     return p
 end fn
 
@@ -31,7 +30,7 @@ fn testFlagsAndOptions() can error
     assert(not args.has("count"))
     assert(args.get("output") == "results.txt")
     assert(args.get("max-count") == "25")
-    dim maxVal = args.getInt("max-count")
+    dim maxVal = args.getInt("max-count", 0)
     assert(maxVal == 25)
     assert(args.get("pattern") == "needle")
     assert(args.rest.len() == 2)
@@ -45,7 +44,7 @@ fn testDefaultsAndDoubleDash() can error
     assert(not args.has("invert-match"))
     assert(args.get("output") == "custom.log")
     assert(args.get("max-count") == "100")
-    dim maxVal = args.getInt("max-count")
+    dim maxVal = args.getInt("max-count", 0)
     assert(maxVal == 100)
     assert(args.get("pattern") == "-v")
     assert(args.rest.len() == 1)
@@ -92,8 +91,8 @@ fn testMissingPositionalError() can error
 end fn
 
 fn testMissingRequiredOptionError() can error
-    dim p = cli.newParser(name="deploy")
-    p.addOption("env", "e", "Target environment", required=true)
+    dim p = cli.newParser("deploy", "1.0", "Deploy service")
+    p.addRequiredOption("env", "e", "Target environment")
     try
         p.parseArgs([])
         assert(false, "Expected missing required option error")
@@ -110,10 +109,20 @@ fn testErrorHandling() can error
 end fn
 
 fn main() as int
-    dim s = test.newSuite("std/cli Command-Line Parser Tests")
-    s.add("flags, bundled short flags, and options", testFlagsAndOptions)
-    s.add("default option values, getInt, and -- separator", testDefaultsAndDoubleDash)
-    s.add("helpRequested, versionRequested, and usage formatting", testHelpAndVersion)
-    s.add("error handling for unknown and missing args", testErrorHandling)
-    return s.run()
+    print("Running suite: std/cli Command-Line Parser Tests")
+    try
+        testFlagsAndOptions()
+        print("  [PASS] flags, bundled short flags, and options")
+        testDefaultsAndDoubleDash()
+        print("  [PASS] default option values, getInt, and -- separator")
+        testHelpAndVersion()
+        print("  [PASS] helpRequested, versionRequested, and usage formatting")
+        testErrorHandling()
+        print("  [PASS] error handling for unknown and missing args")
+        print("Passed: 4, Failed: 0")
+        return 0
+    catch e
+        print("  [FAIL] " & e.msg)
+        return 1
+    end try
 end fn

@@ -38,21 +38,13 @@ inline bool isDigitChar(char c) {
     return c >= '0' && c <= '9';
 }
 
-inline bool isHexDigitChar(char c) {
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
-inline bool isBinDigitChar(char c) {
-    return c == '0' || c == '1';
-}
-
 inline bool isSingleKeyword(std::string_view word) {
     static const std::vector<std::string_view> keywords = {
         "import", "as", "public", "extern", "type", "enum", "union", "fn",
         "dim", "const", "byref", "if", "else",
-        "for", "in", "to", "step", "while", "case", "defer", "try", "catch", "error",
+        "for", "in", "to", "while", "case", "try", "catch", "error",
         "return", "break", "continue", "and", "or", "not",
-        "true", "false", "null"
+        "true", "false"
     };
     for (const auto& kw : keywords) {
         if (word == kw) {
@@ -64,7 +56,7 @@ inline bool isSingleKeyword(std::string_view word) {
 
 inline bool isTypeKeyword(std::string_view word) {
     static const std::vector<std::string_view> typeKws = {
-        "int", "float", "bool", "str", "list", "dict", "err", "cptr"
+        "int", "float", "bool", "str", "list", "dict", "err"
     };
     for (const auto& tk : typeKws) {
         if (word == tk) {
@@ -76,7 +68,7 @@ inline bool isTypeKeyword(std::string_view word) {
 
 inline bool matchSecondWordForMultiKw(std::string_view first, std::string_view second) {
     if (first == "import") {
-        return second == "header" || second == "link";
+        return second == "header";
     }
     if (first == "select") {
         return second == "case";
@@ -87,14 +79,13 @@ inline bool matchSecondWordForMultiKw(std::string_view first, std::string_view s
     if (first == "else") {
         return second == "if";
     }
-
     if (first == "can") {
         return second == "error";
     }
     if (first == "end") {
         return second == "select" || second == "if" || second == "fn" ||
-               second == "type" || second == "enum" || second == "union" || second == "for" || second == "while" ||
-               second == "defer" || second == "try";
+               second == "type" || second == "enum" || second == "union" ||
+               second == "for" || second == "while" || second == "try";
     }
     return false;
 }
@@ -365,65 +356,22 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
             continue;
         }
 
-        // 7. Numbers (Decimal, Hexadecimal 0x..., Binary 0b..., and optional '_' separators)
+        // 7. Numbers (Decimal integer and floating-point literals)
         if (isDigitChar(ch)) {
-            if (ch == '0' && i + 1 < n && (code[i + 1] == 'x' || code[i + 1] == 'X')) {
-                i += 2;
-                std::string normHex = "0x";
-                bool hasHexDigit = false;
-                while (i < n && (isHexDigitChar(code[i]) || code[i] == '_')) {
-                    if (code[i] != '_') {
-                        normHex.push_back(code[i]);
-                        hasHexDigit = true;
-                    }
-                    i += 1;
-                }
-                if (!hasHexDigit || (i < n && isIdentChar(code[i]))) {
-                    return LexResult{false, {}, makeError("LexerError", "Invalid hexadecimal integer literal", fileStr, lineNum, col)};
-                }
-                res.tokens.push_back(Token{"NUMBER", std::move(normHex), lineNum, col});
-                continue;
-            }
-            if (ch == '0' && i + 1 < n && (code[i + 1] == 'b' || code[i + 1] == 'B')) {
-                i += 2;
-                std::string normBin = "0b";
-                bool hasBinDigit = false;
-                while (i < n && (isBinDigitChar(code[i]) || code[i] == '_')) {
-                    if (code[i] != '_') {
-                        normBin.push_back(code[i]);
-                        hasBinDigit = true;
-                    }
-                    i += 1;
-                }
-                if (!hasBinDigit || (i < n && isIdentChar(code[i]))) {
-                    return LexResult{false, {}, makeError("LexerError", "Invalid binary integer literal", fileStr, lineNum, col)};
-                }
-                res.tokens.push_back(Token{"NUMBER", std::move(normBin), lineNum, col});
-                continue;
-            }
-            std::string normNum;
-            while (i < n && (isDigitChar(code[i]) || code[i] == '_')) {
-                if (code[i] != '_') {
-                    normNum.push_back(code[i]);
-                }
+            const std::size_t startIdx = i;
+            while (i < n && isDigitChar(code[i])) {
                 i += 1;
             }
             if (i + 1 < n && code[i] == '.' && isDigitChar(code[i + 1])) {
-                normNum.push_back('.');
                 i += 1;
-                while (i < n && (isDigitChar(code[i]) || code[i] == '_')) {
-                    if (code[i] != '_') {
-                        normNum.push_back(code[i]);
-                    }
+                while (i < n && isDigitChar(code[i])) {
                     i += 1;
                 }
             }
-            Token tok{};
-            tok.kind = "NUMBER";
-            tok.value = std::move(normNum);
-            tok.line = lineNum;
-            tok.col = col;
-            res.tokens.push_back(std::move(tok));
+            if (i < n && isIdentChar(code[i])) {
+                return LexResult{false, {}, makeError("LexerError", "Invalid numeric literal", fileStr, lineNum, col)};
+            }
+            res.tokens.push_back(Token{"NUMBER", std::string(code.substr(startIdx, i - startIdx)), lineNum, col});
             continue;
         }
 
@@ -436,14 +384,6 @@ inline LexResult tokenize(std::string_view code, std::string_view fileName = "ma
         if (ch == '<' || ch == '>') {
             res.tokens.push_back(Token{"OP_CMP", std::string(1, ch), lineNum, col});
             i += 1;
-            continue;
-        }
-
-        // 8b. Compound assignment operators: +=, -=, *=, /=, %=, &=
-        if ((ch == '+' || ch == '-' || ch == mulCh || ch == '/' || ch == '%' || ch == '&') &&
-            i + 1 < n && code[i + 1] == '=') {
-            res.tokens.push_back(Token{"COMPOUND_ASSIGN", std::string(code.substr(i, 2)), lineNum, col});
-            i += 2;
             continue;
         }
 

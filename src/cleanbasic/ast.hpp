@@ -27,20 +27,13 @@ constexpr uint32_t INVALID_ID = UINT32_MAX;
 // Types
 // ==========================================
 
-// Unified representation for primitive, container, user-defined, and function types.
+// Unified representation for primitive, container, and user-defined types.
 // - For generic containers (list[T], dict[K, V]), typeArgs stores the element/key/value TypeIds.
-// - For function reference types (fn(p1, ...) [as Ret] [can error]), name == "fn", typeArgs stores
-//   parameter TypeIds, paramByref tracks per-parameter 'byref' flags, returnType stores the return
-//   TypeId (or INVALID_ID for void), and isFallible records 'can error'. Sharing a single TypeNode
-//   layout enables O(1) structural type interning in AstArena.
 struct TypeNode {
     uint32_t line = 1;
     uint32_t col = 1;
     std::string name;
     std::vector<TypeId> typeArgs;
-    std::vector<bool> paramByref;
-    TypeId returnType = INVALID_ID;
-    bool isFallible = false;
 };
 
 struct Param {
@@ -49,8 +42,6 @@ struct Param {
     std::string name;
     TypeId typeId = INVALID_ID;
     bool isByref = false;
-    bool hasDefault = false;
-    ExprId defaultValue = INVALID_ID;
 };
 
 struct FieldDecl {
@@ -77,8 +68,6 @@ struct BoolLiteral {
     bool value = false;
 };
 
-struct NullLiteral {};
-
 struct Identifier {
     std::string name;
 };
@@ -104,15 +93,9 @@ struct IndexAccess {
     ExprId index = INVALID_ID;
 };
 
-struct NamedArg {
-    std::string name;
-    ExprId value = INVALID_ID;
-};
-
 struct FuncCall {
     ExprId callee = INVALID_ID;
     std::vector<ExprId> args;
-    std::vector<NamedArg> namedArgs;
 };
 
 struct ListLiteral {
@@ -132,7 +115,6 @@ using ExprVariant = std::variant<
     NumberLiteral,
     StringLiteral,
     BoolLiteral,
-    NullLiteral,
     Identifier,
     BinaryOp,
     UnaryOp,
@@ -204,8 +186,6 @@ struct RangeSpec {
     uint32_t col = 1;
     ExprId start = INVALID_ID;
     ExprId end = INVALID_ID;
-    bool hasStep = false;
-    ExprId step = INVALID_ID;
 };
 
 struct ForStmt {
@@ -230,10 +210,6 @@ struct SelectStmt {
     std::vector<StmtId> caseElse;
 };
 
-struct DeferStmt {
-    std::vector<StmtId> body;
-};
-
 struct WhileStmt {
     ExprId condition = INVALID_ID;
     std::vector<StmtId> body;
@@ -256,7 +232,6 @@ using StmtVariant = std::variant<
     WhileStmt,
     SelectStmt,
     TryCatchStmt,
-    DeferStmt,
     ReturnStmt,
     BreakStmt,
     ContinueStmt
@@ -292,15 +267,9 @@ struct TypeDecl {
     bool isExtern = false;
 };
 
-struct EnumMember {
-    std::string name;
-    bool hasValue = false;
-    int64_t value = 0;
-};
-
 struct EnumDecl {
     std::string name;
-    std::vector<EnumMember> members;
+    std::vector<std::string> members;
     bool isPub = false;
 };
 
@@ -436,27 +405,13 @@ struct AstArena {
     }
 
     TypeId findTypeNode(const TypeNode& node) const {
-        for (size_t i = 0; i < types.size(); ++i) {
-            const TypeNode& existing = types[i];
-            if (existing.name == node.name &&
-                existing.typeArgs == node.typeArgs &&
-                existing.paramByref == node.paramByref &&
-                existing.returnType == node.returnType &&
-                existing.isFallible == node.isFallible) {
-                return static_cast<TypeId>(i);
-            }
-        }
-        return INVALID_ID;
+        return findType(node.name, node.typeArgs);
     }
 
     TypeId findType(std::string_view name, const std::vector<TypeId>& typeArgs = {}) const {
         for (size_t i = 0; i < types.size(); ++i) {
             const TypeNode& existing = types[i];
-            if (existing.name == name &&
-                existing.typeArgs == typeArgs &&
-                existing.paramByref.empty() &&
-                existing.returnType == INVALID_ID &&
-                !existing.isFallible) {
+            if (existing.name == name && existing.typeArgs == typeArgs) {
                 return static_cast<TypeId>(i);
             }
         }

@@ -86,8 +86,6 @@ public:
     std::vector<std::string> lines;
     int indentLevel = 0;
     uint32_t tempCounter = 0;
-    uint32_t deferCounter = 0;
-    uint32_t deferDepth = 0;
     std::vector<std::string> catchErrStack;
     std::string currentModuleId = "";
     std::string currentFileName = "main.cb";
@@ -150,21 +148,6 @@ public:
         if (t.name == "err") return "CbError";
         if (t.name == "void") return "void";
         if (t.name == "auto") return "auto";
-        if (t.name == "cptr") return "void*";
-        if (t.name == "fn") {
-            const std::string ret = wrapFallibleReturnCppType(modId, t.returnType, t.isFallible);
-            std::string params;
-            for (size_t i = 0; i < t.typeArgs.size(); ++i) {
-                if (i > 0) params += ", ";
-                bool isByref = false;
-                if (i < t.paramByref.size()) {
-                    isByref = t.paramByref[i];
-                }
-                Param p{1, 1, "", t.typeArgs[i], isByref, false, INVALID_ID};
-                params += mapParamType(modId, p);
-            }
-            return "std::function<" + ret + "(" + params + ")>";
-        }
         if (t.name == "list") {
             std::string elem = "int64_t";
             if (!t.typeArgs.empty()) {
@@ -247,7 +230,7 @@ public:
 
     bool isPassByConstRefType(const TypeNode& resolved) const {
         if (resolved.name == "int" || resolved.name == "float" ||
-            resolved.name == "bool" || resolved.name == "cptr" ||
+            resolved.name == "bool" ||
             resolved.name == "void" || resolved.name == "auto") {
             return false;
         }
@@ -338,56 +321,13 @@ public:
     return rendered;
 }
 
-    std::vector<std::string> orderStructFields(
-    std::string_view typeName,
-    const std::vector<ExprId>& posArgs,
-    const std::vector<NamedArg>& namedArgs,
-    const std::unordered_map<std::string, VarSymbol>& scope
-) {
-    const std::string typeKey = resolveSymbolKey(symbols, currentModuleId, typeName);
-    const auto it = symbols.types.find(typeKey);
-    if (it == symbols.types.end() || it->second.fieldOrder.empty()) {
-        return emitExprList(posArgs, scope);
-    }
-    if (namedArgs.empty() && posArgs.size() == it->second.fieldOrder.size()) {
-        return emitExprList(posArgs, scope);
-    }
-    if (namedArgs.empty() && posArgs.empty()) {
-        return {};
-    }
-
-    std::unordered_map<std::string, ExprId> namedMap;
-    for (const auto& na : namedArgs) {
-        namedMap[na.name] = na.value;
-    }
-
-    std::vector<std::string> ordered;
-    ordered.reserve(it->second.fieldOrder.size());
-    for (size_t i = 0; i < it->second.fieldOrder.size(); ++i) {
-        const auto& fdecl = it->second.fieldOrder[i];
-        if (i < posArgs.size()) {
-            ordered.push_back(emitExpr(posArgs[i], scope));
-        } else {
-            const auto fit = namedMap.find(fdecl.name);
-            if (fit != namedMap.end()) {
-                ordered.push_back(emitExpr(fit->second, scope));
-            } else {
-                ordered.push_back(defaultValueForType(it->second.moduleId, fdecl.typeId));
-            }
-        }
-    }
-    return ordered;
-}
-
     std::string emitCallArgsJoined(
-    const FnSymbol& fnSym,
-    const std::vector<ExprId>& posArgs,
-    const std::vector<NamedArg>& namedArgs,
-    const std::unordered_map<std::string, VarSymbol>& scope
-) {
-    if (fnSym.params.empty() || (namedArgs.empty() && posArgs.size() >= fnSym.params.size())) {
+        const FnSymbol& fnSym,
+        const std::vector<ExprId>& posArgs,
+        const std::unordered_map<std::string, VarSymbol>& scope
+    ) {
         std::vector<std::string> rendered;
-        rendered.reserve(posArgs.size() + namedArgs.size());
+        rendered.reserve(posArgs.size());
         for (size_t i = 0; i < posArgs.size(); ++i) {
             bool isByrefParam = false;
             if (i < fnSym.params.size() && fnSym.params[i].isByref) {
@@ -395,38 +335,8 @@ public:
             }
             rendered.push_back(emitExpr(posArgs[i], scope, isByrefParam));
         }
-        for (const auto& na : namedArgs) {
-            rendered.push_back(emitExpr(na.value, scope));
-        }
         return joinStrings(rendered);
     }
-
-    std::unordered_map<std::string, ExprId> namedMap;
-    for (const auto& na : namedArgs) {
-        namedMap[na.name] = na.value;
-    }
-
-    std::vector<std::string> rendered;
-    rendered.reserve(fnSym.params.size());
-    for (size_t i = 0; i < fnSym.params.size(); ++i) {
-        const auto& p = fnSym.params[i];
-        if (i < posArgs.size()) {
-            rendered.push_back(emitExpr(posArgs[i], scope, p.isByref));
-        } else {
-            const auto nit = namedMap.find(p.name);
-            if (nit != namedMap.end()) {
-                rendered.push_back(emitExpr(nit->second, scope, p.isByref));
-            } else if (p.hasDefault && p.defaultValue != INVALID_ID) {
-                const std::string savedMod = currentModuleId;
-                currentModuleId = fnSym.moduleId;
-                std::unordered_map<std::string, VarSymbol> emptyScope;
-                rendered.push_back(emitExpr(p.defaultValue, emptyScope));
-                currentModuleId = savedMod;
-            }
-        }
-    }
-    return joinStrings(rendered);
-}
 
     std::string emitExpr(
         ExprId exprId,
@@ -438,10 +348,6 @@ public:
     }
 
     if (const auto* num = arena.getExpr<NumberLiteral>(exprId)) {
-        if (!num->isFloat && num->raw.size() >= 2 && num->raw[0] == '0' &&
-            (num->raw[1] == 'x' || num->raw[1] == 'X' || num->raw[1] == 'b' || num->raw[1] == 'B')) {
-            return "static_cast<int64_t>(" + num->raw + "ULL)";
-        }
         return num->raw;
     }
 
@@ -457,18 +363,10 @@ public:
         return "false";
     }
 
-    if (arena.getExpr<NullLiteral>(exprId) != nullptr) {
-        return "nullptr";
-    }
-
     if (const auto* ident = arena.getExpr<Identifier>(exprId)) {
         const auto cOpt = resolveConstSymbol(symbols, currentModuleId, scope, ident->name);
         if (cOpt.has_value()) {
             return cOpt->cppName;
-        }
-        const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
-        if (bareFnOpt.has_value()) {
-            return bareFnOpt->cppName;
         }
         return sanitizeCppIdent(ident->name);
     }
@@ -500,16 +398,12 @@ public:
 
     if (const auto* faccess = arena.getExpr<FieldAccess>(exprId)) {
         const auto enumOpt = resolveEnumMemberAccess(arena, symbols, currentModuleId, scope, *faccess);
-        if (enumOpt.has_value() && enumOpt->memberValues.count(faccess->fieldName) > 0) {
+        if (enumOpt.has_value() && enumOpt->memberSet.count(faccess->fieldName) > 0) {
             return enumOpt->cppName + "::" + sanitizeCppIdent(faccess->fieldName);
         }
         const auto cOpt = resolveModuleConstAccess(arena, symbols, currentModuleId, scope, *faccess);
         if (cOpt.has_value()) {
             return cOpt->cppName;
-        }
-        const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, currentModuleId);
-        if (bareFnOpt.has_value()) {
-            return bareFnOpt->cppName;
         }
         const TypeId tgtTid = exprType(faccess->target, scope);
         const auto tsOpt = resolveTypeSymbol(arena, symbols, currentModuleId, tgtTid);
@@ -567,8 +461,7 @@ public:
         }
         const auto structOpt = resolveStructConstructor(arena, *call, symbols, currentModuleId, scope);
         if (structOpt.has_value()) {
-            const auto ordered = orderStructFields(structOpt->key, call->args, call->namedArgs, scope);
-            return structOpt->cppName + "{" + joinStrings(ordered) + "}";
+            return structOpt->cppName + "{" + joinStrings(emitExprList(call->args, scope)) + "}";
         }
 
         const auto unionVarOpt = resolveUnionVariantConstructor(arena, *call, symbols, currentModuleId, scope);
@@ -616,18 +509,6 @@ public:
                     return "cbListRemoveAt(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "keys") {
                     return "cbDictKeys(" + recvCpp + ")";
-                } else if (fnSym->name == "bitAnd") {
-                    return "((" + recvCpp + ") & (" + emitExpr(call->args[0], scope) + "))";
-                } else if (fnSym->name == "bitOr") {
-                    return "((" + recvCpp + ") | (" + emitExpr(call->args[0], scope) + "))";
-                } else if (fnSym->name == "bitXor") {
-                    return "((" + recvCpp + ") ^ (" + emitExpr(call->args[0], scope) + "))";
-                } else if (fnSym->name == "bitNot") {
-                    return "(~(" + recvCpp + "))";
-                } else if (fnSym->name == "shl") {
-                    return "cbBitShl(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
-                } else if (fnSym->name == "shr") {
-                    return "cbBitShr(" + recvCpp + ", " + emitExpr(call->args[0], scope) + ")";
                 } else if (fnSym->name == "kind") {
                     return "cbUnionKind(" + recvCpp + ")";
                 } else if (fnSym->name == "byteAt") {
@@ -665,11 +546,7 @@ public:
                 }
                 posArgsPtr = &allPos;
             }
-            std::string calleeTargetCpp = fnSym->cppName;
-            if (fnSym->isFnValueCall) {
-                calleeTargetCpp = emitExpr(call->callee, scope);
-            }
-            return calleeTargetCpp + "(" + emitCallArgsJoined(*fnSym, *posArgsPtr, call->namedArgs, scope) + ")";
+            return fnSym->cppName + "(" + emitCallArgsJoined(*fnSym, *posArgsPtr, scope) + ")";
         }
 
         const std::string calleeCpp = emitExpr(call->callee, scope);
@@ -684,22 +561,12 @@ public:
         const std::unordered_map<std::string, VarSymbol>& scope
     ) {
         std::string msgCpp = R"(std::string(""))";
-        if (call.args.size() == 1) {
+        if (!call.args.empty()) {
             msgCpp = emitAsStrExpr(call.args[0], scope);
-        } else if (call.args.size() > 1) {
-            std::vector<std::string> parts;
-            parts.reserve(call.args.size());
-            for (const ExprId argId : call.args) {
-                parts.push_back(emitAsStrExpr(argId, scope));
-            }
-            msgCpp = "(" + joinStrings(parts, " + ") + ")";
         }
-
         std::string codeCpp = "1";
-        for (const auto& na : call.namedArgs) {
-            if (na.name == "code") {
-                codeCpp = emitExpr(na.value, scope);
-            }
+        if (call.args.size() >= 2) {
+            codeCpp = emitExpr(call.args[1], scope);
         }
         const auto& calleeNode = arena.exprs[call.callee];
         return "CbError{" + msgCpp + ", " + codeCpp + ", std::string(" + escapeFileName(currentFileName) + "), " + std::to_string(calleeNode.line) + "}";
@@ -720,22 +587,19 @@ public:
         return "cbAssertCond(" + condCpp + ", " + msgCpp + ", " + escapeFileName(currentFileName) + ", " + lineStr + ")";
     }
     std::string buildErrorBubbleReturn(
-    const FnDecl& fn,
-    std::string_view errVar
-) {
-    if (deferDepth > 0) {
-        return "return;";
+        const FnDecl& fn,
+        std::string_view errVar
+    ) {
+        if (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType)) {
+            return "return " + std::string(errVar) + ";";
+        }
+        const TypeNode tnode = resolveAliasNode(arena, symbols, currentModuleId, fn.returnType);
+        std::string elem = "{}";
+        if (tnode.name != "int" && tnode.name != "float" && tnode.name != "bool") {
+            elem = defaultValueForType(currentModuleId, fn.returnType);
+        }
+        return "return { " + elem + ", " + std::string(errVar) + " };";
     }
-    if (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType)) {
-        return "return " + std::string(errVar) + ";";
-    }
-    const TypeNode tnode = resolveAliasNode(arena, symbols, currentModuleId, fn.returnType);
-    std::string elem = "{}";
-    if (tnode.name != "int" && tnode.name != "float" && tnode.name != "bool" && tnode.name != "cptr") {
-        elem = defaultValueForType(currentModuleId, fn.returnType);
-    }
-    return "return { " + elem + ", " + std::string(errVar) + " };";
-}
 
     void emitStmtList(
     const FnDecl& fn,
@@ -907,10 +771,6 @@ public:
         const ReturnStmt& stmt,
         std::unordered_map<std::string, VarSymbol>& scope
     ) {
-        if (deferDepth > 0) {
-            emitLine("return;");
-            return;
-        }
         if (!stmt.hasValue) {
             if (fn.isFallible && (fn.returnType == INVALID_ID || arena.isVoid(fn.returnType))) {
                 emitLine(R"(return CbError{"", 0};)");
@@ -1009,35 +869,11 @@ public:
             const std::string cppLoopVar = sanitizeCppIdent(loopVar);
             const std::string startCpp = emitExpr(forS->rangeSpec.start, scope);
             const std::string endCpp = emitExpr(forS->rangeSpec.end, scope);
-            std::string stepCpp = "1";
-            bool isKnownPositiveStep = true;
-            bool isKnownNegativeStep = false;
-            if (forS->rangeSpec.hasStep) {
-                stepCpp = emitExpr(forS->rangeSpec.step, scope);
-                isKnownPositiveStep = false;
-                if (arena.getExpr<NumberLiteral>(forS->rangeSpec.step) != nullptr) {
-                    isKnownPositiveStep = true;
-                } else if (const auto* uop = arena.getExpr<UnaryOp>(forS->rangeSpec.step)) {
-                    if (uop->op == "-" && arena.getExpr<NumberLiteral>(uop->operand) != nullptr) {
-                        isKnownNegativeStep = true;
-                    } else if (uop->op == "+" && arena.getExpr<NumberLiteral>(uop->operand) != nullptr) {
-                        isKnownPositiveStep = true;
-                    }
-                }
-            }
-            std::string condCpp;
-            if (isKnownPositiveStep) {
-                condCpp = cppLoopVar + " <= " + endCpp;
-            } else if (isKnownNegativeStep) {
-                condCpp = cppLoopVar + " >= " + endCpp;
-            } else {
-                condCpp = "cbRangeCond(" + cppLoopVar + ", " + endCpp + ", " + stepCpp + ")";
-            }
 
             auto loopScope = scope;
             loopScope[loopVar] = VarSymbol{loopVar, symbols.typeInt, false};
 
-            emitLine("for (int64_t " + cppLoopVar + " = " + startCpp + "; " + condCpp + "; " + cppLoopVar + " += " + stepCpp + ") {");
+            emitLine("for (int64_t " + cppLoopVar + " = " + startCpp + "; " + cppLoopVar + " <= " + endCpp + "; " + cppLoopVar + " += 1) {");
             indentLevel += 1;
             emitStmtList(fn, forS->body, loopScope);
             indentLevel -= 1;
@@ -1251,22 +1087,6 @@ public:
         return;
     }
 
-    if (const auto* defS = arena.getStmt<DeferStmt>(stmtId)) {
-        deferCounter += 1;
-        const std::string deferVar = "_defer_" + std::to_string(deferCounter);
-        emitLine("auto " + deferVar + " = cbDefer([&]() {");
-        indentLevel += 1;
-        deferDepth += 1;
-        const auto savedCatchStack = catchErrStack;
-        catchErrStack.clear();
-        emitStmtList(fn, defS->body, scope);
-        catchErrStack = savedCatchStack;
-        deferDepth -= 1;
-        indentLevel -= 1;
-        emitLine("});");
-        return;
-    }
-
     if (const auto* retS = arena.getStmt<ReturnStmt>(stmtId)) {
         emitReturn(stmtNode.line, fn, *retS, scope);
         return;
@@ -1285,35 +1105,31 @@ public:
 
     void emitEnumDecl(const EnumDecl& ed) {
         const std::string cppName = lookupSymbolCppName(symbols.enums, currentModuleId, ed.name);
-    emitLine("enum class " + cppName + " : int64_t {");
-    indentLevel += 1;
-    for (size_t i = 0; i < ed.members.size(); ++i) {
-        const auto& m = ed.members[i];
-        std::string line = sanitizeCppIdent(m.name);
-        if (m.hasValue) {
-            line += " = " + std::to_string(m.value);
+        emitLine("enum class " + cppName + " : int64_t {");
+        indentLevel += 1;
+        for (size_t i = 0; i < ed.members.size(); ++i) {
+            std::string line = sanitizeCppIdent(ed.members[i]);
+            if (i + 1 < ed.members.size()) {
+                line += ",";
+            }
+            emitLine(line);
         }
-        if (i + 1 < ed.members.size()) {
-            line += ",";
+        indentLevel -= 1;
+        emitLine("};");
+        emitLine("inline std::string cbToStr(" + cppName + " val) {");
+        indentLevel += 1;
+        emitLine("switch (val) {");
+        indentLevel += 1;
+        const std::string q(1, '"');
+        for (const auto& m : ed.members) {
+            emitLine("case " + cppName + "::" + sanitizeCppIdent(m) + ": return std::string(" + q + m + q + ");");
         }
-        emitLine(line);
+        emitLine("default: return std::string();");
+        indentLevel -= 1;
+        emitLine("}");
+        indentLevel -= 1;
+        emitLine("}");
     }
-    indentLevel -= 1;
-    emitLine("};");
-    emitLine("inline std::string cbToStr(" + cppName + " val) {");
-    indentLevel += 1;
-    emitLine("switch (val) {");
-    indentLevel += 1;
-    const std::string q(1, '"');
-    for (const auto& m : ed.members) {
-        emitLine("case " + cppName + "::" + sanitizeCppIdent(m.name) + ": return std::string(" + q + m.name + q + ");");
-    }
-    emitLine("default: return std::string();");
-    indentLevel -= 1;
-    emitLine("}");
-    indentLevel -= 1;
-    emitLine("}");
-}
     void emitStructDecl(const TypeDecl& td) {
         const std::string cppName = lookupSymbolCppName(symbols.types, currentModuleId, td.name);
         emitLine("struct " + cppName + " {");
@@ -1449,15 +1265,6 @@ public:
     }
 
     std::string emitProgram(const Program& program) {
-    if (!symbols.linkLibs.empty()) {
-        std::string flags;
-        for (size_t i = 0; i < symbols.linkLibs.size(); ++i) {
-            if (i > 0) flags += " ";
-            flags += "-l" + symbols.linkLibs[i];
-        }
-        emitLine("// CleanBasic Linker Flags: " + flags);
-    }
-
     lines.push_back(std::string(CPP_RUNTIME_PREAMBLE));
 
     if (!symbols.headers.empty()) {

@@ -59,7 +59,7 @@ fn scanTrimmedLine(trimmed as str) as LineScan
         const b = trimmed.byteAt(i)
         if inNormalString
             if b == 92
-                i += 2
+                i = i + 2
                 continue
             end if
             if b == 34
@@ -67,18 +67,18 @@ fn scanTrimmedLine(trimmed as str) as LineScan
             end if
         else if inInterpString
             if b == 92
-                i += 2
+                i = i + 2
                 continue
             end if
             if b == 123
                 if i + 1 < n and trimmed.byteAt(i + 1) == 123
-                    i += 2
+                    i = i + 2
                     continue
                 end if
                 interpBraceStack.push(braceDepth)
                 inInterpString = false
             else if b == 125 and i + 1 < n and trimmed.byteAt(i + 1) == 125
-                i += 2
+                i = i + 2
                 continue
             else if b == 34
                 inInterpString = false
@@ -86,25 +86,25 @@ fn scanTrimmedLine(trimmed as str) as LineScan
         else
             if b == 36 and i + 1 < n and trimmed.byteAt(i + 1) == 34
                 inInterpString = true
-                i += 2
+                i = i + 2
                 continue
             else if b == 34
                 inNormalString = true
             else if b == 123
-                braceDepth += 1
+                braceDepth = braceDepth + 1
             else if b == 125
                 if interpBraceStack.len() > 0 and braceDepth == interpBraceStack[interpBraceStack.len() - 1]
                     interpBraceStack.pop()
                     inInterpString = true
                 else if braceDepth > 0
-                    braceDepth -= 1
+                    braceDepth = braceDepth - 1
                 end if
             else if b == 39 or b == 35
                 commentIdx = i
                 break
             end if
         end if
-        i += 1
+        i = i + 1
     end while
 
     dim codePart = trimmed
@@ -124,8 +124,8 @@ fn scanTrimmedLine(trimmed as str) as LineScan
     while k < codeLen
         const cb = codePart.byteAt(k)
         if cb == 41 or cb == 93 or cb == 125
-            leadingClose += 1
-            k += 1
+            leadingClose = leadingClose + 1
+            k = k + 1
         else
             break
         end if
@@ -140,7 +140,7 @@ fn scanTrimmedLine(trimmed as str) as LineScan
         const b = codePart.byteAt(k)
         if inNormalString
             if b == 92
-                k += 2
+                k = k + 2
                 continue
             end if
             if b == 34
@@ -148,18 +148,18 @@ fn scanTrimmedLine(trimmed as str) as LineScan
             end if
         else if inInterpString
             if b == 92
-                k += 2
+                k = k + 2
                 continue
             end if
             if b == 123
                 if k + 1 < codeLen and codePart.byteAt(k + 1) == 123
-                    k += 2
+                    k = k + 2
                     continue
                 end if
                 interpBraceStack.push(braceDepth)
                 inInterpString = false
             else if b == 125 and k + 1 < codeLen and codePart.byteAt(k + 1) == 125
-                k += 2
+                k = k + 2
                 continue
             else if b == 34
                 inInterpString = false
@@ -167,37 +167,37 @@ fn scanTrimmedLine(trimmed as str) as LineScan
         else
             if b == 36 and k + 1 < codeLen and codePart.byteAt(k + 1) == 34
                 inInterpString = true
-                k += 2
+                k = k + 2
                 continue
             else if b == 34
                 inNormalString = true
             else if b == 123
-                braceDepth += 1
-                trailingDelta += 1
+                braceDepth = braceDepth + 1
+                trailingDelta = trailingDelta + 1
             else if b == 125
                 if interpBraceStack.len() > 0 and braceDepth == interpBraceStack[interpBraceStack.len() - 1]
                     interpBraceStack.pop()
                     inInterpString = true
                 else
                     if braceDepth > 0
-                        braceDepth -= 1
+                        braceDepth = braceDepth - 1
                     end if
-                    trailingDelta -= 1
+                    trailingDelta = trailingDelta - 1
                 end if
             else if b == 40 or b == 91
-                trailingDelta += 1
+                trailingDelta = trailingDelta + 1
             else if b == 41 or b == 93
-                trailingDelta -= 1
+                trailingDelta = trailingDelta - 1
             end if
         end if
-        k += 1
+        k = k + 1
     end while
 
     return LineScan(
-        codePart=codePart,
-        normalizedLine=normalizedLine,
-        leadingClose=leadingClose,
-        trailingDelta=trailingDelta
+        codePart,
+        normalizedLine,
+        leadingClose,
+        trailingDelta
     )
 end fn
 
@@ -224,7 +224,7 @@ fn isStandardBlockCloser(codePart as str) as bool
     if codePart == "end if" or codePart == "end for" or codePart == "end while"
         return true
     end if
-    if codePart == "end try" or codePart == "end defer"
+    if codePart == "end try"
         return true
     end if
     return false
@@ -268,9 +268,6 @@ fn isStandardBlockOpener(codePart as str) as bool
     if codePart == "try"
         return true
     end if
-    if codePart == "defer"
-        return true
-    end if
 
     const core = stripModifiers(codePart)
     const hasExtern = codePart.startsWith("extern ") or codePart.contains(" extern ")
@@ -295,7 +292,7 @@ fn consumeBrackets(byref bracketStack as list[int], count as int)
         const topIdx = bracketStack.len() - 1
         const topVal = bracketStack[topIdx]
         if topVal <= rem
-            rem -= topVal
+            rem = rem - topVal
             bracketStack.pop()
         else
             bracketStack[topIdx] = topVal - rem
@@ -305,7 +302,7 @@ fn consumeBrackets(byref bracketStack as list[int], count as int)
 end fn
 
 '' Formats a CleanBasic source string using the specified indentation width in spaces.
-public fn formatSource(source as str, indentWidth as int = 4) as str
+public fn formatSource(source as str, indentWidth as int) as str
     const lines = source.lines()
     const indentUnit = " ".repeat(indentWidth)
 
@@ -343,19 +340,19 @@ public fn formatSource(source as str, indentWidth as int = 4) as str
                 if selectStack.len() > 0
                     const hadCase = selectStack.pop()
                     if hadCase
-                        blockIndent -= 2
+                        blockIndent = blockIndent - 2
                     else
-                        blockIndent -= 1
+                        blockIndent = blockIndent - 1
                     end if
                 else
-                    blockIndent -= 1
+                    blockIndent = blockIndent - 1
                 end if
                 if blockIndent < 0
                     blockIndent = 0
                 end if
                 lineBlockIndent = blockIndent
             else if isStandardBlockCloser(codePart)
-                blockIndent -= 1
+                blockIndent = blockIndent - 1
                 if blockIndent < 0
                     blockIndent = 0
                 end if
@@ -369,7 +366,7 @@ public fn formatSource(source as str, indentWidth as int = 4) as str
                 if selectStack.len() > 0
                     const topIdx = selectStack.len() - 1
                     if selectStack[topIdx]
-                        blockIndent -= 1
+                        blockIndent = blockIndent - 1
                         if blockIndent < 0
                             blockIndent = 0
                         end if
@@ -404,12 +401,12 @@ public fn formatSource(source as str, indentWidth as int = 4) as str
 
         if afterBlockDelta > 0
             if bracketStack.len() == 0
-                blockIndent += afterBlockDelta
+                blockIndent = blockIndent + afterBlockDelta
             else
-                pendingBlockIndent += afterBlockDelta
+                pendingBlockIndent = pendingBlockIndent + afterBlockDelta
             end if
         else if bracketStack.len() == 0 and pendingBlockIndent > 0
-            blockIndent += pendingBlockIndent
+            blockIndent = blockIndent + pendingBlockIndent
             pendingBlockIndent = 0
         end if
     end for
@@ -446,13 +443,13 @@ end fn
 '' Configures the CLI parser for cbfmt.
 fn buildParser() as cli.Parser
     dim p = cli.newParser(
-        name="cbfmt",
-        version="1.0",
-        description="Format CleanBasic (.cb) source files"
+        "cbfmt",
+        "1.0",
+        "Format CleanBasic (.cb) source files"
     )
     p.addFlag("write", "w", "Write formatted output back to source files in place")
     p.addFlag("check", "c", "Check if files are formatted (exits with 1 if any file differs)")
-    p.addOption("indent", "i", "Indentation width in spaces", defaultVal="4")
+    p.addOption("indent", "i", "Indentation width in spaces", "4")
     return p
 end fn
 
@@ -517,7 +514,7 @@ fn main() as int
                         if checkOnly
                             if original != formatted
                                 os.eprint($"cbfmt: {filePath}: needs formatting")
-                                unformattedCount += 1
+                                unformattedCount = unformattedCount + 1
                             end if
                         else if writeInPlace
                             if original != formatted

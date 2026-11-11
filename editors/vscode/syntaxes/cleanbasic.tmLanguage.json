@@ -86,11 +86,11 @@
       "patterns": [
         {
           "name": "keyword.control.multiword.cleanbasic",
-          "match": "\\b(?:import\\s+header|import\\s+link|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+enum|end\\s+union|end\\s+for|end\\s+while|end\\s+defer|end\\s+try|can\\s+error)\\b"
+          "match": "\\b(?:import\\s+header|select\\s+case|case\\s+else|end\\s+select|else\\s+if|end\\s+if|end\\s+fn|end\\s+type|end\\s+enum|end\\s+union|end\\s+for|end\\s+while|end\\s+try|can\\s+error)\\b"
         },
         {
           "name": "keyword.control.cleanbasic",
-          "match": "\\b(?:import|as|public|extern|type|enum|union|fn|return|if|else|while|for|to|step|in|case|try|catch|defer|break|continue)\\b"
+          "match": "\\b(?:import|as|public|extern|type|enum|union|fn|return|if|else|while|for|to|in|case|try|catch|break|continue)\\b"
         },
         {
           "name": "storage.modifier.cleanbasic",
@@ -106,7 +106,7 @@
       "patterns": [
         {
           "name": "storage.type.primitive.cleanbasic",
-          "match": "\\b(?:int|float|str|bool|cptr|err|list|dict)\\b"
+          "match": "\\b(?:int|float|str|bool|err|list|dict)\\b"
         }
       ]
     },
@@ -118,7 +118,7 @@
         },
         {
           "name": "support.function.builtin.method.cleanbasic",
-          "match": "\\.(?:len|toStr|toInt|toFloat|push|pop|clear|get|has|remove|keys|contains|sort|removeAt|slice|sliceFrom|byteAt|bitAnd|bitOr|bitXor|bitNot|shl|shr|kind)(?=\\s*\\()"
+          "match": "\\.(?:len|toStr|toInt|toFloat|push|pop|clear|get|has|remove|keys|contains|sort|removeAt|slice|sliceFrom|byteAt|kind)(?=\\s*\\()"
         }
       ]
     },
@@ -127,30 +127,18 @@
         {
           "name": "constant.language.boolean.cleanbasic",
           "match": "\\b(?:true|false)\\b"
-        },
-        {
-          "name": "constant.language.null.cleanbasic",
-          "match": "\\bnull\\b"
         }
       ]
     },
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.hex.cleanbasic",
-          "match": "\\b0x[0-9a-fA-F_]+\\b"
-        },
-        {
-          "name": "constant.numeric.binary.cleanbasic",
-          "match": "\\b0b[01_]+\\b"
-        },
-        {
           "name": "constant.numeric.float.cleanbasic",
-          "match": "\\b[0-9_]+\\.[0-9_]+\\b"
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
         },
         {
           "name": "constant.numeric.integer.cleanbasic",
-          "match": "\\b[0-9_]+\\b"
+          "match": "\\b[0-9]+\\b"
         }
       ]
     },
@@ -159,10 +147,6 @@
         {
           "name": "keyword.operator.comparison.cleanbasic",
           "match": "==|!=|<=|>=|<|>"
-        },
-        {
-          "name": "keyword.operator.assignment.compound.cleanbasic",
-          "match": "\\+=|-=|\\*=|/=|%=|&="
         },
         {
           "name": "keyword.operator.arithmetic.cleanbasic",

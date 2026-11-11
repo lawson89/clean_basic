@@ -87,7 +87,6 @@ struct BuildFileResult {
     std::string outputCppPath;
     std::string outputBinaryPath;
     std::string compileCommand;
-    std::vector<std::string> linkerFlags;
     DiagnosticError error;
     BuildTimings timings{};
 };
@@ -582,7 +581,6 @@ inline std::string buildCompileCommand(
     std::string_view inputParentDir,
     std::string_view outCppPath,
     std::string_view binPath,
-    const std::vector<std::string>& linkerFlags,
     std::string_view optLevel = "0",
     std::string_view pchHeaderPath = "",
     bool staticLink = false,
@@ -617,9 +615,6 @@ inline std::string buildCompileCommand(
         " -I" + q + std::string(inputParentDir) + q +
         " " + q + std::string(outCppPath) + q +
         " -o " + q + std::string(binPath) + q;
-    for (const auto& flag : linkerFlags) {
-        cmd += " " + flag;
-    }
     return cmd;
 }
 
@@ -1016,12 +1011,6 @@ inline BuildFileResult buildFileWithOptions(
     outFile << transRes.cppCode;
     outFile.close();
 
-    std::vector<std::string> linkerFlags;
-    linkerFlags.reserve(transRes.symbols.linkLibs.size());
-    for (const auto& lib : transRes.symbols.linkLibs) {
-        linkerFlags.push_back("-l" + lib);
-    }
-
     std::string optLevel = options.optLevel;
     if (optLevel.empty()) {
         if (options.isRelease) {
@@ -1055,7 +1044,6 @@ inline BuildFileResult buildFileWithOptions(
             parentDir,
             outCpp,
             binPath,
-            linkerFlags,
             optLevel,
             pchRes.headerPath,
             options.staticLink,
@@ -1077,7 +1065,6 @@ inline BuildFileResult buildFileWithOptions(
                 parentDir,
                 outCpp,
                 binPath,
-                linkerFlags,
                 optLevel,
                 "",
                 options.staticLink,
@@ -1100,7 +1087,6 @@ inline BuildFileResult buildFileWithOptions(
                 parentDir,
                 outCpp,
                 binPath,
-                linkerFlags,
                 optLevel,
                 retryPchHeader,
                 false,
@@ -1119,7 +1105,6 @@ inline BuildFileResult buildFileWithOptions(
             res.outputCppPath = outCpp;
             res.outputBinaryPath = binPath;
             res.compileCommand = compileCmd;
-            res.linkerFlags = linkerFlags;
             res.timings = timings;
             res.error = makeError(
                 "CompilationError",
@@ -1137,7 +1122,6 @@ inline BuildFileResult buildFileWithOptions(
     res.outputCppPath = outCpp;
     res.outputBinaryPath = binPath;
     res.compileCommand = compileCmd;
-    res.linkerFlags = std::move(linkerFlags);
     res.timings = timings;
     return res;
 }

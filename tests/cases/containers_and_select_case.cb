@@ -34,7 +34,7 @@ type NodeArena
 end type
 
 fn bumpNode(byref n as NodeEntry, extra as int)
-    n.line += extra
+    n.line = n.line + extra
     n.vals.push(extra)
 end fn
 
@@ -42,7 +42,7 @@ fn inspectReadOnlyArena(arena as NodeArena) as str
     dim totalVals = 0
     for node in arena.nodes
         for v in node.vals
-            totalVals += v
+            totalVals = totalVals + v
         end for
     end for
     dim n0Line = arena.nodes[0].line
@@ -97,17 +97,17 @@ fn testContinueAndEmptyInference()
         if i == 3
             continue
         end if
-        forSum += i
+        forSum = forSum + i
     end for
 
     dim n = 0
     dim whileSum = 0
     while n < 5
-        n += 1
+        n = n + 1
         if n == 2
             continue
         end if
-        whileSum += n
+        whileSum = whileSum + n
     end while
 
     dim el = makeEmptyList()
@@ -121,7 +121,7 @@ fn testIndexedLoops()
     dim names as list[str] = ["alice", "bob"]
     dim nameOut = ""
     for i = 0 to names.len() - 1
-        nameOut &= $"{i}:{names[i]}|"
+        nameOut = nameOut & $"{i}:{names[i]}|"
     end for
     print($"indexed: {nameOut}")
 end fn
@@ -155,12 +155,12 @@ fn main()
     dim d as dict[str, int] = {"gamma": 3, "alpha": 1, "beta": 2}
     dim kout = ""
     for k in d.keys()
-        kout &= k & ","
+        kout = kout & k & ","
     end for
     print("keys: " & kout)
 
     dim arena = NodeArena()
-    arena.nodes.push(NodeEntry(line=2, vals=[25], tags={"x": 10}))
+    arena.nodes.push(NodeEntry(2, [25], {"x": 10}))
     arena.nodes[0].tags["x"] = 99
     arena.modules["root"]["hero"] = "entities/hero"
     bumpNode(arena.nodes[0], 10)

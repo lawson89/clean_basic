@@ -1,7 +1,6 @@
 ' EXPECT_CPP: localUnreferencedHelper(
 ' EXPECT_CPP: cb_helper__usedPublic(
 ' EXPECT_CPP: cb_helper__transitiveInternal(
-' EXPECT_CPP: cb_helper__defaultParamHelper(
 ' EXPECT_CPP: cb_helper__bareRefTarget(
 ' EXPECT_CPP: cb_std_fs__exists(
 ' EXPECT_CPP: cb_std_os__platform(
@@ -16,17 +15,13 @@ import "helper.cb"
 import "std/fs"
 import "std/os"
 
-fn applyFn(f as fn(int) as int, x as int) as int
-    return f(x)
-end fn
-
 fn localUnreferencedHelper() as int
     return 123
 end fn
 
 fn main() as int
-    dim r1 = helper.usedPublic(10)
-    dim r2 = applyFn(helper.bareRefTarget, r1)
+    dim r1 = helper.usedPublic(10, 7)
+    dim r2 = helper.bareRefTarget(r1)
     if fs.exists("README.md") and os.platform().len() > 0
         print("treeShakingResult=" & r2.toStr())
     end if

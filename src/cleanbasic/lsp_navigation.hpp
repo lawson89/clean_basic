@@ -32,7 +32,7 @@ inline void handleDocumentSymbolRequest(LspServerState& state, const JsonArena& 
                     const JsonId symObj = makeLspDocSymbol(outArena, ed->name, "enum", 10, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol);
                     const JsonId childrenArr = jsonAddArray(outArena);
                     for (const auto& m : ed->members) {
-                        jsonArrayPush(outArena, childrenArr, makeLspDocSymbol(outArena, m.name, "member", 22, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
+                        jsonArrayPush(outArena, childrenArr, makeLspDocSymbol(outArena, m, "member", 22, dn.line, dn.col, dn.endLine, dn.nameLine, dn.nameCol));
                     }
                     jsonObjectSet(outArena, symObj, "children", childrenArr);
                     jsonArrayPush(outArena, symbolsArr, symObj);
@@ -191,9 +191,8 @@ inline ResolvedCursorSymbol resolveCursorSymbolInfo(const LspDocumentSnapshot& s
         if (activeScope.find(recv) == activeScope.end()) {
             const auto enumOpt = resolveEnumSymbol(snap.arena, snap.symbols, currentModId, recv);
             if (enumOpt.has_value()) {
-                const auto vit = enumOpt->memberValues.find(member);
-                if (vit != enumOpt->memberValues.end()) {
-                    res.hoverMarkdown = wrapVbCodeBlock("(enum member) " + enumOpt->name + "." + member + " = " + std::to_string(vit->second));
+                if (enumOpt->memberSet.count(member) > 0) {
+                    res.hoverMarkdown = wrapVbCodeBlock("(enum member) " + enumOpt->name + "." + member);
                     if (!enumOpt->fileName.empty()) {
                         res.definition = makeDefTarget(enumOpt->fileName, enumOpt->line, enumOpt->col, enumOpt->name.size());
                     }

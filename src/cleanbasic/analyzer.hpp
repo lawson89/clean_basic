@@ -32,7 +32,7 @@ public:
     }
 
     void recordCalleeEdge(const FnSymbol& fnSym) {
-        if (fnSym.isBuiltinReceiver || fnSym.isFnValueCall) {
+        if (fnSym.isBuiltinReceiver) {
             return;
         }
         const std::string calleeKey = symbolKey(fnSym.moduleId, fnSym.name);
@@ -74,21 +74,6 @@ public:
             return findRootVar(ia->target, scope);
         }
         return {};
-    }
-
-    void validateNonNullTarget(
-        uint32_t line,
-        uint32_t col,
-        TypeId targetTid,
-        ExprId valExprId
-    ) const {
-        if (arena.getExpr<NullLiteral>(valExprId) == nullptr) {
-            return;
-        }
-        const TypeId resolvedTarget = resolveAlias(arena, symbols, moduleId, targetTid);
-        if (resolvedTarget != symbols.typeCptr) {
-            setAnalyzerError(line, col, "CleanBasic types use non-nullable value semantics; only 'cptr' can be 'null'.");
-        }
     }
 
     void checkFallibleUsage(
@@ -176,11 +161,6 @@ public:
         const auto& exprNode = arena.exprs[exprId];
 
         if (arena.getExpr<Identifier>(exprId) != nullptr) {
-            const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, moduleId);
-            if (bareFnOpt.has_value()) {
-                recordCalleeEdge(*bareFnOpt);
-                checkCrossModuleAccess(exprNode.line, exprNode.col, "Function", *bareFnOpt);
-            }
             return;
         }
 
@@ -194,9 +174,6 @@ public:
                 }
                 if (call->args.size() > 2) {
                     setAnalyzerError(exprNode.line, exprNode.col, "'assert(...)' accepts at most 2 arguments (condition, [message]).");
-                }
-                if (!call->namedArgs.empty()) {
-                    setAnalyzerError(exprNode.line, exprNode.col, "Named arguments are not supported in 'assert(...)'.");
                 }
                 const TypeId condTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[0], scope));
                 if (condTid != symbols.typeBool && condTid != symbols.typeAuto) {
@@ -223,11 +200,13 @@ public:
                 if (call->args.empty()) {
                     setAnalyzerError(exprNode.line, exprNode.col, "'error(...)' requires at least one message argument.");
                 }
-                for (const auto& namedArg : call->namedArgs) {
-                    if (namedArg.name != "code") {
-                        std::string msg = "Unknown named argument '" + namedArg.name +
-                            "' in 'error(...)'; only 'code=' is supported.";
-                        setAnalyzerError(exprNode.line, exprNode.col, msg);
+                if (call->args.size() > 2) {
+                    setAnalyzerError(exprNode.line, exprNode.col, "'error(...)' accepts at most 2 arguments (message, [code]).");
+                }
+                if (call->args.size() == 2) {
+                    const TypeId codeTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[1], scope));
+                    if (codeTid != symbols.typeInt && codeTid != symbols.typeAuto) {
+                        setAnalyzerError(exprNode.line, exprNode.col, "Second argument to 'error(...)' (code) must be of type 'int'.");
                     }
                 }
             }
@@ -251,15 +230,10 @@ public:
                     const size_t pIdx = paramOffset + aIdx;
                     if (pIdx < fnSym.params.size()) {
                         const TypeId expectedParamTid = resolveAlias(arena, symbols, moduleId, fnSym.params[pIdx].typeId);
-                        validateNonNullTarget(exprNode.line, exprNode.col, expectedParamTid, call->args[aIdx]);
                         const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[aIdx], scope));
                         if (fnSym.isBuiltinReceiver) {
                             if (expectedParamTid != symbols.typeAuto && actualArgTid != symbols.typeAuto && expectedParamTid != actualArgTid) {
                                 setAnalyzerError(exprNode.line, exprNode.col, "Type mismatch for parameter '" + fnSym.params[pIdx].name + "' in call to '." + fnSym.name + "()'.");
-                            }
-                        } else if (expectedParamTid < arena.types.size() && arena.types[expectedParamTid].name == "fn") {
-                            if (actualArgTid != symbols.typeAuto && actualArgTid != expectedParamTid) {
-                                setAnalyzerError(exprNode.line, exprNode.col, "Function reference type mismatch for parameter '" + fnSym.params[pIdx].name + "' in call to '" + fnSym.name + "'.");
                             }
                         }
                         if (fnSym.params[pIdx].isByref) {
@@ -269,40 +243,14 @@ public:
                 }
 
                 const bool isBuiltinPrint = (fnSym.name == "print" && fnSym.moduleId.empty());
-                for (const auto& namedArg : call->namedArgs) {
-                    bool foundParam = false;
-                    for (const auto& p : fnSym.params) {
-                        if (p.name == namedArg.name) {
-                            foundParam = true;
-                            validateNonNullTarget(exprNode.line, exprNode.col, p.typeId, namedArg.value);
-                            if (p.isByref) {
-                                validateByrefArg(exprNode.line, exprNode.col, namedArg.value, scope, fnSym, p.name);
-                            }
-                            break;
-                        }
-                    }
-                    if (!foundParam && !isBuiltinPrint) {
-                        setAnalyzerError(exprNode.line, exprNode.col, "Unknown named argument '" + namedArg.name + "' in call to '" + fnSym.name + "'.");
-                    }
-                }
-
                 if (!isBuiltinPrint) {
-                    const size_t totalProvided = paramOffset + call->args.size() + call->namedArgs.size();
+                    const size_t totalProvided = paramOffset + call->args.size();
                     if (totalProvided > fnSym.params.size()) {
                         setAnalyzerError(exprNode.line, exprNode.col, "Too many arguments in call to '" + fnSym.name + "'.");
                     }
-                    for (size_t pIdx = paramOffset + call->args.size(); pIdx < fnSym.params.size(); ++pIdx) {
-                        const auto& p = fnSym.params[pIdx];
-                        bool providedByName = false;
-                        for (const auto& na : call->namedArgs) {
-                            if (na.name == p.name) {
-                                providedByName = true;
-                                break;
-                            }
-                        }
-                        if (!providedByName && !p.hasDefault) {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Missing required argument for parameter '" + p.name + "' in call to '" + fnSym.name + "'.");
-                        }
+                    if (totalProvided < fnSym.params.size()) {
+                        const auto& p = fnSym.params[totalProvided];
+                        setAnalyzerError(exprNode.line, exprNode.col, "Missing required argument for parameter '" + p.name + "' in call to '" + fnSym.name + "'.");
                     }
                 }
 
@@ -332,16 +280,8 @@ public:
                     if (structOpt->isExtern && structOpt->fieldOrder.empty()) {
                         setAnalyzerError(exprNode.line, exprNode.col, "Cannot directly construct opaque extern type '" + structOpt->name + "'.");
                     }
-                    for (size_t aIdx = 0; aIdx < call->args.size() && aIdx < structOpt->fieldOrder.size(); ++aIdx) {
-                        validateNonNullTarget(exprNode.line, exprNode.col, structOpt->fieldOrder[aIdx].typeId, call->args[aIdx]);
-                    }
-                    for (const auto& na : call->namedArgs) {
-                        const auto fit = structOpt->fields.find(na.name);
-                        if (fit != structOpt->fields.end()) {
-                            validateNonNullTarget(exprNode.line, exprNode.col, fit->second, na.value);
-                        } else {
-                            setAnalyzerError(exprNode.line, exprNode.col, "Unknown field '" + na.name + "' in constructor for '" + structOpt->name + "'.");
-                        }
+                    if (!call->args.empty() && call->args.size() != structOpt->fieldOrder.size()) {
+                        setAnalyzerError(exprNode.line, exprNode.col, "Constructor for '" + structOpt->name + "' expects 0 or " + std::to_string(structOpt->fieldOrder.size()) + " positional arguments (got " + std::to_string(call->args.size()) + ").");
                     }
                 }
 
@@ -353,11 +293,10 @@ public:
                         if (vTypeIt == uOpt->variantTypes.end()) {
                             setAnalyzerError(exprNode.line, exprNode.col, "Union '" + uOpt->name + "' has no variant '" + fa->fieldName + "'.");
                         }
-                        if (!call->namedArgs.empty() || call->args.size() != 1) {
+                        if (call->args.size() != 1) {
                             setAnalyzerError(exprNode.line, exprNode.col, "Union variant constructor '" + uOpt->name + "." + fa->fieldName + "(...)' requires exactly 1 positional argument.");
                         }
                         const TypeId expectedPayloadTid = resolveAlias(arena, symbols, uOpt->moduleId, vTypeIt->second);
-                        validateNonNullTarget(exprNode.line, exprNode.col, expectedPayloadTid, call->args[0]);
                         const TypeId actualArgTid = resolveAlias(arena, symbols, moduleId, inferExpr(call->args[0], scope));
                         if (expectedPayloadTid != symbols.typeAuto && actualArgTid != symbols.typeAuto && expectedPayloadTid != actualArgTid) {
                             setAnalyzerError(exprNode.line, exprNode.col, "Argument type does not match payload type for union variant '" + uOpt->name + "." + fa->fieldName + "'.");
@@ -376,9 +315,6 @@ public:
             for (const ExprId argId : call->args) {
                 validateExprCalls(fn, argId, scope, false);
             }
-            for (const auto& namedArg : call->namedArgs) {
-                validateExprCalls(fn, namedArg.value, scope, false);
-            }
             return;
         }
 
@@ -387,14 +323,6 @@ public:
             validateExprCalls(fn, bop->right, scope, false);
             const TypeId lt = inferExpr(bop->left, scope);
             const TypeId rt = inferExpr(bop->right, scope);
-            if (bop->op == "==" || bop->op == "!=") {
-                if (arena.getExpr<NullLiteral>(bop->left) != nullptr && rt != symbols.typeAuto) {
-                    validateNonNullTarget(exprNode.line, exprNode.col, rt, bop->left);
-                }
-                if (arena.getExpr<NullLiteral>(bop->right) != nullptr && lt != symbols.typeAuto) {
-                    validateNonNullTarget(exprNode.line, exprNode.col, lt, bop->right);
-                }
-            }
             const bool lEnum = isEnumType(symbols, lt, arena, moduleId);
             const bool rEnum = isEnumType(symbols, rt, arena, moduleId);
             if (bop->op != "&" && (lEnum || rEnum)) {
@@ -414,7 +342,7 @@ public:
             const auto enumOpt = resolveEnumMemberAccess(arena, symbols, moduleId, scope, *faccess);
             if (enumOpt.has_value()) {
                 checkCrossModuleAccess(exprNode.line, exprNode.col, "Enum", *enumOpt);
-                if (enumOpt->memberValues.count(faccess->fieldName) == 0) {
+                if (enumOpt->memberSet.count(faccess->fieldName) == 0) {
                     setAnalyzerError(exprNode.line, exprNode.col, "Enum '" + enumOpt->name + "' has no member '" + faccess->fieldName + "'.");
                 }
                 return;
@@ -422,12 +350,6 @@ public:
             const auto cOpt = resolveModuleConstAccess(arena, symbols, moduleId, scope, *faccess);
             if (cOpt.has_value()) {
                 checkCrossModuleAccess(exprNode.line, exprNode.col, "Constant", *cOpt);
-                return;
-            }
-            const auto bareFnOpt = resolveBareFnRef(arena, exprId, symbols, scope, moduleId);
-            if (bareFnOpt.has_value()) {
-                recordCalleeEdge(*bareFnOpt);
-                checkCrossModuleAccess(exprNode.line, exprNode.col, "Function", *bareFnOpt);
                 return;
             }
             const TypeId targetTid = inferExpr(faccess->target, scope);
@@ -499,11 +421,6 @@ public:
         if (!varIsEnum && valIsEnum && resolvedTarget == symbols.typeInt) {
             setAnalyzerError(line, col, "Cannot assign enum value to 'int' without explicit conversion (use .toInt()).");
         }
-        if (resolvedTarget < arena.types.size() && arena.types[resolvedTarget].name == "fn") {
-            if (resolvedVal != symbols.typeAuto && resolvedVal != resolvedTarget) {
-                setAnalyzerError(line, col, "Cannot assign mismatched function signature to '" + std::string(varName) + "'.");
-            }
-        }
     }
 
     void validateEmptyContainerInference(
@@ -527,25 +444,9 @@ public:
         }
     }
 
-    void validateDefaultValueExpr(
-        const FnDecl& dummyFn,
-        uint32_t line,
-        uint32_t col,
-        std::string_view itemName,
-        TypeId rawTypeId,
-        ExprId defaultExprId,
-        const std::unordered_map<std::string, VarSymbol>& emptyScope
-    ) {
-        const TypeId resolvedTid = resolveAlias(arena, symbols, moduleId, rawTypeId);
-        const TypeId valTid = inferExpr(defaultExprId, emptyScope);
-        validateNonNullTarget(line, col, resolvedTid, defaultExprId);
-        validateEnumAssignment(line, col, itemName, resolvedTid, valTid);
-        validateExprCalls(dummyFn, defaultExprId, emptyScope, false);
-    }
-
-    void validateDeclDefaults(DeclId did, const DeclNode& declNode) {
-        std::unordered_map<std::string, VarSymbol> emptyScope;
+    void validateConstDecl(DeclId did, const DeclNode& declNode) {
         if (const auto* cdecl = arena.getDecl<ConstDecl>(did)) {
+            std::unordered_map<std::string, VarSymbol> emptyScope;
             const std::string key = symbolKey(declNode.moduleId, cdecl->name);
             const TypeId valTid = inferExpr(cdecl->value, emptyScope);
             TypeId targetTid = valTid;
@@ -558,17 +459,6 @@ public:
             dummyFn.isFallible = false;
             currentFnKey = "__top__" + declNode.moduleId;
             validateExprCalls(dummyFn, cdecl->value, emptyScope, false);
-            currentFnKey.clear();
-        } else if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
-            FnDecl dummyFn{};
-            dummyFn.name = fdecl->name;
-            dummyFn.isFallible = false;
-            currentFnKey = symbolKey(declNode.moduleId, fdecl->name);
-            for (const auto& p : fdecl->params) {
-                if (p.hasDefault && p.defaultValue != INVALID_ID) {
-                    validateDefaultValueExpr(dummyFn, p.line, p.col, p.name, p.typeId, p.defaultValue, emptyScope);
-                }
-            }
             currentFnKey.clear();
         }
     }
@@ -602,7 +492,6 @@ public:
                     } else if (valType != INVALID_ID) {
                         varTid = valType;
                     }
-                    validateNonNullTarget(tgtNode.line, tgtNode.col, varTid, vassign->value);
                     validateEnumAssignment(tgtNode.line, tgtNode.col, ident->name, varTid, valType);
                     bindLocalVar(scope, ident->name, varTid, false, vassign->isConst, tgtNode.line, tgtNode.col);
                 } else {
@@ -619,7 +508,6 @@ public:
                         std::string msg = "Cannot reassign const variable '" + ident->name + "'.";
                         setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                     }
-                    validateNonNullTarget(tgtNode.line, tgtNode.col, existing->second.typeId, vassign->value);
                     validateEnumAssignment(tgtNode.line, tgtNode.col, ident->name, existing->second.typeId, valType);
                 }
             } else {
@@ -639,7 +527,6 @@ public:
                     setAnalyzerError(tgtNode.line, tgtNode.col, msg);
                 }
                 const TypeId lhsTid = inferExpr(vassign->target, scope);
-                validateNonNullTarget(tgtNode.line, tgtNode.col, lhsTid, vassign->value);
                 std::string targetLabel = root.name;
                 if (const auto* fa = arena.getExpr<FieldAccess>(vassign->target)) {
                     targetLabel = fa->fieldName;
@@ -691,9 +578,6 @@ public:
             if (forStmt->rangeSpec.hasRange) {
                 validateExprCalls(fn, forStmt->rangeSpec.start, scope, false);
                 validateExprCalls(fn, forStmt->rangeSpec.end, scope, false);
-                if (forStmt->rangeSpec.hasStep) {
-                    validateExprCalls(fn, forStmt->rangeSpec.step, scope, false);
-                }
                 if (!forStmt->loopVars.empty()) {
                     bindLocalVar(loopScope, forStmt->loopVars[0], symbols.typeInt, false, false, stmtNode.line, stmtNode.col);
                 }
@@ -782,18 +666,6 @@ public:
             return;
         }
 
-        if (const auto* dstmt = arena.getStmt<DeferStmt>(stmtId)) {
-            const int savedTryDepth = activeTryDepth;
-            activeTryDepth = 0;
-            FnDecl deferFn{};
-            deferFn.name = "defer";
-            deferFn.returnType = symbols.typeVoid;
-            deferFn.isFallible = false;
-            analyzeBlock(deferFn, dstmt->body, scope);
-            activeTryDepth = savedTryDepth;
-            return;
-        }
-
         if (const auto* retStmt = arena.getStmt<ReturnStmt>(stmtId)) {
             bool isReturnErrorCall = false;
             bool isReturnVoidFallibleCall = false;
@@ -827,8 +699,6 @@ public:
                 } else if (!retStmt->hasValue && expectedHasValue) {
                     std::string msg = "Function '" + fn.name + "' expects a return value, but none was provided.";
                     setAnalyzerError(stmtNode.line, stmtNode.col, msg);
-                } else if (retStmt->hasValue && expectedHasValue) {
-                    validateNonNullTarget(stmtNode.line, stmtNode.col, fn.returnType, retStmt->value);
                 }
             }
             return;
@@ -925,14 +795,6 @@ public:
                     } else if (declNode.moduleId != "std/str") {
                         symbols.headerModules[headerPath] = declNode.moduleId;
                     }
-                } else if (imp->kind == "link") {
-                    bool found = false;
-                    for (const auto& l : symbols.linkLibs) {
-                        if (l == imp->target) { found = true; break; }
-                    }
-                    if (!found) {
-                        symbols.linkLibs.push_back(imp->target);
-                    }
                 } else if (imp->kind == "module") {
                     std::string alias = defaultImportAlias(imp->target);
                     if (imp->hasAlias) {
@@ -962,14 +824,12 @@ public:
             } else if (const auto* edecl = arena.getDecl<EnumDecl>(did)) {
                 EnumSymbol esym{};
                 populateSymbolMeta(esym, declNode, edecl->name, edecl->isPub, makeCppTypeName(declNode.moduleId, edecl->name, false));
-                std::unordered_set<std::string> seen;
-                for (const auto& mem : edecl->members) {
-                    if (seen.count(mem.name) > 0) {
-                        throw makeError("AnalyzerError", "Duplicate enum member '" + mem.name + "' in enum '" + edecl->name + "'.", declNode.fileName, declNode.line, declNode.col);
+                for (const auto& memName : edecl->members) {
+                    if (esym.memberSet.count(memName) > 0) {
+                        throw makeError("AnalyzerError", "Duplicate enum member '" + memName + "' in enum '" + edecl->name + "'.", declNode.fileName, declNode.line, declNode.col);
                     }
-                    seen.insert(mem.name);
-                    esym.members.push_back(mem);
-                    esym.memberValues[mem.name] = mem.value;
+                    esym.memberSet.insert(memName);
+                    esym.members.push_back(memName);
                 }
                 const std::string keyCopy = esym.key;
                 symbols.enums[keyCopy] = std::move(esym);
@@ -1056,9 +916,6 @@ public:
                 if (cdecl->hasDeclaredType) {
                     constTid = canonicalizeType(arena, symbols, declNode.moduleId, cdecl->declaredType);
                 }
-                if (arena.getExpr<NullLiteral>(cdecl->value) != nullptr && constTid != symbols.typeCptr) {
-                    throw makeError("AnalyzerError", "CleanBasic types use non-nullable value semantics; only 'cptr' can be 'null'.", declNode.fileName, declNode.line, declNode.col);
-                }
                 ConstSymbol csym{};
                 populateSymbolMeta(csym, declNode, cdecl->name, cdecl->isPub, makeCppConstName(declNode.moduleId, cdecl->name));
                 csym.typeId = constTid;
@@ -1079,7 +936,6 @@ public:
                 } else {
                     fsym.returnType = symbols.typeVoid;
                 }
-                fsym.fnTypeId = addFnTypeId(arena, fsym);
                 if (symbols.functions.find(fsym.key) != symbols.functions.end()) {
                     setAnalyzerError(declNode.line, declNode.col, "Duplicate function definition '" + fdecl->name + "'.");
                 }
@@ -1163,7 +1019,7 @@ public:
             const auto& declNode = arena.decls[did];
             fileName = declNode.fileName;
             moduleId = declNode.moduleId;
-            validateDeclDefaults(did, declNode);
+            validateConstDecl(did, declNode);
             if (const auto* fdecl = arena.getDecl<FnDecl>(did)) {
                 if (!fdecl->isExtern) {
                     if (declNode.moduleId.empty()) {

@@ -1,7 +1,7 @@
 import "ast.cb"
 
 public fn makeCfg(s as int) as ast.SharedCfg
-    return ast.SharedCfg(scale=s)
+    return ast.SharedCfg(s)
 end fn
 
 public fn resolveAlias(arena as ast.AstArena, tid as int) as str

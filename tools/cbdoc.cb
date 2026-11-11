@@ -67,7 +67,7 @@ fn parseDeclKindAndName(header as str) as list[str]
                 if ch == "(" or ch == " " or ch == "=" or ch == "	"
                     break
                 end if
-                endIdx += 1
+                endIdx = endIdx + 1
             end while
             const name = rest.slice(0, endIdx)
             return [k, name]
@@ -98,7 +98,7 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
                 docLine = docLine.sliceFrom(1)
             end if
             pendingDoc.push(docLine)
-            i += 1
+            i = i + 1
             continue
         end if
 
@@ -111,32 +111,32 @@ fn parseFileDocs(filePath as str, includePrivate as bool) as list[DocEntry] can 
                 dim sigLines as list[str] = [trimmed]
                 if isBlockDeclKind(kind)
                     const endMarker = $"end {kind}"
-                    i += 1
+                    i = i + 1
                     while i < lines.len()
                         const bodyTrimmed = lines[i].trim()
                         sigLines.push(lines[i])
                         if bodyTrimmed == endMarker
                             break
                         end if
-                        i += 1
+                        i = i + 1
                     end while
                 end if
                 if isPublicHeader(header) or pendingDoc.len() > 0
                     entries.push(DocEntry(
-                        name=name,
-                        kind=kind,
-                        signature=str.join(sigLines, "\n"),
-                        doc=str.join(pendingDoc, "\n")
+                        name,
+                        kind,
+                        str.join(sigLines, "\n"),
+                        str.join(pendingDoc, "\n")
                     ))
                 end if
             end if
             pendingDoc.clear()
-            i += 1
+            i = i + 1
             continue
         end if
 
         pendingDoc.clear()
-        i += 1
+        i = i + 1
     end while
 
     return entries
@@ -186,14 +186,14 @@ end fn
 '' Configures the CLI parser for cbdoc.
 fn buildParser() as cli.Parser
     dim p = cli.newParser(
-        name="cbdoc",
-        version="1.0",
-        description="Generate Markdown API documentation from CleanBasic '' doc-comments"
+        "cbdoc",
+        "1.0",
+        "Generate Markdown API documentation from CleanBasic '' doc-comments"
     )
-    p.addOption("output", "o", "Write generated Markdown to file instead of stdout")
-    p.addOption("title", "t", "Document title heading", defaultVal="CleanBasic API Reference")
+    p.addOption("output", "o", "Write generated Markdown to file instead of stdout", "")
+    p.addOption("title", "t", "Document title heading", "CleanBasic API Reference")
     p.addFlag("include-private", "p", "Include documented private declarations")
-    p.addArg("target", "CleanBasic .cb file or directory to document", required=true)
+    p.addArg("target", "CleanBasic .cb file or directory to document", true)
     return p
 end fn
 
@@ -220,7 +220,7 @@ fn main() as int
 
         const files = collectCbFiles(target)
 
-        const title = args.get("title", "CleanBasic API Reference")
+        const title = args.getOr("title", "CleanBasic API Reference")
         const includePrivate = args.has("include-private")
         dim sections as list[str] = [$"# {title}", ""]
 
@@ -232,7 +232,7 @@ fn main() as int
         end for
 
         const markdown = str.join(sections, "\n").rtrim() & "\n"
-        const outPath = args.get("output", "")
+        const outPath = args.get("output")
         if outPath != ""
             fs.write(outPath, markdown)
         else

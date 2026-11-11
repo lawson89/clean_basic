@@ -21,13 +21,13 @@
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*(?:(?:public\\s+)?(?:fn|type|enum|union)\\b|if\\b|for\\b|select\\s+case\\b|while\\b|try\\b|defer\\b)",
-      "end": "^\\s*end\\s+(?:fn|type|enum|union|if|for|select|while|try|defer)\\b"
+      "start": "^\\s*(?:(?:public\\s+)?(?:fn|type|enum|union)\\b|if\\b|for\\b|select\\s+case\\b|while\\b|try\\b)",
+      "end": "^\\s*end\\s+(?:fn|type|enum|union|if|for|select|while|try)\\b"
     }
   },
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(?:(?:public\\s+)?(?:fn|type|enum|union)\\b(?!.*\\bextern\\b)|if\\b|else\\s+if\\b|else\\b|for\\b|select\\s+case\\b|case\\b|while\\b|try\\b|catch\\b|defer\\b)",
-    "decreaseIndentPattern": "^\\s*(?:end\\s+(?:fn|type|enum|union|if|for|select|while|try|defer)|else\\s+if|else|catch|case(?:\\s+else)?)\\b"
+    "increaseIndentPattern": "^\\s*(?:(?:public\\s+)?(?:fn|type|enum|union)\\b(?!.*\\bextern\\b)|if\\b|else\\s+if\\b|else\\b|for\\b|select\\s+case\\b|case\\b|while\\b|try\\b|catch\\b)",
+    "decreaseIndentPattern": "^\\s*(?:end\\s+(?:fn|type|enum|union|if|for|select|while|try)|else\\s+if|else|catch|case(?:\\s+else)?)\\b"
   },
   "wordPattern": "[a-zA-Z_][a-zA-Z0-9_]*"
 }

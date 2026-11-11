@@ -29,7 +29,7 @@ fn main() as int
     dim sLen = ast.privateSecretLen()
     print($"constAndDiamond: port={p}, scale={cfg.scale}, secretLen={sLen}")
 
-    dim arena = ast.AstArena(types=["int", "str"])
+    dim arena = ast.AstArena(["int", "str"])
     dim t0 = arena.resolveAlias(0)
     dim tFallback = arena.resolveAliasOr(99, "void")
     dim node = ast.AstNode.intVal(42)

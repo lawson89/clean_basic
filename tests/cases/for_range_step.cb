@@ -1,12 +1,9 @@
-' EXPECT_CPP: for (int64_t i = 0; i <= 10; i += 2) {
-' EXPECT_CPP: for (int64_t i = 10; i >= 2; i += (-2)) {
-' EXPECT_CPP: for (int64_t i = 5; i >= 1; i += (-2)) {
+' EXPECT_CPP: for (int64_t i = 0; i <= 10; i += 1) {
 ' EXPECT_CPP: for (int64_t i = 0; i <= (5 - 1); i += 1) {
 ' EXPECT_CPP: for (const auto& x : nums) {
 ' EXPECT_CPP: cbStrUtf8Chars(
 ' FORBID_CPP: throw
 ' EXPECT_OUT: inclusiveEvens: 30
-' EXPECT_OUT: countdownEvens: 30, countdownOdds: 9
 ' EXPECT_OUT: halfOpenSum: 10
 ' EXPECT_OUT: itemsSum: 60
 ' EXPECT_OUT: indexedSum: 140
@@ -15,26 +12,10 @@
 
 fn sumEvens() as int
     dim total = 0
-    for i = 0 to 10 step 2
+    for i = 0 to 10
         if i % 2 == 0
-            total += i
+            total = total + i
         end if
-    end for
-    return total
-end fn
-
-fn sumCountdownEvens() as int
-    dim total = 0
-    for i = 10 to 2 step -2
-        total += i
-    end for
-    return total
-end fn
-
-fn sumCountdownOdds() as int
-    dim total = 0
-    for i = 5 to 1 step -2
-        total += i
     end for
     return total
 end fn
@@ -42,7 +23,7 @@ end fn
 fn sumHalfOpen() as int
     dim total = 0
     for i = 0 to 5 - 1
-        total += i
+        total = total + i
     end for
     return total
 end fn
@@ -51,7 +32,7 @@ fn sumItems() as int
     dim nums as list[int] = [10, 20, 30]
     dim sum = 0
     for x in nums
-        sum += x
+        sum = sum + x
     end for
     return sum
 end fn
@@ -60,7 +41,7 @@ fn sumIndexedItems() as int
     dim nums as list[int] = [10, 20, 30]
     dim sum = 0
     for idx = 0 to nums.len() - 1
-        sum += (idx + 1) * nums[idx]
+        sum = sum + (idx + 1) * nums[idx]
     end for
     return sum
 end fn
@@ -69,21 +50,20 @@ fn iterateStrings()
     dim s = "aé🚀"
     dim out1 = ""
     for ch in s
-        out1 &= ch & "|"
+        out1 = out1 & ch & "|"
     end for
     print("strChars: " & out1)
 
     dim chars = s.chars()
     dim out2 = ""
     for idx = 0 to chars.len() - 1
-        out2 &= idx.toStr() & ":" & chars[idx] & ","
+        out2 = out2 & idx.toStr() & ":" & chars[idx] & ","
     end for
     print("strIndexed: " & out2)
 end fn
 
 fn main()
     print("inclusiveEvens: ", sumEvens())
-    print($"countdownEvens: {sumCountdownEvens()}, countdownOdds: {sumCountdownOdds()}")
     print("halfOpenSum: ", sumHalfOpen())
     print("itemsSum: " & sumItems())
     print("indexedSum: " & sumIndexedItems())

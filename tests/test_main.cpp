@@ -132,14 +132,13 @@ TEST_CASE("Lexer tokenizes multi-word keywords and rejects C-style operators", "
 ' VB style comment
 import "player.cb" as player
 import header "sqliteWrapper.hpp"
-import link "sqlite3"
 dim x as int = 1
 const y = "hello" & " world"
 select case x
 case 1
 case else
 end select
-for i = 0 to 10 step 2
+for i = 0 to 10
 end for
 if a and b or not c
 else if d
@@ -149,8 +148,6 @@ end fn
 try
 catch e
 end try
-defer
-end defer
 )";
 
     const auto lexRes = cb::tokenize(code, "lexTest.cb");
@@ -177,7 +174,6 @@ end defer
     CHECK(hasKw("dim"));
     CHECK(hasKw("const"));
     CHECK(hasKw("import header"));
-    CHECK(hasKw("import link"));
     CHECK(hasKw("select case"));
     CHECK(hasKw("case"));
     CHECK(hasKw("case else"));
@@ -192,10 +188,7 @@ end defer
     CHECK(hasKw("end try"));
     CHECK(hasKw("for"));
     CHECK(hasKw("to"));
-    CHECK(hasKw("step"));
     CHECK(hasKw("end for"));
-    CHECK(hasKw("defer"));
-    CHECK(hasKw("end defer"));
 
     SECTION("Rejects forbidden C-style logical operators") {
         const std::vector<std::string> forbidden = {"a && b", "a || b", "!flag"};
@@ -213,7 +206,7 @@ public const defaultTag = "score"
 
 fn compute(byref items as list[int], tag as str) as int
     dim total = 0
-    for i = 0 to 10 step 2
+    for i = 0 to 10
         select case i
         case 2
             total = total + 2
@@ -244,7 +237,7 @@ end fn
     SECTION("Parses classic BASIC 'for i = start to end' with inclusive RangeSpec") {
         const std::string forToCode = R"(fn loopTest() as int
     dim s = 0
-    for i = 1 to 5 step 2
+    for i = 1 to 5
         s = s + i
     end for
     return s
@@ -259,7 +252,6 @@ end fn
         REQUIRE(fnFt.body.size() >= 2);
         const auto& forStmt = *parseFt.arena.getStmt<cb::ForStmt>(fnFt.body[1]);
         CHECK(forStmt.rangeSpec.hasRange);
-        CHECK(forStmt.rangeSpec.hasStep);
     }
 
     SECTION("Parses 'can error' on value-returning and void functions and 'try / catch' blocks") {
@@ -270,7 +262,7 @@ end fn
 
 fn validate(port as int) can error
     if port <= 0
-        error("bad port", code=400)
+        error("bad port", 400)
     end if
 end fn
 
@@ -397,7 +389,7 @@ end fn
 end fn
 )",
             R"(enum Huge
-    v = 999999999999999999999
+    v = 1
 end enum
 )"
         };
@@ -453,7 +445,7 @@ end fn
     SECTION("Permits try / catch block that falls through without return, break, or continue") {
         const std::string fallthroughCode = R"(
 fn risky() as int can error
-    error("failed", code=503)
+    error("failed", 503)
     return 42
 end fn
 
@@ -484,10 +476,10 @@ end fn
         CHECK(parseFt.arena.getStmt<cb::VarAssignment>(tryCatch.tryBody[0]) != nullptr);
     }
 
-    SECTION("Rejects calling error(...) inside an infallible function or with invalid named args") {
+    SECTION("Rejects calling error(...) inside an infallible function or with non-int code argument") {
         const std::string badErrorInInfallible = R"(
 fn notFallible() as int
-    error("boom", code=1)
+    error("boom", 1)
     return 0
 end fn
 )";
@@ -496,16 +488,16 @@ end fn
         CHECK(resInf.error.kind == "AnalyzerError");
         CHECK(resInf.error.message.find("Cannot call 'error(...)' inside infallible function") != std::string::npos);
 
-        const std::string badErrorKwarg = R"(
+        const std::string badErrorCodeType = R"(
 fn fallibleFn() as int can error
-    error("boom", status=500)
+    error("boom", "notAnInt")
     return 0
 end fn
 )";
-        const auto resKw = cb::transpileSource(badErrorKwarg, "badErrorKw.cb");
-        CHECK_FALSE(resKw.ok);
-        CHECK(resKw.error.kind == "AnalyzerError");
-        CHECK(resKw.error.message.find("Unknown named argument 'status'") != std::string::npos);
+        const auto resCode = cb::transpileSource(badErrorCodeType, "badErrorCode.cb");
+        CHECK_FALSE(resCode.ok);
+        CHECK(resCode.error.kind == "AnalyzerError");
+        CHECK(resCode.error.message.find("Second argument to 'error(...)' (code) must be of type 'int'") != std::string::npos);
     }
 
     SECTION("Rejects const variable reassignment") {
@@ -568,7 +560,7 @@ end fn
     }
 }
 
-TEST_CASE("Emitter generates C++17 error bubbling and defer for extern declarations", "[emitter]") {
+TEST_CASE("Emitter generates C++17 error bubbling for extern declarations", "[emitter]") {
     const std::string code = R"(
 public extern type SQL_DB
 end type
@@ -578,11 +570,7 @@ public extern fn SQL_close(db as SQL_DB)
 fn processData() as int can error
     ' Implicit bubble (needs if (cbHasError(_err1)) return ...)
     dim db = connect("data.db")
-    
-    defer
-        SQL_close(db)
-    end defer
-    
+    SQL_close(db)
     return 100
 end fn
 
@@ -601,14 +589,11 @@ end fn
 
     const std::string& cpp = res.cppCode;
     CHECK(cpp.find("struct [[nodiscard]] CbError {") != std::string::npos);
-    CHECK(cpp.find("template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };") != std::string::npos);
-    CHECK(cpp.find("template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }") != std::string::npos);
     CHECK(cpp.find("[[nodiscard]] std::tuple<int64_t, CbError> processData()") != std::string::npos);
     CHECK(cpp.find(R"raw(auto [_val1, _err1] = connect(std::string("data.db"));)raw") != std::string::npos);
     CHECK(cpp.find("if (cbHasError(_err1)) {") != std::string::npos);
     CHECK(cpp.find("return { {}, _err1 };") != std::string::npos);
     CHECK(cpp.find("auto db = _val1;") != std::string::npos);
-    CHECK(cpp.find("auto _defer_1 = cbDefer([&]() {") != std::string::npos);
     CHECK(cpp.find("SQL_close(db);") != std::string::npos);
     CHECK(cpp.find(R"raw(return { 100, CbError{"", 0} };)raw") != std::string::npos);
     CHECK(cpp.find("CbError _catch_err_2{};") != std::string::npos);
@@ -633,8 +618,8 @@ fn compute() as int
     dim c = 30
     dim s1 = "hello"
     dim s2 = "world"
-    dim b1 = Box(val=a)
-    dim b2 = Box(val=b)
+    dim b1 = Box(a)
+    dim b2 = Box(b)
     return b1.val + b2.val + c
 end fn
 )";
@@ -774,7 +759,7 @@ end fn
             std::ofstream ftype(baseDir + "/constructPriv.cb");
             ftype << R"(import "secret.cb"
 fn main()
-    dim h = secret.HiddenType(v=1)
+    dim h = secret.HiddenType(1)
 end fn
 )";
         }
@@ -792,7 +777,7 @@ TEST_CASE("End-to-end fixture: call-graph tree-shaking across modules and stdlib
     cb::testE2E::runE2EFixture("treeShaking", "tests/cases/tree_shaking/main.cb");
 }
 
-TEST_CASE("End-to-end fixture: network error bubbling and defer cleanup", "[e2e]") {
+TEST_CASE("End-to-end fixture: network error bubbling", "[e2e]") {
     cb::testE2E::runE2EFixture("networkErrorBubblingDefer", "tests/cases/network_error_bubbling_defer.cb");
 }
 
@@ -804,12 +789,8 @@ TEST_CASE("End-to-end fixture: struct initialization and field access", "[e2e]")
     cb::testE2E::runE2EFixture("structAndFieldAccess", "tests/cases/struct_and_field_access.cb");
 }
 
-TEST_CASE("End-to-end fixture: for range loop with step", "[e2e]") {
+TEST_CASE("End-to-end fixture: for range loop", "[e2e]") {
     cb::testE2E::runE2EFixture("forRangeStep", "tests/cases/for_range_step.cb");
-}
-
-TEST_CASE("End-to-end fixture: cptr interop", "[e2e]") {
-    cb::testE2E::runE2EFixture("cptrInterop", "tests/cases/cptr_interop.cb");
 }
 
 TEST_CASE("End-to-end fixture: fibonacci sequence", "[e2e]") {
@@ -820,11 +801,11 @@ TEST_CASE("End-to-end fixture: enums and bytes", "[e2e]") {
     cb::testE2E::runE2EFixture("enumsAndBytes", "tests/cases/enums_and_bytes.cb");
 }
 
-TEST_CASE("End-to-end fixture: defaults, compound assignments, zero-copy containers, and prelude", "[e2e]") {
+TEST_CASE("End-to-end fixture: defaults, zero-copy containers, and prelude", "[e2e]") {
     cb::testE2E::runE2EFixture("defaultsAndErgonomics", "tests/cases/defaults_and_ergonomics.cb");
 }
 
-TEST_CASE("End-to-end fixture: tagged unions, bitwise methods, and function overloads", "[e2e]") {
+TEST_CASE("End-to-end fixture: tagged unions and containers", "[e2e]") {
     cb::testE2E::runE2EFixture("unionsAndBitwise", "tests/cases/unions_and_bitwise.cb");
 }
 
@@ -860,9 +841,6 @@ TEST_CASE("End-to-end fixture: std/cli standard library", "[e2e]") {
     cb::testE2E::runE2EFixture("stdlibCli", "tests/cases/stdlib_cli.cb");
 }
 
-TEST_CASE("End-to-end fixture: std/test standard library and assert()", "[e2e]") {
-    cb::testE2E::runE2EFixture("stdlibTest", "tests/cases/stdlib_test.cb");
-}
 TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
     const std::string artifactDir = "build/testArtifacts/cliBuild";
     std::error_code ec;
@@ -874,9 +852,7 @@ TEST_CASE("End-to-end CLI build generates persistent C++ artifacts", "[e2e]") {
     const std::string cliOutPath = artifactDir + "/cliExecBuild.cpp";
 
     std::ofstream outCb(testCbPath);
-    outCb << R"(import link "m"
-
-fn main()
+    outCb << R"(fn main()
     dim x = 42
     print("Answer: " & x.toStr())
 end fn
@@ -887,7 +863,6 @@ end fn
     REQUIRE(buildRes.ok);
 
     const std::string content = cb::testE2E::readFileText(testOutPath);
-    CHECK(content.find("// CleanBasic Linker Flags: -lm") != std::string::npos);
     CHECK(content.find("int main(int argc, char** argv)") != std::string::npos);
 
     std::string cbBinPath = "./build/cleanbasic";
@@ -1589,7 +1564,7 @@ fn localBoost(base as int) as int
 end fn
 fn main() as int can error
     const maxPotion = 50
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     dim boosted = localBoost(maxPotion)
     dim newHp = hero.heal(boosted)
     print(hero.health, newHp)
@@ -1681,7 +1656,7 @@ fn localBoost(base as int) as int
 end fn
 fn main() as int can error
     const maxPotion = 50
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     dim boosted = localBoost(maxPotion)
     dim newHp = hero.heal(boosted)
     print(hero.health, newHp)
@@ -1758,7 +1733,7 @@ fn localBoost(base as int) as int
 end fn
 fn main() as int can error
     const maxPotion = 50
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     return 0
 end fn
 )");
@@ -1770,7 +1745,7 @@ fn localBoost(base as int) as int
 end fn
 fn main() as int can error
     const maxPotion = 50
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     if
 )");
 
@@ -1836,7 +1811,7 @@ fn main() as int
     catch e
     end try
     dim nums as list[int] = [1, 2]
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     hero.
     return 0
 end fn
@@ -1858,7 +1833,7 @@ fn main() as int
     catch e
     end try
     dim nums as list[int] = [1, 2]
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
 )";
         fullSrc += std::string(newLine10) + R"(
     return 0
@@ -1927,7 +1902,7 @@ end fn
     CHECK_FALSE(cb::testLsp::hasCompletionItem(compList.arena, listItems, "append"));
 }
 
-TEST_CASE("LSP Completion Provider resolves named arguments, type annotations, and lexical scope", "[lsp][completion]") {
+TEST_CASE("LSP Completion Provider resolves type annotations and lexical scope", "[lsp][completion]") {
     std::stringstream clientToServer;
     std::stringstream serverToClient;
 
@@ -1944,35 +1919,22 @@ end type
 
     cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
 fn main() as int
-    dim hero = player.Player(name="Alice", health=100)
-    dim p2 = player.Player(
-    return 0
-end fn
-)");
-
-    // Req id=6: named field= completion inside 'player.Player(' (line 3, char 27)
-    cb::writeJsonrpcMessage(
-        clientToServer,
-        R"({"jsonrpc":"2.0","id":6,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":27}}})"
-    );
-
-    // Change v2: '    dim x as ' (line 3, char 13) -> Req id=9 (type annotation completion after 'as ')
-    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 2, R"(import "player.cb"
-fn main() as int
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     dim x as 
     return 0
 end fn
 )");
+
+    // Req id=9: type annotation completion after 'as ' (line 3, char 13)
     cb::writeJsonrpcMessage(
         clientToServer,
         R"({"jsonrpc":"2.0","id":9,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":13}}})"
     );
 
-    // Change v3: '    he' (line 3, char 6) -> Req id=10 (general scope completion filtered by prefix 'he' -> finds 'hero')
-    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 3, R"(import "player.cb"
+    // Change v2: '    he' (line 3, char 6) -> Req id=10 (general scope completion filtered by prefix 'he' -> finds 'hero')
+    cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 2, R"(import "player.cb"
 fn main() as int
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     he
     return 0
 end fn
@@ -1986,11 +1948,6 @@ end fn
     cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
 
     CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
-
-    const auto compNamed = cb::testLsp::readResponseForId(serverToClient, 6);
-    const cb::JsonId namedItems = cb::jsonGetField(compNamed.arena, compNamed.root, "result");
-    CHECK(cb::testLsp::hasCompletionItem(compNamed.arena, namedItems, "name=", 5, "as str"));
-    CHECK(cb::testLsp::hasCompletionItem(compNamed.arena, namedItems, "health=", 5, "as int"));
 
     const auto compTypes = cb::testLsp::readResponseForId(serverToClient, 9);
     const cb::JsonId typeItems = cb::jsonGetField(compTypes.arena, compTypes.root, "result");
@@ -2025,7 +1982,7 @@ end fn
 
     cb::testLsp::sendDidOpen(clientToServer, "file:///ws/main.cb", R"(import "player.cb"
 fn main() as int
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     dim p2 = player.Player(
     return 0
 end fn
@@ -2040,7 +1997,7 @@ end fn
     // Change v2: '    hero.heal(25, ' (line 3, char 18) -> Req id=8 (UFCS signatureHelp at 2nd visible parameter: activeParameter == 1)
     cb::testLsp::sendDidChange(clientToServer, "file:///ws/main.cb", 2, R"(import "player.cb"
 fn main() as int
-    dim hero = player.Player(name="Alice", health=100)
+    dim hero = player.Player("Alice", 100)
     hero.heal(25, 
     return 0
 end fn
@@ -2049,10 +2006,8 @@ end fn
         clientToServer,
         R"({"jsonrpc":"2.0","id":8,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///ws/main.cb"},"position":{"line":3,"character":18}}})"
     );
-
     cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null})");
     cb::writeJsonrpcMessage(clientToServer, R"({"jsonrpc":"2.0","method":"exit"})");
-
     CHECK(cb::runLspServer(clientToServer, serverToClient) == 0);
 
     const auto initResp = cb::testLsp::readResponseForId(serverToClient, 1);
@@ -2385,14 +2340,13 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "/opt/cleanbasic-sdk",
             "projects/demo",
             "projects/demo/build.cpp",
-            "projects/demo/app.exe",
-            {"-lm"}
+            "projects/demo/app.exe"
         );
         CHECK(cmd.find("zig c++ -target x86_64-windows-gnu -O0 -std=c++17 -pthread") != std::string::npos);
         CHECK(cmd.find(R"(-I"/opt/cleanbasic-sdk/vendor")") != std::string::npos);
         CHECK(cmd.find(R"(-I"/opt/cleanbasic-sdk/stdlib")") != std::string::npos);
         CHECK(cmd.find(R"(-I"projects/demo")") != std::string::npos);
-        CHECK(cmd.find(R"("projects/demo/build.cpp" -o "projects/demo/app.exe" -lm)") != std::string::npos);
+        CHECK(cmd.find(R"("projects/demo/build.cpp" -o "projects/demo/app.exe")") != std::string::npos);
 
         const std::string releaseCmd = cb::buildCompileCommand(
             crossCc,
@@ -2400,7 +2354,6 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "projects/demo",
             "projects/demo/build.cpp",
             "projects/demo/app.exe",
-            {"-lm"},
             "3"
         );
         CHECK(releaseCmd.find("zig c++ -target x86_64-windows-gnu -O3 -std=c++17 -pthread") != std::string::npos);
@@ -2411,7 +2364,6 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "projects/demo",
             "projects/demo/build.cpp",
             "projects/demo/app",
-            {},
             "0",
             "/opt/cleanbasic-sdk/build/pch/cb_pch.hpp"
         );
@@ -2438,7 +2390,6 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "projects/demo",
             "projects/demo/build.cpp",
             "projects/demo/app.exe",
-            {"-luser32"},
             "0",
             "",
             false,
@@ -2446,12 +2397,9 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
         );
         const size_t bdPos = winHybridCmd.find("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic");
         const size_t srcPos = winHybridCmd.find(R"("projects/demo/build.cpp")");
-        const size_t libPos = winHybridCmd.find("-luser32");
         CHECK(bdPos != std::string::npos);
         CHECK(srcPos != std::string::npos);
-        CHECK(libPos != std::string::npos);
         CHECK(bdPos < srcPos);
-        CHECK(srcPos < libPos);
 
         const std::string staticLinuxCmd = cb::buildCompileCommand(
             "g++",
@@ -2459,7 +2407,6 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "projects/demo",
             "projects/demo/build.cpp",
             "projects/demo/app",
-            {"-lm"},
             "3",
             "",
             true,
@@ -2473,7 +2420,6 @@ TEST_CASE("Portable SDK root resolution, cross-platform target specs, CLI flags,
             "projects/demo",
             "projects/demo/build.cpp",
             "projects/demo/app",
-            {},
             "3",
             "",
             true,
@@ -2974,8 +2920,8 @@ end fn
         cb::LspServerState state{};
         const std::string uri = "file:///ws/enum_lsp.cb";
         const std::string text = R"CB(public enum Color
-    red = 1
-    blue = 2
+    red
+    blue
 end enum
 fn demo()
     dim c = Color.red
@@ -2993,7 +2939,7 @@ end fn
         CHECK(enumMemberCtx.receiverName == "Color");
         const cb::ResolvedCursorSymbol hoverInfo = cb::resolveCursorSymbolInfo(snap, "/ws/enum_lsp.cb", enumMemberCtx);
         REQUIRE(hoverInfo.hoverMarkdown.has_value());
-        CHECK(hoverInfo.hoverMarkdown.value().find("(enum member) Color.red = 1") != std::string::npos);
+        CHECK(hoverInfo.hoverMarkdown.value().find("(enum member) Color.red") != std::string::npos);
 
         std::vector<cb::CompletionItemEntry> dotEnumItems;
         std::unordered_map<std::string, bool> seenEnum;
@@ -3002,7 +2948,7 @@ end fn
     }
 }
 
-TEST_CASE("Analyzer guardrails for module constants, defaults, const containers, untyped empty literals, and LSP parity", "[ergonomics][constants][defaults][containers][guardrails]") {
+TEST_CASE("Analyzer guardrails for module constants, arity, const containers, untyped empty literals, and LSP parity", "[ergonomics][constants][containers][guardrails]") {
     SECTION("Rejects private cross-module constant access and constant reassignment") {
         std::unordered_map<std::string, std::string> memFiles;
         memFiles["cfg.cb"] = R"CB(
@@ -3023,7 +2969,7 @@ end fn
         const std::string badReassignConst = R"CB(
 const maxRetries = 3
 fn main()
-    maxRetries += 1
+    maxRetries = 4
 end fn
 )CB";
         const auto reassignRes = cb::transpileSource(badReassignConst, "reassignConst.cb");
@@ -3031,27 +2977,31 @@ end fn
         CHECK(reassignRes.error.message.find("Cannot reassign const variable 'maxRetries'") != std::string::npos);
     }
 
-    SECTION("Rejects default value on byref parameter and missing required arguments") {
-        const std::string badByrefDefault = R"CB(
-fn bump(byref x as int = 0)
-    x += 1
-end fn
-)CB";
-        const auto badByrefRes = cb::transpileSource(badByrefDefault, "badByref.cb");
-        CHECK_FALSE(badByrefRes.ok);
-        CHECK(badByrefRes.error.message.find("'byref' parameter 'x' cannot have a default value") != std::string::npos);
-
+    SECTION("Rejects missing required arguments and wrong struct constructor arity") {
         const std::string missingReqArg = R"CB(
-fn greet(name as str, suffix as str = "!")
+fn greet(name as str, suffix as str)
     print(name & suffix)
 end fn
 fn main()
-    greet()
+    greet("Alice")
 end fn
 )CB";
         const auto missingRes = cb::transpileSource(missingReqArg, "missingArg.cb");
         CHECK_FALSE(missingRes.ok);
-        CHECK(missingRes.error.message.find("Missing required argument for parameter 'name'") != std::string::npos);
+        CHECK(missingRes.error.message.find("Missing required argument for parameter 'suffix'") != std::string::npos);
+
+        const std::string badStructArity = R"CB(
+type Pair
+    a as int
+    b as int
+end type
+fn main()
+    dim p = Pair(1)
+end fn
+)CB";
+        const auto arityRes = cb::transpileSource(badStructArity, "badStructArity.cb");
+        CHECK_FALSE(arityRes.ok);
+        CHECK(arityRes.error.message.find("Constructor for 'Pair' expects 0 or 2 positional arguments") != std::string::npos);
     }
 
     SECTION("Rejects mutating container receiver methods (pop, remove) on const variables") {
@@ -3076,7 +3026,7 @@ end fn
         CHECK(badRemRes.error.message.find("Cannot call '.remove()' on const variable 'd'") != std::string::npos);
     }
 
-    SECTION("Guardrails: untyped empty []/{} and non-cptr null") {
+    SECTION("Guardrails: untyped empty []/{}") {
         const std::string untypedEmptyList = R"CB(
 fn main()
     dim items = []
@@ -3094,15 +3044,6 @@ end fn
         const auto emptyDictRes = cb::transpileSource(untypedEmptyDict, "emptyDict.cb");
         CHECK_FALSE(emptyDictRes.ok);
         CHECK(emptyDictRes.error.message.find("Cannot infer key/value types of empty dict '{}'") != std::string::npos);
-
-        const std::string badNullStr = R"CB(
-fn main()
-    dim s as str = null
-end fn
-)CB";
-        const auto nullStrRes = cb::transpileSource(badNullStr, "nullStr.cb");
-        CHECK_FALSE(nullStrRes.ok);
-        CHECK(nullStrRes.error.message.find("only 'cptr' can be 'null'") != std::string::npos);
     }
 
     SECTION("LSP surfaces top-level constants and new container receiver methods") {
@@ -3231,23 +3172,9 @@ end fn
         CHECK(resBin.error.kind == "AnalyzerError");
         CHECK(resBin.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
 
-        const std::string nestedInCompound = R"CB(
-fn stepOne() as int can error
-    return 10
-end fn
-
-fn caller() can error
-    dim total = 0
-    total += 1 + stepOne()
-end fn
-)CB";
-        const auto resComp = cb::transpileSource(nestedInCompound, "nestedInCompound.cb");
-        CHECK_FALSE(resComp.ok);
-        CHECK(resComp.error.kind == "AnalyzerError");
-        CHECK(resComp.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 
-    SECTION("Rejects fallible calls inside for-in iterables, while conditions, struct field defaults, and RHS of compound assignments") {
+    SECTION("Rejects fallible calls inside for-in iterables, while conditions, and struct field defaults") {
         const std::string fallibleFor = R"CB(
 fn loadItems() as list[str] can error
     return ["a"]
@@ -3288,21 +3215,6 @@ end type
         const auto badStructRes = cb::transpileSource(structFieldDefault, "badStruct.cb");
         CHECK_FALSE(badStructRes.ok);
         CHECK(badStructRes.error.kind == "ParseError");
-
-        const std::string compoundFallible = R"CB(
-fn stepOne() as int can error
-    return 1
-end fn
-
-fn badCaller() can error
-    dim total = 0
-    total += stepOne()
-end fn
-)CB";
-        const auto badCompRes = cb::transpileSource(compoundFallible, "compoundFallible.cb");
-        CHECK_FALSE(badCompRes.ok);
-        CHECK(badCompRes.error.kind == "AnalyzerError");
-        CHECK(badCompRes.error.message.find("Fallible call to 'stepOne' must be assigned to a variable, returned directly, or called as a standalone statement.") != std::string::npos);
     }
 }
 
@@ -3354,8 +3266,8 @@ end fn
     }
 }
 
-TEST_CASE("Analyzer validates assert() arguments, fallibility rules, and fn(...) signature matching", "[stdlib][test][assert][fn]") {
-    SECTION("Analyzer validates assert() arguments, fallibility rules, and fn(...) signature matching") {
+TEST_CASE("Analyzer validates assert() arguments and fallibility rules", "[stdlib][assert]") {
+    SECTION("Analyzer validates assert() arguments and fallibility rules") {
         const std::string unhandledAssert = R"(
 fn bad()
     assert(1 == 1)
@@ -3373,19 +3285,6 @@ end fn
         const auto res2 = cb::transpileSource(nonBoolAssert, "bad_assert_type.cb");
         CHECK_FALSE(res2.ok);
         CHECK(res2.error.message.find("First argument to 'assert(...)' must be of type 'bool'") != std::string::npos);
-
-        const std::string mismatchedFn = R"(
-fn add(a as int, b as int) as int
-    return a + b
-end fn
-
-fn main()
-    dim f as fn(int) as int = add
-end fn
-)";
-        const auto res3 = cb::transpileSource(mismatchedFn, "bad_fn_sig.cb");
-        CHECK_FALSE(res3.ok);
-        CHECK(res3.error.message.find("Cannot assign mismatched function signature") != std::string::npos);
     }
 }
 
@@ -3486,8 +3385,8 @@ return 20
 end select
 else
 dim it = Item(
-id=0,
-name="none"
+0,
+"none"
 )
 return it.id
 end if
@@ -3512,8 +3411,8 @@ fn compute(x as int) as int
         end select
     else
         dim it = Item(
-            id=0,
-            name="none"
+            0,
+            "none"
         )
         return it.id
     end if
@@ -3605,7 +3504,7 @@ end type
 
 '' Connects to the target Endpoint.
 '' Raises an error if the port is invalid.
-public fn connectEndpoint(ep as Endpoint, timeoutMs as int = 1000) as bool can error
+public fn connectEndpoint(ep as Endpoint, timeoutMs as int) as bool can error
     return ep.port > 0 and timeoutMs > 0
 end fn
 
@@ -3613,8 +3512,8 @@ fn main() as int
     ' setup
     ' parser
     try
-    dim p = cli.newParser("app")
-    dim ep = Endpoint(host="localhost", port=8080)
+    dim p = cli.newParser("app", "1.0", "App")
+    dim ep = Endpoint("localhost", 8080)
     dim ok = connectEndpoint(ep, 500)
     catch e
     end try
@@ -3886,7 +3785,7 @@ end fn
         lspState.openDocuments["file:///ws/analyzer.cb"] = R"CB(import "ast.cb"
 import "symbols.cb"
 fn main() as int
-    dim arena = ast.AstArena(types=["int"])
+    dim arena = ast.AstArena(["int"])
     return 0
 end fn
 )CB";
@@ -4001,7 +3900,7 @@ end type
 
 fn main() as int
     dim a as int = 10
-    dim b as list[Box] = [Box(v=a)]
+    dim b as list[Box] = [Box(a)]
     return b[0].v
 end fn
 )CB";
@@ -4181,7 +4080,7 @@ type TreeNode
 end type
 
 fn main() as int
-    dim root = TreeNode(label="root", children=[], lookup={})
+    dim root = TreeNode("root", [], {})
     return root.children.len()
 end fn
 )CB";
@@ -4204,7 +4103,7 @@ type CylinderSpec
 end type
 
 fn main() as int
-    dim c = Car(engine=Engine(cylinders=CylinderSpec(count=6)))
+    dim c = Car(Engine(CylinderSpec(6)))
     return c.engine.cylinders.count
 end fn
 )CB";
@@ -4263,8 +4162,8 @@ type Config
 end type
 
 fn main() as int
-    dim c = Config(default=10, class="admin", template=3, delete=true)
-    c.default += c.template
+    dim c = Config(10, "admin", 3, true)
+    c.default = c.default + c.template
     if c.delete and c.class == "admin"
         return c.default
     end if
@@ -4327,53 +4226,6 @@ end fn
         CHECK(unknownFlag.errorMessage.find("Unknown option") != std::string::npos);
     }
 
-    SECTION("Defer block return and fallibility validation plus LSP bytes endian hover and bytes.fromHex signature help") {
-        // 1. Bare return inside defer in a value-returning function is valid and exits the defer lambda early
-        const std::string validDeferReturnSrc = R"CB(
-fn computeWithEarlyDeferExit(skipCleanup as bool) as int
-    defer
-        if skipCleanup
-            return
-        end if
-    end defer
-    return 42
-end fn
-)CB";
-        const auto validDeferTp = cb::transpileSource(validDeferReturnSrc, "defer_ret.cb");
-        REQUIRE(validDeferTp.ok);
-        CHECK(validDeferTp.cppCode.find("return;") != std::string::npos);
-
-        // 2. Returning a value inside defer is rejected by the semantic analyzer
-        const std::string badDeferValSrc = R"CB(
-fn badDeferVal() as int
-    defer
-        return 10
-    end defer
-    return 0
-end fn
-)CB";
-        const auto badDeferValCheck = cb::checkSource(badDeferValSrc, "bad_defer_val.cb");
-        CHECK(!badDeferValCheck.ok);
-        CHECK(badDeferValCheck.error.message.find("Function 'defer' returns void, but a value was returned") != std::string::npos);
-
-        // 3. Unhandled fallible call inside defer (even in a can error function) is rejected unless wrapped in try / catch
-        const std::string badDeferFallibleSrc = R"CB(
-fn mightFail() can error
-    error("boom")
-end fn
-
-fn caller() as int can error
-    defer
-        mightFail()
-    end defer
-    return 1
-end fn
-)CB";
-        const auto badDeferFallibleCheck = cb::checkSource(badDeferFallibleSrc, "bad_defer_fallible.cb");
-        CHECK(!badDeferFallibleCheck.ok);
-        CHECK(badDeferFallibleCheck.error.message.find("Unhandled error") != std::string::npos);
-    }
-
     SECTION("Zero-copy const auto& union select case binding, const enforcement, pre-cached built-in receiver methods, and Analyzer call-graph edges") {
         const std::string unionSelectSrc = R"CB(
 type Payload
@@ -4386,7 +4238,7 @@ union Event
 end union
 
 fn bump(byref p as Payload)
-    p.count += 1
+    p.count = p.count + 1
 end fn
 
 fn inspectEvent(ev as Event) as int
@@ -4402,8 +4254,8 @@ fn inspectEvent(ev as Event) as int
 end fn
 
 fn main() as int
-    dim e1 = Event.readOnly(Payload(count=10))
-    dim e2 = Event.mutated(Payload(count=20))
+    dim e1 = Event.readOnly(Payload(10))
+    dim e2 = Event.mutated(Payload(20))
     return inspectEvent(e1) + inspectEvent(e2)
 end fn
 )CB";
@@ -4449,7 +4301,7 @@ union Event
 end union
 
 fn bump(byref p as Payload)
-    p.count += 1
+    p.count = p.count + 1
 end fn
 
 fn bad(ev as Event)

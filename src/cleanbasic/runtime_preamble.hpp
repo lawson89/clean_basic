@@ -34,7 +34,6 @@ constexpr std::string_view CPP_RUNTIME_PREAMBLE = R"(#ifndef CLEANBASIC_RUNTIME_
 #include <memory>
 #include <tuple>
 #include <utility>
-#include <functional>
 #include <variant>
 #include <algorithm>
 #include <type_traits>
@@ -60,13 +59,6 @@ inline std::string cbToStr(bool val) {
     return "false";
 }
 inline std::string cbToStr(const CbError& val) { return val.msg; }
-inline std::string cbToStr(std::nullptr_t) { return "null"; }
-inline std::string cbToStr(const void* val) {
-    if (val == nullptr) {
-        return "null";
-    }
-    return "<cptr>";
-}
 template <typename T>
 inline std::string cbToStr(const std::vector<T>& val) {
     return "<list len=" + std::to_string(val.size()) + ">";
@@ -265,20 +257,6 @@ inline std::vector<K> cbDictKeys(const std::unordered_map<K, V>& d) {
     return keys;
 }
 
-inline int64_t cbBitShl(int64_t x, int64_t bits) {
-    if (bits < 0 || bits >= 64) {
-        return 0;
-    }
-    return static_cast<int64_t>(static_cast<uint64_t>(x) << static_cast<uint64_t>(bits));
-}
-
-inline int64_t cbBitShr(int64_t x, int64_t bits) {
-    if (bits < 0 || bits >= 64) {
-        return 0;
-    }
-    return static_cast<int64_t>(static_cast<uint64_t>(x) >> static_cast<uint64_t>(bits));
-}
-
 template <typename T>
 inline T cbListPop(std::vector<T>& v) {
     if (v.empty()) {
@@ -289,20 +267,10 @@ inline T cbListPop(std::vector<T>& v) {
     return val;
 }
 
-inline bool cbRangeCond(int64_t curr, int64_t end, int64_t step) {
-    if (step < 0) {
-        return curr >= end;
-    }
-    return curr <= end;
-}
-
 inline std::vector<std::string>& cbRuntimeArgs() {
     static std::vector<std::string> args;
     return args;
 }
-
-template <typename F> struct CbDeferTask { F f; ~CbDeferTask() { f(); } };
-template <typename F> CbDeferTask<F> cbDefer(F f) { return {f}; }
 #endif // CLEANBASIC_RUNTIME_PREAMBLE_INCLUDED
 )";
 

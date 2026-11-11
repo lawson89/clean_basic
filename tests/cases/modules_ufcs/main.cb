@@ -21,7 +21,7 @@ fn main()
     usesLeft = 2
 
     ' MEMORY: Stack allocation (flat, fast, zero cleanup needed)
-    dim stackHero = player.Player(name="Alice", health=10)
+    dim stackHero = player.Player("Alice", 10)
 
     ' UFCS (Unified Function Call Syntax):
     stackHero.heal(maxPotion)

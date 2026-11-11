@@ -59,22 +59,6 @@ inline int64_t parseIntegerLiteral(std::string_view raw, bool* okOut = nullptr) 
     const std::string cleaned(raw);
     try {
         size_t idx = 0;
-        if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X')) {
-            const std::string sub = cleaned.substr(2);
-            const unsigned long long val = std::stoull(sub, &idx, 16);
-            if (idx != sub.size() && okOut != nullptr) {
-                *okOut = false;
-            }
-            return static_cast<int64_t>(val);
-        }
-        if (cleaned.size() >= 2 && cleaned[0] == '0' && (cleaned[1] == 'b' || cleaned[1] == 'B')) {
-            const std::string sub = cleaned.substr(2);
-            const unsigned long long val = std::stoull(sub, &idx, 2);
-            if (idx != sub.size() && okOut != nullptr) {
-                *okOut = false;
-            }
-            return static_cast<int64_t>(val);
-        }
         const long long val = std::stoll(cleaned, &idx, 10);
         if (idx != cleaned.size() && okOut != nullptr) {
             *okOut = false;
@@ -262,43 +246,6 @@ public:
     // Argument & Expression Parsing
     // ==========================================
 
-    void parseCallArguments(
-        std::string_view closingKind,
-        std::vector<ExprId>& posArgs,
-        std::vector<NamedArg>& namedArgs
-    ) {
-        if (check(closingKind)) {
-            return;
-        }
-
-        while (true) {
-            const Token& peekTok = peekOffset(1);
-            if (check("IDENT") && peekTok.kind == "COLON") {
-                setParseError(peekTok, "Named arguments must use '=' (e.g., name=value), not ':'");
-            }
-            if (check("IDENT") && peekTok.kind == "ASSIGN") {
-                const Token nameTok = match("IDENT");
-                pos += 1;  // consume '='
-                const ExprId val = parseExpr();
-                NamedArg arg{};
-                arg.name = nameTok.value;
-                arg.value = val;
-                namedArgs.push_back(std::move(arg));
-            } else {
-                posArgs.push_back(parseExpr());
-            }
-
-            if (check("COMMA")) {
-                match("COMMA");
-                if (check(closingKind)) {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-    }
-
     ExprId parsePrimary() {
         const Token& tok = current();
 
@@ -325,10 +272,6 @@ public:
         if (check("KEYWORD", "true") || check("KEYWORD", "false")) {
             const Token bTok = match("KEYWORD");
             return arena.addExpr(bTok.line, bTok.col, BoolLiteral{bTok.value == "true"});
-        }
-        if (check("KEYWORD", "null")) {
-            const Token nTok = match("KEYWORD", "null");
-            return arena.addExpr(nTok.line, nTok.col, NullLiteral{});
         }
 
         if (check("LPAREN")) {
@@ -389,14 +332,9 @@ public:
                 expr = arena.addExpr(bTok.line, bTok.col, std::move(node));
             } else if (check("LPAREN")) {
                 const Token pTok = match("LPAREN");
-                std::vector<ExprId> posArgs;
-                std::vector<NamedArg> namedArgs;
-                parseCallArguments("RPAREN", posArgs, namedArgs);
-                match("RPAREN");
                 FuncCall node{};
                 node.callee = expr;
-                node.args = std::move(posArgs);
-                node.namedArgs = std::move(namedArgs);
+                node.args = parseCommaSeparated<ExprId>("RPAREN", [&]() { return parseExpr(); });
                 expr = arena.addExpr(pTok.line, pTok.col, std::move(node));
             } else {
                 break;
@@ -485,46 +423,6 @@ public:
 
     TypeId parseType() {
         const Token start = current();
-        if (check("KEYWORD", "fn")) {
-            match("KEYWORD", "fn");
-            match("LPAREN");
-            TypeNode fnNode{};
-            fnNode.line = start.line;
-            fnNode.col = start.col;
-            fnNode.name = "fn";
-            skipNewlines();
-            while (!check("RPAREN") && !check("EOF")) {
-                bool isByref = false;
-                if (check("KEYWORD", "byref")) {
-                    match("KEYWORD", "byref");
-                    isByref = true;
-                }
-                const TypeId paramTid = parseType();
-                fnNode.typeArgs.push_back(paramTid);
-                fnNode.paramByref.push_back(isByref);
-                skipNewlines();
-                if (check("COMMA")) {
-                    match("COMMA");
-                    skipNewlines();
-                } else {
-                    break;
-                }
-            }
-            match("RPAREN");
-            if (check("KEYWORD", "as")) {
-                match("KEYWORD", "as");
-                const TypeId retTid = parseType();
-                if (!arena.isVoid(retTid)) {
-                    fnNode.returnType = retTid;
-                }
-            }
-            if (check("KEYWORD", "can error")) {
-                match("KEYWORD", "can error");
-                fnNode.isFallible = true;
-            }
-            return arena.addType(std::move(fnNode));
-        }
-
         const Token tok = matchIdentOrType();
         std::string typeName = tok.value;
 
@@ -599,21 +497,6 @@ public:
         }
 
         const ExprId firstExpr = parseExpr();
-
-        if (check("COMPOUND_ASSIGN")) {
-            const Token opTok = match("COMPOUND_ASSIGN");
-            const std::string binOp = opTok.value.substr(0, opTok.value.size() - 1);
-            const ExprId rhsExpr = parseExpr();
-            expectNewlineOrEof();
-
-            const ExprId valExpr = arena.addExpr(opTok.line, opTok.col, BinaryOp{binOp, firstExpr, rhsExpr});
-            VarAssignment stmt{};
-            stmt.target = firstExpr;
-            stmt.hasDeclaredType = false;
-            stmt.declaredType = INVALID_ID;
-            stmt.value = valExpr;
-            return arena.addStmt(start.line, start.col, std::move(stmt));
-        }
 
         if (check("ASSIGN")) {
             match("ASSIGN");
@@ -714,14 +597,7 @@ public:
             const ExprId startExpr = parseExpr();
             match("KEYWORD", "to");
             const ExprId endExpr = parseExpr();
-            bool hasStep = false;
-            ExprId stepExpr = INVALID_ID;
-            if (check("KEYWORD", "step")) {
-                match("KEYWORD", "step");
-                hasStep = true;
-                stepExpr = parseExpr();
-            }
-            rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr, hasStep, stepExpr};
+            rangeSpec = RangeSpec{true, eqTok.line, eqTok.col, startExpr, endExpr};
         } else {
             match("KEYWORD", "in");
             iterable = parseExpr();
@@ -791,15 +667,6 @@ public:
         return arena.addStmt(start.line, start.col, TryCatchStmt{std::move(tryBody), catchIdent.value, std::move(catchBody)});
     }
 
-    StmtId parseDeferStmt() {
-        const Token start = match("KEYWORD", "defer");
-        expectNewlineOrEof();
-        std::vector<StmtId> body = parseStmtBlockUntil({"end defer"}, "Unclosed 'defer' block, expected 'end defer'");
-        match("KEYWORD", "end defer");
-        expectNewlineOrEof();
-        return arena.addStmt(start.line, start.col, DeferStmt{std::move(body)});
-    }
-
     StmtId parseWhileStmt() {
         const Token start = match("KEYWORD", "while");
         const ExprId cond = parseExpr();
@@ -856,9 +723,6 @@ public:
         if (check("KEYWORD", "try")) {
             return parseTryCatchStmt();
         }
-        if (check("KEYWORD", "defer")) {
-            return parseDeferStmt();
-        }
         if (check("KEYWORD", "return")) {
             return parseReturnStmt();
         }
@@ -881,8 +745,6 @@ public:
         std::string kind = "module";
         if (start.value == "import header") {
             kind = "header";
-        } else if (start.value == "import link") {
-            kind = "link";
         }
         const Token strTok = match("STRING");
         ImportDecl decl{};
@@ -935,44 +797,13 @@ public:
         const Token nameTok = match("IDENT");
         expectNewlineOrEof();
 
-        std::vector<EnumMember> members;
-        int64_t nextAutoValue = 0;
-
+        std::vector<std::string> members;
         while (!check("KEYWORD", "end enum")) {
             if (check("EOF")) {
                 setParseError(current(), "Unclosed 'enum " + nameTok.value + "', expected 'end enum'");
             }
             const Token memberTok = match("IDENT");
-            bool hasVal = false;
-            int64_t memberVal = nextAutoValue;
-            if (check("ASSIGN")) {
-                match("ASSIGN");
-                bool isNeg = false;
-                if (check("OP_ARITH", "-")) {
-                    match("OP_ARITH", "-");
-                    isNeg = true;
-                } else if (check("OP_ARITH", "+")) {
-                    match("OP_ARITH", "+");
-                }
-                const Token numTok = match("NUMBER");
-                if (numTok.value.find('.') != std::string::npos) {
-                    setParseError(numTok, "Enum member value must be an integer");
-                }
-                hasVal = true;
-                bool intOk = true;
-                int64_t parsed = parseIntegerLiteral(numTok.value, &intOk);
-                if (!intOk) {
-                    setParseError(numTok, "Enum member integer literal '" + numTok.value + "' is out of range for 64-bit integer");
-                }
-                if (isNeg) {
-                    parsed = -parsed;
-                }
-                memberVal = parsed;
-                nextAutoValue = memberVal + 1;
-            } else {
-                nextAutoValue += 1;
-            }
-            members.push_back(EnumMember{memberTok.value, hasVal, memberVal});
+            members.push_back(memberTok.value);
             expectNewlineOrEof();
         }
 
@@ -1036,14 +867,6 @@ public:
         p.name = nameTok.value;
         p.typeId = tNode;
         p.isByref = isByref;
-        if (check("ASSIGN")) {
-            if (isByref) {
-                setParseError(current(), "'byref' parameter '" + nameTok.value + "' cannot have a default value");
-            }
-            match("ASSIGN");
-            p.hasDefault = true;
-            p.defaultValue = parseExpr();
-        }
         return p;
     }
 
@@ -1121,7 +944,7 @@ public:
     DeclId parseTopLevelDecl() {
         const Token tok = current();
 
-        if (check("KEYWORD", "import") || check("KEYWORD", "import header") || check("KEYWORD", "import link")) {
+        if (check("KEYWORD", "import") || check("KEYWORD", "import header")) {
             return parseImportDecl();
         }
 

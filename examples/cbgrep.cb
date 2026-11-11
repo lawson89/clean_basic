@@ -20,37 +20,40 @@ fn search(path as str, args as cli.Args) as int can error
         f = fs.open(path)
         source = path
     end if
-    defer
-        f.close()
-    end defer
 
     dim lineNum = 0
     dim matchCount = 0
     dim line = ""
-    while true
-        dim hasLine = f.readLine(line)
-        if not hasLine
-            break
-        end if
-        lineNum += 1
-        dim matched = false
-        if ignoreCase
-            matched = line.asciiContainsIgnoreCase(pattern)
-        else
-            matched = line.contains(pattern)
-        end if
+    try
+        while true
+            dim hasLine = f.readLine(line)
+            if not hasLine
+                break
+            end if
+            lineNum = lineNum + 1
+            dim matched = false
+            if ignoreCase
+                matched = line.asciiContainsIgnoreCase(pattern)
+            else
+                matched = line.contains(pattern)
+            end if
 
-        if matched != invert
-            matchCount += 1
-            if not countOnly
-                if lineNumbers
-                    print($"{source}:{lineNum}:{line}")
-                else
-                    print($"{source}:{line}")
+            if matched != invert
+                matchCount = matchCount + 1
+                if not countOnly
+                    if lineNumbers
+                        print($"{source}:{lineNum}:{line}")
+                    else
+                        print($"{source}:{line}")
+                    end if
                 end if
             end if
-        end if
-    end while
+        end while
+    catch e
+        f.close()
+        error(e.msg, e.code)
+    end try
+    f.close()
 
     if countOnly
         print($"{source}:{matchCount}")
@@ -61,12 +64,12 @@ end fn
 
 '' CLI entry point for cbgrep.
 fn main() as int
-    dim p = cli.newParser(name="cbgrep", version="1.0", description="Search for pattern in files")
+    dim p = cli.newParser("cbgrep", "1.0", "Search for pattern in files")
     p.addFlag("ignore-case", "i", "Case-insensitive search")
     p.addFlag("line-number", "n", "Show line numbers")
     p.addFlag("count", "c", "Only show a count of matching lines")
     p.addFlag("invert-match", "v", "Invert match: select non-matching lines")
-    p.addArg("pattern", "Search pattern", required=true)
+    p.addArg("pattern", "Search pattern", true)
 
     try
         const args = p.parse()
@@ -92,14 +95,14 @@ fn main() as int
                     for path in paths
                         try
                             dim matches = search(path, args)
-                            totalMatches += matches
+                            totalMatches = totalMatches + matches
                         catch e2
                             os.eprint($"cbgrep: {path}: {e2.msg}")
                         end try
                     end for
                 else
                     dim matches = search(target, args)
-                    totalMatches += matches
+                    totalMatches = totalMatches + matches
                 end if
             catch e
                 os.eprint($"cbgrep: {target}: {e.msg}")

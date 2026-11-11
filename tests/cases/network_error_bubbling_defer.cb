@@ -7,7 +7,6 @@
 ' EXPECT_CPP: auto [_val2, _err2] = connect(std::string("192.168.1.1"));
 ' EXPECT_CPP: if (cbHasError(_err2)) {
 ' EXPECT_CPP: auto conn = _val2;
-' EXPECT_CPP: auto _defer_1 = cbDefer([&]() {
 ' EXPECT_CPP: closeConnection(conn);
 ' EXPECT_CPP: auto [_val4, _err4] = processNetwork();
 ' EXPECT_CPP: if (cbHasError(_err4)) {
@@ -20,16 +19,14 @@
 ' EXPECT_OUT: Handled empty IP (code=408): IP cannot be empty
 ' EXPECT_OUT: Handled bad port (code=1): Invalid port 0
 ' EXPECT_OUT: Multi-call caught (code=408): IP cannot be empty
-' EXPECT_OUT: Defer B before error return
-' EXPECT_OUT: Defer A before error return
 ' EXPECT_OUT: Forwarded connection id: 1
 ' EXPECT_OUT: Fallback connection id: -1
-' EXPECT_OUT: Fallible loops & compound: total=5, label=items:ac, mode=fast, decoded=ok
+' EXPECT_OUT: Fallible loops & concat: total=5, label=items:ac, mode=fast, decoded=ok
 ' EXPECT_OUT: innerCaught(neg:-1)|outerCaught(neg:-2)|m1=6|loopCaught(neg:-5)|direct(directRaise:422)|forCont=6
 
 public enum Status
-    ok = 10
-    bad = 20
+    ok
+    bad
 end enum
 
 public enum Mode
@@ -43,17 +40,17 @@ end type
 
 public fn validatePort(port as int) can error
     if port <= 0
-        error("Invalid port ", port)
+        error("Invalid port " & port.toStr())
     end if
 end fn
 
 ' Function can return a Connection OR an error
 public fn connect(ip as str) as Connection can error
     if ip == ""
-        error("IP cannot be empty", code=408)
+        error("IP cannot be empty", 408)
     end if
 
-    return Connection(id=1)
+    return Connection(1)
 end fn
 
 public fn closeConnection(conn as Connection)
@@ -66,11 +63,7 @@ public fn processNetwork() as int can error
 
     ' IMPLICIT BUBBLING: If connect fails, processNetwork immediately returns the error.
     dim conn = connect("192.168.1.1")
-
-    ' DETERMINISTIC CLEANUP: Runs right before the function exits, no matter how.
-    defer
-        closeConnection(conn)
-    end defer
+    closeConnection(conn)
 
     return 100
 end fn
@@ -105,15 +98,7 @@ fn testFailedPort()
     end try
 end fn
 
-fn testMultiCallAndDeferLifo()
-    defer
-        print("Defer A before error return")
-    end defer
-
-    defer
-        print("Defer B before error return")
-    end defer
-
+fn testMultiCall()
     try
         validatePort(8080)
         dim c1 = connect("10.0.0.1")
@@ -133,7 +118,7 @@ fn connectWithFallback(ip as str) as Connection
     try
         return forwardConnect(ip)
     catch e
-        return Connection(id=-1)
+        return Connection(-1)
     end try
 end fn
 
@@ -168,7 +153,7 @@ fn parseAndSumMode(raw as str, nums as list[int]) as Mode can error
     dim decoded = decodeTextDirect(raw)
     dim total = 0
     for n in nums
-        total += n
+        total = total + n
     end for
     if total > 0 and decoded.len() > 0
         return Mode.fast
@@ -176,23 +161,23 @@ fn parseAndSumMode(raw as str, nums as list[int]) as Mode can error
     return Mode.safe
 end fn
 
-fn testFallibleLoopsAndCompound() can error
+fn testFallibleLoopsAndConcat() can error
     dim total = 0
     dim label = "items:"
     dim items = loadItems()
     for item in items
         dim delta = countItem(item)
-        total += delta
-        label &= item.left(1)
+        total = total + delta
+        label = label & item.left(1)
     end for
     dim m = parseAndSumMode("ok", [1, 2])
     dim dec = decodeTextDirect("ok")
-    print($"Fallible loops & compound: total={total}, label={label}, mode={m}, decoded={dec}")
+    print($"Fallible loops & concat: total={total}, label={label}, mode={m}, decoded={dec}")
 end fn
 
 fn mightFail(x as int) as int can error
     if x < 0
-        error("neg:" & x.toStr(), code=400)
+        error("neg:" & x.toStr(), 400)
     end if
     return x * 2
 end fn
@@ -203,48 +188,48 @@ fn testNestedTryAndControlFlow() as str
     try
         try
             dim a = mightFail(-1)
-            log &= "UNREACHABLE_INNER|"
+            log = log & "UNREACHABLE_INNER|"
         catch innerErr
-            log &= "innerCaught(" & innerErr.msg & ")|"
+            log = log & "innerCaught(" & innerErr.msg & ")|"
             dim b = mightFail(-2)
-            log &= "UNREACHABLE_AFTER_RETHROW|"
+            log = log & "UNREACHABLE_AFTER_RETHROW|"
         end try
-        log &= "UNREACHABLE_OUTER|"
+        log = log & "UNREACHABLE_OUTER|"
     catch outerErr
-        log &= "outerCaught(" & outerErr.msg & ")|"
+        log = log & "outerCaught(" & outerErr.msg & ")|"
     end try
 
     ' 2. Fallible call inside string select case inside while loop inside try
     try
         dim stepIdx = 0
         while stepIdx < 3
-            stepIdx += 1
+            stepIdx = stepIdx + 1
             select case "mode_" & stepIdx.toStr()
                 case "mode_1"
                     dim v1 = mightFail(3)
-                    log &= "m1=" & v1.toStr() & "|"
+                    log = log & "m1=" & v1.toStr() & "|"
                 case "mode_2"
                     if stepIdx == 2
                         dim v2 = mightFail(-5)
-                        log &= "m2=" & v2.toStr() & "|"
+                        log = log & "m2=" & v2.toStr() & "|"
                     end if
-                    log &= "UNREACHABLE_M2|"
+                    log = log & "UNREACHABLE_M2|"
                 case else
-                    log &= "UNREACHABLE_M3|"
+                    log = log & "UNREACHABLE_M3|"
             end select
         end while
     catch loopErr
-        log &= "loopCaught(" & loopErr.msg & ")|"
+        log = log & "loopCaught(" & loopErr.msg & ")|"
     end try
 
     ' 3. Calling error(...) directly inside try/catch in an infallible function
     try
         if Status.bad == Status.bad
-            error("directRaise", code=422)
+            error("directRaise", 422)
         end if
-        log &= "UNREACHABLE_DIRECT|"
+        log = log & "UNREACHABLE_DIRECT|"
     catch directErr
-        log &= "direct(" & directErr.msg & ":" & directErr.code.toStr() & ")|"
+        log = log & "direct(" & directErr.msg & ":" & directErr.code.toStr() & ")|"
     end try
 
     ' 4. try / catch inside a for loop using continue in catch
@@ -252,12 +237,12 @@ fn testNestedTryAndControlFlow() as str
     for i = -1 to 2
         try
             dim v = mightFail(i)
-            forSum += v
+            forSum = forSum + v
         catch e
             continue
         end try
     end for
-    log &= "forCont=" & forSum.toStr()
+    log = log & "forCont=" & forSum.toStr()
 
     return log
 end fn
@@ -266,10 +251,10 @@ fn main()
     startServer()
     testFailedConnect()
     testFailedPort()
-    testMultiCallAndDeferLifo()
+    testMultiCall()
     testDirectReturnFallible()
     try
-        testFallibleLoopsAndCompound()
+        testFallibleLoopsAndConcat()
     catch e
         print("Unexpected error: " & e.msg)
     end try

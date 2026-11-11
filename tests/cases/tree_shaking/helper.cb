@@ -2,11 +2,7 @@ fn transitiveInternal(x as int) as int
     return x * 2
 end fn
 
-fn defaultParamHelper() as int
-    return 7
-end fn
-
-public fn usedPublic(a as int, b as int = defaultParamHelper()) as int
+public fn usedPublic(a as int, b as int) as int
     return transitiveInternal(a) + b
 end fn
 

@@ -6,11 +6,10 @@
 ' EXPECT_CPP: msg = (msg + cbToStr(x));
 ' EXPECT_CPP: std::string host{};
 ' EXPECT_CPP: int64_t port{};
-' EXPECT_CPP: ServerConfig{std::string(), 9090, false}
+' EXPECT_CPP: ServerConfig{}
+' EXPECT_CPP: ServerConfig{std::string("localhost"), 9090, false}
 ' EXPECT_CPP: connectEndpoint(std::string("localhost"), 8080, 5000)
 ' EXPECT_CPP: connectEndpoint(std::string("10.0.0.1"), 8080, 1500)
-' EXPECT_CPP: void* h = nullptr;
-' EXPECT_CPP: (h == nullptr)
 ' EXPECT_CPP: cbListGet(nums, 0)
 ' EXPECT_CPP: cbDictAt(d, std::string("present"))
 ' EXPECT_CPP: cbDictGet(d, std::string("missing"), 10)
@@ -22,9 +21,8 @@
 ' EXPECT_CPP: struct [[nodiscard]] CbError {
 ' EXPECT_CPP: [[nodiscard]] CbError testZeroImportStdStrPrelude()
 ' EXPECT_CPP: int64_t sumReadOnly(const std::vector<int64_t>& nums, const std::unordered_map<std::string, int64_t>& d)
-' EXPECT_OUT: compound: count=3
-' EXPECT_OUT: defaults:  | 9090 | localhost:8080 (t=5000) | 10.0.0.1:8080 (t=1500)
-' EXPECT_OUT: cptrNull: true
+' EXPECT_OUT: arithmetic: count=3
+' EXPECT_OUT: configs:  | 9090 | localhost:8080 (t=5000) | 10.0.0.1:8080 (t=1500)
 ' EXPECT_OUT: safeContainers: sum=160, zeroCopyTotal=12
 ' EXPECT_OUT: zeroImportPrelude: alpha-beta:42
 ' EXPECT_OUT: multilineCfg: localhost:8080 (retries=3)
@@ -53,13 +51,13 @@ fn makeMultilineConfig(
     retries as int, ' trailing comma + single-quote comment
 ) as MultilineConfig
     return MultilineConfig(
-        host=host,
-        port=port,
-        retries=retries,
+        host,
+        port,
+        retries,
     )
 end fn
 
-fn connectEndpoint(host as str = "localhost", port as int = 8080, timeoutMs as int = 5000) as str
+fn connectEndpoint(host as str, port as int, timeoutMs as int) as str
     return $"{host}:{port} (t={timeoutMs})"
 end fn
 
@@ -75,10 +73,10 @@ end fn
 fn readZeroCopyItems(items as list[Item], table as dict[str, list[Item]]) as int
     dim total = items[0].id + table["a"][0].id
     for it in items
-        total += it.id
+        total = total + it.id
     end for
     for k, v in table
-        total += v.len()
+        total = total + v.len()
     end for
     return total
 end fn
@@ -96,31 +94,26 @@ end fn
 
 fn main() as int
     dim x = 10
-    x += 5
-    x -= 3
-    x *= 4
-    x /= 6
-    x %= 5
+    x = x + 5
+    x = x - 3
+    x = x * 4
+    x = x / 6
+    x = x % 5
     dim msg = "count="
-    msg &= x
-    print("compound: " & msg)
+    msg = msg & x
+    print("arithmetic: " & msg)
 
     dim cfg1 = ServerConfig()
-    dim cfg2 = ServerConfig(port=9090)
-    dim s1 = connectEndpoint()
-    dim s2 = connectEndpoint("10.0.0.1", timeoutMs=1500)
-    print($"defaults: {cfg1.host} | {cfg2.port} | {s1} | {s2}")
-
-    dim h as cptr = null
-    if h == null
-        print("cptrNull: true")
-    end if
+    dim cfg2 = ServerConfig("localhost", 9090, false)
+    dim s1 = connectEndpoint("localhost", 8080, 5000)
+    dim s2 = connectEndpoint("10.0.0.1", 8080, 1500)
+    print($"configs: {cfg1.host} | {cfg2.port} | {s1} | {s2}")
 
     dim nums as list[int] = [1, 2]
     dim d as dict[str, int] = {"present": 7}
     mutateContainers(nums, d)
     dim sro = sumReadOnly(nums, d)
-    dim zc = readZeroCopyItems([Item(id=2), Item(id=3)], {"a": [Item(id=4)]})
+    dim zc = readZeroCopyItems([Item(2), Item(3)], {"a": [Item(4)]})
     print($"safeContainers: sum={sro}, zeroCopyTotal={zc}")
 
     try

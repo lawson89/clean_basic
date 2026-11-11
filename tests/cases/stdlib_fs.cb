@@ -29,7 +29,6 @@ fn testWholeFileAndCopy(baseDir as str) can error
     dim renamedPath = fs.joinPath(baseDir, "renamed.txt")
 
     print("Path helpers: dir=" & fs.parentDir(notesPath) & ", file=" & fs.fileName(notesPath) & ", ext=" & fs.ext(notesPath))
-
     fs.write(notesPath, "alpha\r\nbeta\n")
     fs.append(notesPath, "gamma\n")
     fs.copy(notesPath, copyPath)
@@ -49,26 +48,16 @@ fn testStreamingFile(baseDir as str) can error
     dim logPath = fs.joinPath(baseDir, "stream.log")
 
     dim writer = fs.openMode(logPath, "w")
-    defer
-        writer.close()
-    end defer
     writer.writeLine("L1")
     writer.writeStr("L2\r\n")
     writer.flush()
     writer.close()
 
     dim appender = fs.openMode(logPath, "a")
-    defer
-        appender.close()
-    end defer
     appender.writeLine("L3")
     appender.close()
 
     dim reader = fs.open(logPath)
-    defer
-        reader.close()
-    end defer
-
     dim count = 0
     dim summary = ""
     dim line = ""
@@ -82,6 +71,7 @@ fn testStreamingFile(baseDir as str) can error
     end while
 
     dim atEof = reader.eof()
+    reader.close()
     print("Streamed lines=" & count & ":" & summary & ", eofAfter=" & atEof)
 end fn
 
@@ -104,12 +94,12 @@ fn testWalkFiles(baseDir as str) can error
         if visibleCount == 0
             firstVisible = path
         end if
-        visibleCount += 1
+        visibleCount = visibleCount + 1
         dim fileSize = fs.size(path)
-        totalVisibleBytes += fileSize
+        totalVisibleBytes = totalVisibleBytes + fileSize
     end for
 
-    dim allFiles = fs.walkFiles(baseDir, includeHidden=true)
+    dim allFiles = fs.walkAllFiles(baseDir)
     fs.remove(hiddenFile)
     fs.removeAll(hiddenDir)
 

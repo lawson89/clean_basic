@@ -14,8 +14,8 @@
 ' EXPECT_OUT: Enum assignment success
 
 public enum Status
-    Active = 1
-    Inactive = 2
+    Active
+    Inactive
 end enum
 
 public type State
@@ -57,7 +57,7 @@ fn main() as int
         overloadInt(1)
         overloadStr("test")
 
-        dim s = State(val=Status.Active)
+        dim s = State(Status.Active)
         s.val = Status.Inactive
 
         dim l as list[Status] = [Status.Active]

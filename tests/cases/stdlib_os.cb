@@ -22,13 +22,8 @@ import "std/str"
 fn testChdirRoundtrip(sandboxDir as str) can error
     dim origCwd = os.cwd()
     os.chdir(sandboxDir)
-    defer
-        try
-            os.chdir(origCwd)
-        catch e
-        end try
-    end defer
     dim insideCwd = os.cwd()
+    os.chdir(origCwd)
     print("Working dir changed=" & fs.fileName(insideCwd) & ", restored=" & (origCwd != insideCwd))
 end fn
 

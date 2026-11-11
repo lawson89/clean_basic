@@ -48,7 +48,6 @@ set(CLEANBASIC_PCH_HEADERS
     <cstdlib>
     <filesystem>
     <fstream>
-    <functional>
     <iomanip>
     <iostream>
     <memory>

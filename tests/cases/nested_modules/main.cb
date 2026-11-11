@@ -12,8 +12,8 @@ import "entities/enemy.cb" as foe
 import "combat/battle.cb"
 
 fn main()
-    dim h = hero.Unit(name="Paladin", hp=100)
-    dim g = foe.Unit(name="Goblin", hp=40, threat=3)
+    dim h = hero.Unit("Paladin", 100)
+    dim g = foe.Unit("Goblin", 40, 3)
 
     g.boost(10)
     dim remHp = battle.clash(h, g, 25)

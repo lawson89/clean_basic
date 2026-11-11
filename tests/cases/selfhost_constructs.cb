@@ -69,13 +69,13 @@ end type
 
 fn addExpr(byref arena as MiniArena, line as int, payload as ExprPayload) as int
     dim id = arena.exprs.len()
-    arena.exprs.push(ExprNode(line=line, col=1, payload=payload))
+    arena.exprs.push(ExprNode(line, 1, payload))
     return id
 end fn
 
 fn addStmt(byref arena as MiniArena, line as int, payload as StmtPayload) as int
     dim id = arena.stmts.len()
-    arena.stmts.push(StmtNode(line=line, payload=payload))
+    arena.stmts.push(StmtNode(line, payload))
     return id
 end fn
 
@@ -98,7 +98,7 @@ fn evalExpr(arena as MiniArena, fnKey as str, exprId as int) as int can error
             return lit.val
         case ident as idNode
             if not arena.scopes[fnKey].has(idNode.name)
-                error("Unresolved identifier: " & idNode.name, code=422)
+                error("Unresolved identifier: " & idNode.name, 422)
             end if
             return arena.scopes[fnKey][idNode.name].val
         case binOp as bop
@@ -110,7 +110,7 @@ fn evalExpr(arena as MiniArena, fnKey as str, exprId as int) as int can error
                 case "*"
                     return lhs * rhs
                 case else
-                    error("Unknown binary operator: " & bop.op, code=400)
+                    error("Unknown binary operator: " & bop.op, 400)
             end select
     end select
     return 0
@@ -122,7 +122,7 @@ fn executeStmts(byref arena as MiniArena, fnKey as str) can error
         select case st.payload
             case assign as asgn
                 dim v = evalExpr(arena, fnKey, asgn.exprId)
-                arena.scopes[fnKey][asgn.varName] = VarSym(name=asgn.varName, val=v, isConst=false)
+                arena.scopes[fnKey][asgn.varName] = VarSym(asgn.varName, v, false)
             case printVal as pv
                 dim v = evalExpr(arena, fnKey, pv.exprId)
                 print("eval_expr: " & v.toStr())
@@ -135,20 +135,20 @@ fn runCompilerSim() can error
     arena.modules["root"]["hero"] = "entities/hero"
 
     ' Build expression tree: (5 + 2) * 5 = 35
-    dim e0 = arena.addExpr(10, ExprPayload.intLit(IntLit(val=5)))
-    dim e1 = arena.addExpr(10, ExprPayload.intLit(IntLit(val=2)))
-    dim e2 = arena.addExpr(10, ExprPayload.binOp(BinOpExpr(op="+", left=e0, right=e1)))
-    dim e3 = arena.addExpr(11, ExprPayload.intLit(IntLit(val=5)))
-    dim e4 = arena.addExpr(11, ExprPayload.binOp(BinOpExpr(op="*", left=e2, right=e3)))
+    dim e0 = arena.addExpr(10, ExprPayload.intLit(IntLit(5)))
+    dim e1 = arena.addExpr(10, ExprPayload.intLit(IntLit(2)))
+    dim e2 = arena.addExpr(10, ExprPayload.binOp(BinOpExpr("+", e0, e1)))
+    dim e3 = arena.addExpr(11, ExprPayload.intLit(IntLit(5)))
+    dim e4 = arena.addExpr(11, ExprPayload.binOp(BinOpExpr("*", e2, e3)))
 
     ' Statements: x = (5 + 2) * 5; print(x); y = x + 7
-    arena.addStmt(12, StmtPayload.assign(AssignStmt(varName="x", exprId=e4)))
-    dim eRefX = arena.addExpr(13, ExprPayload.ident(IdentExpr(name="x")))
-    arena.addStmt(13, StmtPayload.printVal(PrintStmt(exprId=eRefX)))
+    arena.addStmt(12, StmtPayload.assign(AssignStmt("x", e4)))
+    dim eRefX = arena.addExpr(13, ExprPayload.ident(IdentExpr("x")))
+    arena.addStmt(13, StmtPayload.printVal(PrintStmt(eRefX)))
 
-    dim eSeven = arena.addExpr(14, ExprPayload.intLit(IntLit(val=7)))
-    dim eAddY = arena.addExpr(14, ExprPayload.binOp(BinOpExpr(op="+", left=eRefX, right=eSeven)))
-    arena.addStmt(14, StmtPayload.assign(AssignStmt(varName="y", exprId=eAddY)))
+    dim eSeven = arena.addExpr(14, ExprPayload.intLit(IntLit(7)))
+    dim eAddY = arena.addExpr(14, ExprPayload.binOp(BinOpExpr("+", eRefX, eSeven)))
+    arena.addStmt(14, StmtPayload.assign(AssignStmt("y", eAddY)))
 
     arena.executeStmts("main")
 
@@ -162,7 +162,7 @@ fn runCompilerSim() can error
     print("overloads: " & arena.formatNodeId(7) & ", " & arena.formatNodeTag("custom", 7) & ", stamped_line=" & arena.exprs[0].line.toStr())
 
     ' Trigger an unresolved identifier error and recover via try / catch
-    dim eBad = arena.addExpr(25, ExprPayload.ident(IdentExpr(name="missingVar")))
+    dim eBad = arena.addExpr(25, ExprPayload.ident(IdentExpr("missingVar")))
     try
         dim ignored = evalExpr(arena, "main", eBad)
     catch e

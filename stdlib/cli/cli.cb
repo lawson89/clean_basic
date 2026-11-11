@@ -47,27 +47,32 @@ public type Args
     versionRequested as bool
 end type
 
-'' Creates a new declarative command-line Parser with the given program name, optional version, and optional description.
-public fn newParser(name as str, version as str = "", description as str = "") as Parser
+'' Creates a new declarative command-line Parser with the given program name, version, and description.
+public fn newParser(name as str, version as str, description as str) as Parser
     dim flags as list[FlagSpec] = []
     dim options as list[OptionSpec] = []
     dim args as list[ArgSpec] = []
-    return Parser(name=name, version=version, description=description, flags=flags, options=options, args=args)
+    return Parser(name, version, description, flags, options, args)
 end fn
 
 '' Registers a boolean flag (--name and optional -shortName) on the parser.
-public fn addFlag(byref p as Parser, name as str, shortName as str = "", help as str = "")
-    p.flags.push(FlagSpec(name=name, shortName=shortName, help=help))
+public fn addFlag(byref p as Parser, name as str, shortName as str, help as str)
+    p.flags.push(FlagSpec(name, shortName, help))
 end fn
 
-'' Registers a value-taking option (--name <val> and optional -shortName <val>) on the parser.
-public fn addOption(byref p as Parser, name as str, shortName as str = "", help as str = "", defaultVal as str = "", required as bool = false)
-    p.options.push(OptionSpec(name=name, shortName=shortName, help=help, defaultVal=defaultVal, required=required))
+'' Registers a value-taking option (--name <val> and optional -shortName <val>) with a default value on the parser.
+public fn addOption(byref p as Parser, name as str, shortName as str, help as str, defaultVal as str)
+    p.options.push(OptionSpec(name, shortName, help, defaultVal, false))
+end fn
+
+'' Registers a required value-taking option (--name <val> and optional -shortName <val>) on the parser.
+public fn addRequiredOption(byref p as Parser, name as str, shortName as str, help as str)
+    p.options.push(OptionSpec(name, shortName, help, "", true))
 end fn
 
 '' Registers a positional argument on the parser in declaration order.
-public fn addArg(byref p as Parser, name as str, help as str = "", required as bool = true)
-    p.args.push(ArgSpec(name=name, help=help, required=required))
+public fn addArg(byref p as Parser, name as str, help as str, required as bool)
+    p.args.push(ArgSpec(name, help, required))
 end fn
 
 fn findFlagByName(p as Parser, name as str) as int
@@ -125,13 +130,13 @@ public fn usage(p as Parser) as str
 
     dim synopsis = $"Usage: {p.name}"
     if p.flags.len() > 0 or p.options.len() > 0
-        synopsis &= " [options]"
+        synopsis = synopsis & " [options]"
     end if
     for a in p.args
         if a.required
-            synopsis &= $" <{a.name}>"
+            synopsis = synopsis & $" <{a.name}>"
         else
-            synopsis &= $" [{a.name}]"
+            synopsis = synopsis & $" [{a.name}]"
         end if
     end for
     lines.push(synopsis)
@@ -177,13 +182,13 @@ public fn usage(p as Parser) as str
         dim desc = o.help
         if o.defaultVal != ""
             if desc != ""
-                desc &= $" (default: {o.defaultVal})"
+                desc = desc & $" (default: {o.defaultVal})"
             else
                 desc = $"(default: {o.defaultVal})"
             end if
         else if o.required
             if desc != ""
-                desc &= " (required)"
+                desc = desc & " (required)"
             else
                 desc = "(required)"
             end if
@@ -230,7 +235,7 @@ public fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
         dim arg = rawArgs[i]
         if not flagsDone and arg == "--"
             flagsDone = true
-            i += 1
+            i = i + 1
             continue
         end if
 
@@ -268,21 +273,21 @@ public fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
                         if i + 1 >= rawArgs.len()
                             error($"Option '--{body}' requires a value")
                         end if
-                        i += 1
+                        i = i + 1
                         options[body] = rawArgs[i]
                         providedOptions[body] = true
                     else if body == "help"
                         flags["help"] = true
-                        return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=true, versionRequested=false)
+                        return Args(flags, options, positional, rest, true, false)
                     else if body == "version" and p.version != ""
                         flags["version"] = true
-                        return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=false, versionRequested=true)
+                        return Args(flags, options, positional, rest, false, true)
                     else
                         error($"Unknown option '--{body}'")
                     end if
                 end if
             end if
-            i += 1
+            i = i + 1
             continue
         end if
 
@@ -306,7 +311,7 @@ public fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
                     dim fIdx = findFlagByShort(p, ch)
                     if fIdx >= 0
                         flags[p.flags[fIdx].name] = true
-                        cIdx += 1
+                        cIdx = cIdx + 1
                     else
                         dim oIdx = findOptionByShort(p, ch)
                         if oIdx >= 0
@@ -319,35 +324,35 @@ public fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
                                 if i + 1 >= rawArgs.len()
                                     error($"Option '-{ch}' requires a value")
                                 end if
-                                i += 1
+                                i = i + 1
                                 options[optName] = rawArgs[i]
                                 providedOptions[optName] = true
-                                cIdx += 1
+                                cIdx = cIdx + 1
                             end if
                         else if ch == "h"
                             flags["help"] = true
-                            return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=true, versionRequested=false)
+                            return Args(flags, options, positional, rest, true, false)
                         else if ch == "V" and p.version != ""
                             flags["version"] = true
-                            return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=false, versionRequested=true)
+                            return Args(flags, options, positional, rest, false, true)
                         else
                             error($"Unknown option '-{ch}'")
                         end if
                     end if
                 end while
             end if
-            i += 1
+            i = i + 1
             continue
         end if
 
         if posIdx < p.args.len()
             dim spec = p.args[posIdx]
             positional[spec.name] = arg
-            posIdx += 1
+            posIdx = posIdx + 1
         else
             rest.push(arg)
         end if
-        i += 1
+        i = i + 1
     end while
 
     for o in p.options
@@ -362,7 +367,7 @@ public fn parseArgs(p as Parser, rawArgs as list[str]) as Args can error
         end if
     end for
 
-    return Args(flags=flags, options=options, positional=positional, rest=rest, helpRequested=false, versionRequested=false)
+    return Args(flags, options, positional, rest, false, false)
 end fn
 
 '' Parses the process command-line arguments from os.args() (automatically skipping argv[0]).
@@ -389,20 +394,31 @@ public fn has(a as Args, name as str) as bool
     return false
 end fn
 
-'' Returns the string value of an option or positional argument, or defaultVal if not present.
-public fn get(a as Args, name as str, defaultVal as str = "") as str
+'' Returns the string value of an option or positional argument, or "" if not present.
+public fn get(a as Args, name as str) as str
     if a.options.has(name)
         return a.options[name]
     end if
     if a.positional.has(name)
         return a.positional[name]
     end if
+    return ""
+end fn
+
+'' Returns the string value of an option or positional argument, or defaultVal if not present or empty.
+public fn getOr(a as Args, name as str, defaultVal as str) as str
+    if a.options.has(name) and a.options[name] != ""
+        return a.options[name]
+    end if
+    if a.positional.has(name) and a.positional[name] != ""
+        return a.positional[name]
+    end if
     return defaultVal
 end fn
 
 '' Parses and returns the integer value of an option or positional argument, or defaultVal if empty.
-public fn getInt(a as Args, name as str, defaultVal as int = 0) as int can error
-    dim raw = a.get(name, "")
+public fn getInt(a as Args, name as str, defaultVal as int) as int can error
+    dim raw = a.get(name)
     if raw == ""
         return defaultVal
     end if

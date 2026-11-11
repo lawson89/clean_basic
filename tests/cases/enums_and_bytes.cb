@@ -1,10 +1,9 @@
 ' EXPECT_CPP: enum class HttpMethod : int64_t
 ' EXPECT_OUT: HttpMethod.post toStr: post, toInt: 1
-' EXPECT_OUT: FileAccess.readWrite: 3
+' EXPECT_OUT: FileAccess.readWrite: 2
 ' EXPECT_OUT: describeMethod GET: GET
 ' EXPECT_OUT: describeMethod POST: MUTATE
 ' EXPECT_OUT: describeMethod DELETE: OTHER
-' EXPECT_OUT: Numerics & bitwise: hex=255, bin=165, sep=1000000, and=15, or=255, xor=240, shl=1024, shr=16
 ' EXPECT_OUT: Union kinds & match: number:42 | add(10,20) | label:start | fallback
 ' EXPECT_OUT: Interp basic: Method=post, code=1, sum=30, ok=true
 ' EXPECT_OUT: Interp braces & nested: {post: 200} / dict=42
@@ -17,9 +16,9 @@ enum HttpMethod
 end enum
 
 enum FileAccess
-    read = 0b0001
-    write = 0b0010
-    readWrite = 0x03
+    read
+    write
+    readWrite
 end enum
 
 type NumberLit
@@ -52,19 +51,9 @@ fn evalExprItem(e as ExprItem) as str
     end select
 end fn
 
-fn testNumericsBitwiseAndUnions()
-    dim hx = 0xFF
-    dim bn = 0b1010_0101
-    dim mil = 1_000_000
-    dim bAnd = hx.bitAnd(0x0F)
-    dim bOr = (0xF0).bitOr(0x0F)
-    dim bXor = hx.bitXor(0x0F)
-    dim bShl = (1).shl(10)
-    dim bShr = (0x100).shr(4)
-    print($"Numerics & bitwise: hex={hx}, bin={bn}, sep={mil}, and={bAnd}, or={bOr}, xor={bXor}, shl={bShl}, shr={bShr}")
-
-    dim e1 = ExprItem.number(NumberLit(val=42))
-    dim e2 = ExprItem.binary(BinaryOpNode(op="add", left=10, right=20))
+fn testUnions()
+    dim e1 = ExprItem.number(NumberLit(42))
+    dim e2 = ExprItem.binary(BinaryOpNode("add", 10, 20))
     dim e3 = ExprItem.label("start")
     dim e4 = ExprItem.empty(0)
     print("Union kinds & match: " & evalExprItem(e1) & " | " & evalExprItem(e2) & " | " & evalExprItem(e3) & " | " & evalExprItem(e4))
@@ -99,7 +88,7 @@ end fn
 
 fn main() as int
     testEnums()
-    testNumericsBitwiseAndUnions()
+    testUnions()
     dim m = HttpMethod.post
     dim a = 10
     dim b = 20

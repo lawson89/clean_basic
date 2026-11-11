@@ -297,13 +297,8 @@ inline void collectDotCompletions(const LspDocumentSnapshot& snap, std::string_v
         const auto enumOpt = resolveEnumSymbol(snap.arena, snap.symbols, currentModuleId, receiverName);
         if (enumOpt.has_value() && (enumOpt->moduleId == currentModuleId || enumOpt->isPub)) {
             for (const auto& m : enumOpt->members) {
-                if (!matchesCompletionPrefix(m.name, prefix)) continue;
-                std::string detail = "enum member";
-                const auto vit = enumOpt->memberValues.find(m.name);
-                if (vit != enumOpt->memberValues.end()) {
-                    detail = "= " + std::to_string(vit->second);
-                }
-                addCompletionEntry(items, seen, m.name, 20, detail);
+                if (!matchesCompletionPrefix(m, prefix)) continue;
+                addCompletionEntry(items, seen, m, 20, "enum member");
             }
             return;
         }
@@ -388,41 +383,8 @@ inline std::optional<ResolvedCallFunction> resolveCallFnSymbol(const LspDocument
     return std::nullopt;
 }
 
-inline void collectNamedArgumentCompletions(const LspDocumentSnapshot& snap, std::string_view currentModuleId, const std::optional<std::string>& enclosingFnKey, const CallSiteContext& callCtx, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
-    if (!callCtx.insideCall || !callCtx.atArgNamePosition) return;
-    if (!callCtx.hasReceiver && callCtx.calleeName == "error") {
-        if (matchesCompletionPrefix("code", callCtx.argPrefix)) addCompletionEntry(items, seen, "code=", 6, "as int");
-        return;
-    }
-    const auto tsOpt = resolveCallStructSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
-    if (tsOpt.has_value()) {
-        if (tsOpt->isExtern && tsOpt->fieldOrder.empty()) {
-            return;
-        }
-        for (const auto& f : tsOpt->fieldOrder) {
-            if (!matchesCompletionPrefix(f.name, callCtx.argPrefix)) continue;
-            TypeId ftid = f.typeId;
-            const auto fit = tsOpt->fields.find(f.name);
-            if (fit != tsOpt->fields.end()) ftid = fit->second;
-            addCompletionEntry(items, seen, f.name + "=", 5, "as " + formatCleanbasicType(snap.arena, ftid));
-        }
-        return;
-    }
-    const auto fnOpt = resolveCallFnSymbol(snap, currentModuleId, enclosingFnKey, callCtx);
-    if (fnOpt.has_value()) {
-        const FnSymbol& fn = fnOpt.value().fn;
-        size_t startIdx = 0;
-        if (fnOpt.value().isUfcs) {
-            startIdx = 1;
-        }
-        for (size_t i = startIdx; i < fn.params.size(); ++i) {
-            if (matchesCompletionPrefix(fn.params[i].name, callCtx.argPrefix)) addCompletionEntry(items, seen, fn.params[i].name + "=", 6, "as " + formatCleanbasicType(snap.arena, fn.params[i].typeId));
-        }
-    }
-}
-
 inline void collectTypeAnnotationCompletions(const LspDocumentSnapshot& snap, std::string_view currentModuleId, std::string_view prefix, std::vector<CompletionItemEntry>& items, std::unordered_map<std::string, bool>& seen) {
-    const std::vector<std::string> builtinTypes = {"int", "float", "str", "bool", "cptr", "err", "list", "dict"};
+    const std::vector<std::string> builtinTypes = {"int", "float", "str", "bool", "err", "list", "dict"};
     for (const auto& bt : builtinTypes) if (matchesCompletionPrefix(bt, prefix)) addCompletionEntry(items, seen, bt, 14, "built-in type");
     if (snap.valid) collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, false, true, items, seen);
 }
@@ -437,14 +399,14 @@ inline void collectGeneralScopeCompletions(const LspDocumentSnapshot& snap, std:
         }
         collectModuleSymbolCompletions(snap, currentModuleId, prefix, false, true, true, items, seen);
     }
-    const std::vector<std::pair<std::string, std::string>> builtins = {{"print", "fn print(values...)"}, {"error", "fn error(msg as str, [code=1]) as err"}, {"assert", "fn assert(cond as bool, [msg as str]) can error"}};
+    const std::vector<std::pair<std::string, std::string>> builtins = {{"print", "fn print(values...)"}, {"error", "fn error(msg as str, [code as int]) as err"}, {"assert", "fn assert(cond as bool, [msg as str]) can error"}};
     for (const auto& b : builtins) if (matchesCompletionPrefix(b.first, prefix)) {
         std::string doc;
         const auto docOpt = formatBuiltinHoverMarkdown(b.first);
         if (docOpt.has_value()) doc = docOpt.value();
         addCompletionEntry(items, seen, b.first, 3, b.second, b.first, doc);
     }
-    const std::vector<std::string> keywords = {"fn", "end fn", "public", "extern", "type", "end type", "enum", "end enum", "union", "end union", "import", "import header", "import link", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "step", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "defer", "end defer", "return", "break", "continue", "can error", "and", "or", "not", "true", "false", "null"};
+    const std::vector<std::string> keywords = {"fn", "end fn", "public", "extern", "type", "end type", "enum", "end enum", "union", "end union", "import", "import header", "dim", "const", "byref", "as", "if", "else if", "else", "end if", "for", "to", "in", "end for", "while", "end while", "select case", "case", "case else", "end select", "try", "catch", "end try", "return", "break", "continue", "can error", "and", "or", "not", "true", "false"};
     for (const auto& kw : keywords) if (matchesCompletionPrefix(kw, prefix)) addCompletionEntry(items, seen, kw, 14, "keyword");
 }
 
@@ -468,7 +430,6 @@ inline void handleCompletionRequest(LspServerState& state, const JsonArena& reqA
     if (cursorInfo.isDot) { if (snap.valid) collectDotCompletions(snap, currentModId, enclosingFnKey, cursorInfo.dotReceiver, cursorInfo.prefix, entries, seen); }
     else if (cursorInfo.isAfterAs) collectTypeAnnotationCompletions(snap, currentModId, cursorInfo.prefix, entries, seen);
     else {
-        if (snap.valid && cursorInfo.callCtx.insideCall && cursorInfo.callCtx.atArgNamePosition) collectNamedArgumentCompletions(snap, currentModId, enclosingFnKey, cursorInfo.callCtx, entries, seen);
         collectGeneralScopeCompletions(snap, currentModId, enclosingFnKey, cursorInfo.prefix, entries, seen);
     }
     for (const auto& entry : entries) {

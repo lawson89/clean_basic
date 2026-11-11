@@ -135,7 +135,7 @@ public fn isOpen(f as File) as bool
     return cbFsIsOpen(f)
 end fn
 
-'' Closes an open File handle and releases its slot. Safe to call in defer blocks.
+'' Closes an open File handle and releases its slot.
 public fn close(byref f as File)
     cbFsClose(f)
 end fn
@@ -147,9 +147,14 @@ public fn exists(path as str) as bool
     return cbFsExists(path)
 end fn
 
-'' Recursively collects all regular file paths in the directory tree at path.
-public fn walkFiles(path as str, includeHidden as bool = false) as list[str] can error
-    return cbFsWalkFiles(path, includeHidden)
+'' Recursively collects all non-hidden regular file paths in the directory tree at path.
+public fn walkFiles(path as str) as list[str] can error
+    return cbFsWalkFiles(path, false)
+end fn
+
+'' Recursively collects all regular file paths (including hidden files/directories) in the directory tree at path.
+public fn walkAllFiles(path as str) as list[str] can error
+    return cbFsWalkFiles(path, true)
 end fn
 
 '' Returns true if path exists and is a regular file.

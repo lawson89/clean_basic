@@ -27,12 +27,10 @@ TopLevelDecl    ::= ImportDecl | ConstDecl | TypeDecl | EnumDecl | UnionDecl | F
 
 ImportDecl      ::= "import" StringLiteral ["as" Identifier] NEWLINE
                   | "import header" StringLiteral NEWLINE
-                  | "import link" StringLiteral NEWLINE
 
 ConstDecl       ::= ["public"] "const" Identifier ["as" Type] "=" Expr NEWLINE
 
-EnumDecl        ::= ["public"] "enum" Identifier NEWLINE EnumMember* "end enum" NEWLINE
-EnumMember      ::= Identifier ["=" ["+" | "-"] NumberLiteral] NEWLINE
+EnumDecl        ::= ["public"] "enum" Identifier NEWLINE Identifier* "end enum" NEWLINE
 
 UnionDecl       ::= ["public"] "union" Identifier NEWLINE UnionVariant+ "end union" NEWLINE
 UnionVariant    ::= Identifier "as" Type NEWLINE
@@ -45,25 +43,24 @@ FnDecl          ::= ("public" | "extern")* "fn" Identifier "(" [ParamList] ")" [
                     "end fn" NEWLINE
                   | ["public"] "extern" "fn" Identifier "(" [ParamList] ")" ["as" Type] ["can error"] NEWLINE
 ParamList       ::= Param ("," Param)* [","]
-Param           ::= ["byref"] Identifier "as" Type ["=" Expr]
+Param           ::= ["byref"] Identifier "as" Type
 
 Statement       ::= VarDecl | Assignment | ExprStmt
                   | IfStmt | ForStmt | WhileStmt | SelectStmt
-                  | TryCatchStmt | DeferBlock | ReturnStmt | BreakStmt | ContinueStmt
+                  | TryCatchStmt | ReturnStmt | BreakStmt | ContinueStmt
 
 VarDecl         ::= ("dim" | "const") Identifier ["as" Type] "=" Expr NEWLINE
-Assignment      ::= Expr ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=") Expr NEWLINE
+Assignment      ::= Expr "=" Expr NEWLINE
 ExprStmt        ::= Expr NEWLINE
 
 TryCatchStmt    ::= "try" NEWLINE Statement* "catch" Identifier NEWLINE Statement* "end try" NEWLINE
-DeferBlock      ::= "defer" NEWLINE Statement* "end defer" NEWLINE
 
 IfStmt          ::= "if" Expr NEWLINE Statement*
                     ("else if" Expr NEWLINE Statement*)*
                     ["else" NEWLINE Statement*]
                     "end if" NEWLINE
 
-ForStmt         ::= "for" Identifier "=" Expr "to" Expr ["step" Expr] NEWLINE
+ForStmt         ::= "for" Identifier "=" Expr "to" Expr NEWLINE
                     Statement*
                     "end for" NEWLINE
                   | "for" IdentList "in" Expr NEWLINE
@@ -100,24 +97,20 @@ PostfixExpr     ::= PrimaryExpr
 
 PrimaryExpr     ::= Literal | QualifiedIdent | "(" Expr ")"
 
-CallArgList     ::= CallArg ("," CallArg)* [","]
-CallArg         ::= [Identifier "="] Expr
+CallArgList     ::= Expr ("," Expr)* [","]
 
 Literal         ::= NumberLiteral | StringLiteral | InterpString
-                  | "true" | "false" | "null"
+                  | "true" | "false"
                   | ListLiteral | DictLiteral
 InterpString    ::= '$"' (StringChar | "{{" | "}}" | "{" Expr "}")* '"'
 ListLiteral     ::= "[" [Expr ("," Expr)* [","]] "]"
 DictLiteral     ::= "{" [DictEntry ("," DictEntry)* [","]] "}"
 DictEntry       ::= Expr ":" Expr
 
-Type            ::= "int" | "float" | "str" | "bool" | "cptr" | "err"
+Type            ::= "int" | "float" | "str" | "bool" | "err"
                   | "list" "[" Type "]"
                   | "dict" "[" Type "," Type "]"
-                  | FnType
                   | QualifiedIdent
-FnType          ::= "fn" "(" [FnTypeParam ("," FnTypeParam)* [","]] ")" ["as" Type] ["can error"]
-FnTypeParam     ::= ["byref"] Type
 
 IdentList       ::= Identifier ("," Identifier)*
 QualifiedIdent  ::= Identifier ("." Identifier)*
@@ -157,7 +150,7 @@ end fn
 
 ### 2. Pure Value Semantics, Mutability, and UFCS
 
-CleanBasic uses stack-first value semantics (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Named arguments and struct fields strictly use `=` (`Type(field=val)`). For C/C++ FFI handles, the built-in `cptr` type maps directly to `void*`.
+CleanBasic uses stack-first value semantics (safe clones) by default. Mutability is strictly controlled at the declaration site (`const` vs `dim`) and the parameter boundary (`byref`). Struct constructors use positional arguments in field declaration order (`Type(f1, f2)` or `Type()` for default initialization).
 
 **main.cb (The Executable Module)**
 
@@ -173,7 +166,7 @@ fn main() as int
     usesLeft = 2
 
     ' VALUE SEMANTICS: Stack allocation (flat, fast, zero cleanup needed)
-    dim hero = player.Player(name="Alice", health=10)
+    dim hero = player.Player("Alice", 10)
 
     ' UFCS (Unified Function Call Syntax): 
     ' The compiler translates hero.heal(maxPotion) into heal(hero, maxPotion)

@@ -224,24 +224,6 @@ inline std::string formatCleanbasicType(const AstArena& arena, TypeId tid) {
     if (tid == INVALID_ID || tid >= arena.types.size()) return "void";
     const TypeNode& tn = arena.types[tid];
     if (tn.name.empty() || tn.name == "void") return "void";
-    if (tn.name == "fn") {
-        std::string out = "fn(";
-        for (size_t i = 0; i < tn.typeArgs.size(); ++i) {
-            if (i > 0) out += ", ";
-            if (i < tn.paramByref.size() && tn.paramByref[i]) {
-                out += "byref ";
-            }
-            out += formatCleanbasicType(arena, tn.typeArgs[i]);
-        }
-        out += ")";
-        if (!arena.isVoid(tn.returnType)) {
-            out += " as " + formatCleanbasicType(arena, tn.returnType);
-        }
-        if (tn.isFallible) {
-            out += " can error";
-        }
-        return out;
-    }
     const auto [modId, baseName] = splitSymbolKey(tn.name);
     std::string out = baseName;
     if (!tn.typeArgs.empty()) {
@@ -317,12 +299,7 @@ inline std::string formatEnumHoverMarkdown(const EnumSymbol& es) {
     const std::string nl(1, static_cast<char>(10));
     std::string code = buildHoverHeader("enum", es.name, es.isPub) + nl;
     for (const auto& m : es.members) {
-        code += "    " + m.name;
-        const auto vit = es.memberValues.find(m.name);
-        if (vit != es.memberValues.end()) {
-            code += " = " + std::to_string(vit->second);
-        }
-        code += nl;
+        code += "    " + m + nl;
     }
     code += "end enum";
     return appendDocCommentMarkdown(wrapVbCodeBlock(code), es.docComment);
@@ -365,7 +342,7 @@ struct BuiltinHoverEntry {
 inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view name) {
     static constexpr BuiltinHoverEntry entries[] = {
         {"print", "fn print(values...)", "Writes one or more values to standard output followed by a newline."},
-        {"error", "fn error(msg as str, [code=1]) as err", "Raises and returns a structured err value from a can error function."},
+        {"error", "fn error(msg as str, [code as int]) as err", "Raises and returns a structured err value from a can error function."},
         {"assert", "fn assert(cond as bool, [msg as str]) can error", "Asserts that cond is true; raises an err (with .file and .line) if cond is false."},
         {"len", "fn .len() as int", "Returns the number of elements in a list, dict, or str."},
         {"toStr", "fn .toStr() as str", "Returns a string representation of the value."},
@@ -384,12 +361,6 @@ inline std::optional<std::string> formatBuiltinHoverMarkdown(std::string_view na
         {"sort", "fn .sort()", "Sorts the elements of a list in ascending order in place."},
         {"removeAt", "fn .removeAt(idx as int) as T", "Removes and returns the element at index idx in a list (or default T{} if out of bounds)."},
         {"keys", "fn .keys() as list[K]", "Returns a list of all keys in a dict (sorted deterministically when K is orderable)."},
-        {"bitAnd", "fn .bitAnd(y as int) as int", "Returns the bitwise AND of two 64-bit integers."},
-        {"bitOr", "fn .bitOr(y as int) as int", "Returns the bitwise OR of two 64-bit integers."},
-        {"bitXor", "fn .bitXor(y as int) as int", "Returns the bitwise XOR of two 64-bit integers."},
-        {"bitNot", "fn .bitNot() as int", "Returns the bitwise NOT (~x) of a 64-bit integer."},
-        {"shl", "fn .shl(bits as int) as int", "Shifts a 64-bit integer left by bits (0..63), returning 0 if bits is out of range."},
-        {"shr", "fn .shr(bits as int) as int", "Performs a logical unsigned 64-bit right shift by bits (0..63), returning 0 if bits is out of range."},
         {"kind", "fn .kind() as str", "Returns the active variant name of a tagged union as a str."},
     };
     for (const auto& entry : entries) {

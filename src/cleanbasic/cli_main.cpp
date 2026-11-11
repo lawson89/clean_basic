@@ -280,16 +280,7 @@ inline int runCli(std::string_view progName, const std::vector<std::string_view>
         return 1;
     }
 
-    std::string flagsStr;
-    if (!res.linkerFlags.empty()) {
-        flagsStr = " (linker flags:";
-        for (const auto& flag : res.linkerFlags) {
-            flagsStr += " " + flag;
-        }
-        flagsStr += ")";
-    }
-
-    std::cout << "Generated " << res.outputCppPath << flagsStr << std::endl;
+    std::cout << "Generated " << res.outputCppPath << std::endl;
     if (args.compileBinary && !res.outputBinaryPath.empty()) {
         std::cout << "Compiled binary " << res.outputBinaryPath << std::endl;
     }
